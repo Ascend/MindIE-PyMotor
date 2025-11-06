@@ -1,0 +1,14 @@
+{
+  "controller_api_host": "127.0.0.1",
+  "controller_api_port": 57675,
+  "instance_assemble_timeout": 600,
+  "instance_assembler_check_internal": 1,
+  "instance_assembler_cmd_send_internal": 1,
+  "max_link_number": 768,
+  "send_cmd_retry_times": 3,
+  "instance_manager_check_internal": 1,
+  "instance_heartbeat_timeout": 5,
+  "instance_expired_timeout": 300,
+  "enable_fault_tolerance": true,
+  "strategy_center_check_internal": 1
+}
