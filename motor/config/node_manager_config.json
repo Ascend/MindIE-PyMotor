@@ -1,0 +1,40 @@
+{
+  "version": "v1.0",
+  "controller_api_dns": "127.0.0.1",
+  "controller_api_port": 57675,
+  "node_manager_port": 1027,
+  "role": "prefill",
+  "model_name": "vllm",
+  "parallel_config": {
+    "dp": 1,
+    "cp": 1,
+    "tp": 8,
+    "sp": 1,
+    "ep": 1,
+    "pp": 1,
+    "world_size": 16
+  },
+  "heartbeat_interval_seconds": 5,
+  "nodemanager_tls_config": {
+    "server_tls_enable": false,
+    "server_tls_items": {
+      "ca_cert": "./security/nm/cert/ca_cert/ca.pem",
+      "tls_cert": "./security/nm/cert/server_cert/server.pem",
+      "tls_key": "./security/nm/cert/server_cert/server.key.pem",
+      "tls_passwd": "./security/nm/cert/server_cert/server_pwd.txt",
+      "kmcKsfMaster": "./security/nm/cert/server_cert/tools/pmt/master/ksfa",
+      "kmcKsfStandby": "./security/nm/cert/server_cert/tools/pmt/standby/ksfb",
+      "tls_crl": ""
+    },
+    "client_tls_enable": false,
+    "client_tls_items": {
+      "ca_cert": "./security/nm/cert/ca_cert/ca.pem",
+      "tls_cert": "./security/nm/cert/server_cert/server.pem",
+      "tls_key": "./security/nm/cert/server_cert/server.key.pem",
+      "tls_passwd": "./security/nm/cert/server_cert/server_pwd.txt",
+      "kmcKsfMaster": "./security/nm/cert/server_cert/tools/pmt/master/ksfa",
+      "kmcKsfStandby": "./security/nm/cert/server_cert/tools/pmt/standby/ksfb",
+      "tls_crl": ""
+    }
+  }
+}
