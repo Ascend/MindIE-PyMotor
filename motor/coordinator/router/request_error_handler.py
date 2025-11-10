@@ -74,7 +74,7 @@ async def __execute_with_retry(func: Callable, stream: bool, *args, **kwargs):
     resource = kwargs['resource']
     
     logger.debug("Forwarding request to instance at %s:%s with data: %s", \
-        resource.endpoint.ip, resource.endpoint.port, kwargs['req_data'])
+        resource.endpoint.ip, resource.endpoint.business_port, kwargs['req_data'])
     
     for attempt in range(CoordinatorConfig().exception_config.max_retry):
         try:

@@ -3,6 +3,7 @@ import time
 import threading
 from unittest.mock import patch
 from motor.coordinator.core.request_manager import RequestManager
+from motor.coordinator.models.request import RequestInfo, ReqState
 
 
 class TestRequestManager:
@@ -159,6 +160,113 @@ class TestRequestManager:
         assert counter2 == 0
         # Timestamps should be different
         assert id1[:16] != id2[:16]
+
+    def test_add_req_info_and_del_req_info(self):
+        manager = RequestManager()
+        
+        # Create a RequestInfo object
+        req_id = manager.generate_request_id()
+        req_info = RequestInfo(
+            req_id=req_id,
+            req_data={"test": "data"},
+            req_len=100,
+            api="/test/api",
+            state=ReqState.ARRIVE
+        )
+        
+        # Test add_req_info
+        result = manager.add_req_info(req_info)
+        assert result == True
+        assert req_id in manager._req_info_dict
+        assert manager._req_info_dict[req_id].req_id == req_id
+        
+        # Test del_req_info
+        result = manager.del_req_info(req_id)
+        assert result == True
+        assert req_id not in manager._req_info_dict
+        
+        # Test del_req_info with non-existent ID
+        result = manager.del_req_info("non_existent_id")
+        assert result == False
+
+    def test_concurrent_access(self):
+        """Test concurrent access to add_req_info and del_req_info methods"""
+        manager = RequestManager()
+        def worker(worker_id, results):
+            try:
+                # Generate request ID
+                req_id = manager.generate_request_id()
+                
+                # Create RequestInfo
+                req_info = RequestInfo(
+                    req_id=req_id,
+                    req_data={"worker_id": worker_id, "test": "data"},
+                    req_len=100,
+                    api=f"/test/api/{worker_id}",
+                    state=ReqState.ARRIVE
+                )
+                
+                # Add request
+                add_result = manager.add_req_info(req_info)
+                
+                # Delete request
+                del_result = manager.del_req_info(req_id)
+                
+                results[worker_id] = (add_result, del_result)
+            except Exception as e:
+                results[worker_id] = (False, False, str(e))
+        
+        # Run multiple threads
+        num_threads = 10
+        threads = []
+        results = {}
+        
+        for i in range(num_threads):
+            thread = threading.Thread(target=worker, args=(i, results))
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Check results
+        for i in range(num_threads):
+            assert i in results
+            assert results[i][0] == True, f"Add failed for worker {i}"
+            assert results[i][1] == True, f"Delete failed for worker {i}"
+            
+    def test_request_persistence(self):
+        """Test that requests persist in the dictionary until deleted"""
+        manager = RequestManager()
+        # Add multiple requests
+        req_ids = []
+        for i in range(5):
+            req_id = manager.generate_request_id()
+            req_info = RequestInfo(
+                req_id=req_id,
+                req_data={"index": i, "test": "data"},
+                req_len=100,
+                api=f"/test/api/{i}",
+                state=ReqState.ARRIVE
+            )
+            manager.add_req_info(req_info)
+            req_ids.append(req_id)
+        
+        # Check all requests exist
+        for req_id in req_ids:
+            assert req_id in manager._req_info_dict
+        
+        # Delete some requests
+        manager.del_req_info(req_ids[1])
+        manager.del_req_info(req_ids[3])
+        
+        # Check remaining requests
+        assert req_ids[0] in manager._req_info_dict
+        assert req_ids[1] not in manager._req_info_dict
+        assert req_ids[2] in manager._req_info_dict
+        assert req_ids[3] not in manager._req_info_dict
+        assert req_ids[4] in manager._req_info_dict
 
 
 @pytest.fixture

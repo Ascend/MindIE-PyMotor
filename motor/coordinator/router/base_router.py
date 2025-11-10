@@ -102,7 +102,7 @@ class BaseRouter(ABC):
         }
         
         async with httpx.AsyncClient(timeout=CoordinatorConfig().exception_config.first_token_timeout,
-                                    base_url=f"http://{endpoint.ip}:{endpoint.port}",
+                                    base_url=f"http://{endpoint.ip}:{endpoint.business_port}",
                                     verify=False) as client:
             self.first_chunk_sent = False
             async with client.stream("POST",
@@ -136,7 +136,7 @@ class BaseRouter(ABC):
             'X-Request-Id': self.req_info.req_id
         }
         async with httpx.AsyncClient(timeout=CoordinatorConfig().exception_config.infer_timeout,
-                                    base_url=f"http://{endpoint.ip}:{endpoint.port}",
+                                    base_url=f"http://{endpoint.ip}:{endpoint.business_port}",
                                     verify=False) as client:
 
             response = await client.post(f"/{self.req_info.api}",

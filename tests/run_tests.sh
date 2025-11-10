@@ -84,6 +84,7 @@ check_dependencies() {
     # Check pytest related packages
     python3 -c "import pytest" 2>/dev/null || { echo "Installing pytest..."; pip install pytest; }
     python3 -c "import pytest_cov" 2>/dev/null || { echo "Installing pytest-cov..."; pip install pytest-cov; }
+    python3 -c "import pytest_asyncio" 2>/dev/null || { echo "Installing pytest-asyncio..."; pip install pytest-asyncio; }
     
     # Check project core dependencies
     echo "Checking project core dependencies..."
