@@ -29,6 +29,8 @@ class ControllerConfig:
     # controller api relative config
     controller_api_host: str = '127.0.0.1'
     controller_api_port: int = 8000
+    coordinator_api_dns: str = '127.0.0.1'
+    coordinator_api_port: int = 8000
     enable_tls: bool = False
     cert_path: str = 'security/controller/cert/server.crt'
     key_path: str = 'security/controller/keys/server.key'
@@ -71,6 +73,8 @@ class ControllerConfig:
             config = cls(
                 controller_api_host=cfg.get('controller_api_host', cls.controller_api_host),
                 controller_api_port=cfg.get('controller_api_port', cls.controller_api_port),
+                coordinator_api_dns=cfg.get('coordinator_api_dns', cls.coordinator_api_dns),
+                coordinator_api_port=cfg.get('coordinator_api_port', cls.coordinator_api_port),
                 enable_tls=cfg.get('enable_tls', cls.enable_tls),
                 cert_path=cfg.get('cert_path', cls.cert_path),
                 key_path=cfg.get('key_path', cls.key_path),
@@ -206,6 +210,7 @@ class ControllerConfig:
         return f"""
                 Controller Configuration Summary:
                   API Service: {self.controller_api_host}:{self.controller_api_port}
+                  Coordinator API Service: {self.coordinator_api_dns}:{self.coordinator_api_port}
                   Instance Assembly Timeout: {self.instance_assemble_timeout} seconds
                   Instance Heartbeat Timeout: {self.instance_heartbeat_timeout} seconds
                   Instance Expired Timeout: {self.instance_expired_timeout} seconds

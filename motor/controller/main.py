@@ -98,7 +98,7 @@ def main() -> None:
 
     modules["InstanceManager"] = InstanceManager(config)
     modules["InstanceAssembler"] = InstanceAssembler(config)
-    modules["EventPusher"] = EventPusher()
+    modules["EventPusher"] = EventPusher(config)
     modules["ControllerAPI"] = ControllerAPI(config)
     if config.enable_fault_tolerance:
         from motor.controller.ft.fault_manager import FaultManager
