@@ -18,8 +18,9 @@ from motor.coordinator.api_server.coordinator_server import (
 )
 from motor.coordinator.core.instance_manager import InstanceManager
 from motor.coordinator.core.request_manager import RequestManager
-from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker, ControllerClient
+from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.config.coordinator import CoordinatorConfig
+from motor.coordinator.metrics.metrics_collector import MetricsCollector
 from motor.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -44,26 +45,23 @@ def initialize_components():
     logger.info("Initializing coordinator components...")
     
     logger.info("Initializing CoordinatorConfig...")
-    coordinator_config = CoordinatorConfig()
-    if coordinator_config.init() == -1:
-        logger.error("Failed to initialize CoordinatorConfig")
-        raise RuntimeError("Failed to initialize CoordinatorConfig")
-    logger.info("CoordinatorConfig initialized successfully")
-    modules["CoordinatorConfig"] = coordinator_config
+    try:
+        modules["CoordinatorConfig"] = CoordinatorConfig()
+    except Exception as e:
+        logger.error(f"Failed to initialize CoordinatorConfig: {e}")
+        raise RuntimeError("Failed to initialize CoordinatorConfig") from e
     
     logger.info("Initializing InstanceManager...")
     modules["InstanceManager"] = InstanceManager()
     
     logger.info("Initializing RequestManager...")
     modules["RequestManager"] = RequestManager()
-    
-    logger.info("Initializing ControllerClient...")
-    controller_client = ControllerClient()
+
+    logger.info("Initializing MetricsListener...")
+    modules["MetricsListener"] = MetricsCollector()
     
     logger.info("Initializing InstanceHealthChecker...")
-    instance_health_checker = InstanceHealthChecker(controller_client)
-    instance_health_checker.start()
-    modules["InstanceHealthChecker"] = instance_health_checker
+    modules["InstanceHealthChecker"] = InstanceHealthChecker()
     
     logger.info("Creating server configurations...")
     coordinator_config = modules.get("CoordinatorConfig")
