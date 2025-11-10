@@ -13,6 +13,8 @@ from motor.utils.singleton import ThreadSafeSingleton
 class DeployMode(Enum):
     SINGLE_NODE = "single_node"
     PD_SEPARATE = "pd_separate"
+    CDP_SEPARATE = "cdp_separate"
+    CPCD_SEPARATE = "cpcd_separate"
     
     @classmethod
     def from_string(cls, value: str) -> Optional['DeployMode']:
@@ -61,6 +63,7 @@ class PrometheusMetricsConfig:
 class ExceptionConfig:
     def __init__(self):
         self.max_retry = 5
+        self.retry_delay = 0.2
         self.schedule_timeout = 60
         self.first_token_timeout = 60
         self.infer_timeout = 300
@@ -336,6 +339,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
         
         exception_mappings = {
             "max_retry": (int, 5),
+            "retry_delay": (float, 0.2),
             "schedule_timeout": (int, 60),
             "first_token_timeout": (int, 60),
             "infer_timeout": (int, 300),

@@ -41,12 +41,20 @@ class SeparatePDRouter(BaseRouter):
                     logger.debug("Prefill response received: %s", p_resp_json)
                 except Exception as e:
                     logger.error("Error occurred while forwarding P request: %s", e)
-                    import traceback
-                    import sys
-                    exc_info = sys.exc_info()
-                    logger.error(e)
-                    logger.error("".join(traceback.format_exception(*exc_info)))
-                    raise e
+                    if isinstance(e, HTTPException):
+                        error_response = {
+                            "status_code": e.status_code,
+                            "error_type": type(e).__name__,
+                            "error_message": e.detail,
+                        }
+                    else:
+                        error_response = {
+                            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            "error_type": type(e).__name__,
+                            "error_message": str(e),
+                        }
+                    yield f"data: {json.dumps(error_response)}".encode('utf-8')
+                    return
                 finally:
                     if prefill_resource and self.req_info.state != ReqState.PREFILL_END:
                         # When forwarding fails, releases p tokens and kvcache
@@ -129,7 +137,19 @@ class SeparatePDRouter(BaseRouter):
             logger.info(f"Completed streaming for request {self.req_info}")
         except Exception as e:
             self.__handle_stream_error(prefill_resource, e)
-            raise
+            if isinstance(e, HTTPException):
+                error_response = {
+                    "status_code": e.status_code,
+                    "error_type": type(e).__name__,
+                    "error_message": e.detail,
+                }
+            else:
+                error_response = {
+                    "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+            yield f"data: {json.dumps(error_response)}".encode('utf-8')
 
     def __extract_request_info(self, req_data: dict) -> dict:
         """Extract request information from req_data"""

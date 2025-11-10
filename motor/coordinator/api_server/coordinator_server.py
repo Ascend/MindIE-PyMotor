@@ -696,6 +696,12 @@ class CoordinatorServer:
         async def refresh_instances(request: Request) -> RequestResponse:
             return await self._handle_refresh_instances(request)
         
+        @self.management_app.post("/v1/metaserver")
+        @self._timeout_handler()
+        async def metaserver(request: Request):
+            """MetaServer API"""
+            return await self._handle_metaserver_request(request)
+        
         @self.management_app.get("/")
         async def root():
             return {
@@ -811,3 +817,16 @@ class CoordinatorServer:
             logger.error(f"Failed to process OpenAI request: {e}", exc_info=True)
             raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
+    async def _handle_metaserver_request(self, request: Request):
+        """Handle MetaServer request"""
+        try:
+            if not self.instance_manager.is_available():
+                raise HTTPException(status_code=503, detail="Service is not available")
+
+            # Use router to handle requests
+            return await handle_metaserver_request(request)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to process MetaServer request: {e}")
+            raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e)) from e

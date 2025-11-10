@@ -23,6 +23,7 @@
     },
     "exception_config": {
         "max_retry": 5,
+        "retry_delay": 0.2,
         "schedule_timeout": 600,
         "first_token_timeout": 600,
         "infer_timeout": 600,

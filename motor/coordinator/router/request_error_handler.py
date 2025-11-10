@@ -6,12 +6,12 @@ from typing import Callable
 import asyncio
 import functools
 
-from fastapi import status
+from fastapi import status, HTTPException
 import httpx
 
 from motor.config.coordinator import CoordinatorConfig
-from motor.coordinator.models.request import ReqState
-from motor.coordinator.models.request import ScheduledResource
+from motor.coordinator.models.request import ReqState, ScheduledResource
+from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -83,11 +83,16 @@ async def __execute_with_retry(func: Callable, stream: bool, *args, **kwargs):
             return
         except Exception as e:
             last_exc = e 
-            __handle_execution_exception(e, self_instance)
+            await __handle_execution_exception(e, self_instance, resource)
             
         if last_exc and attempt == CoordinatorConfig().exception_config.max_retry - 1:
             __handle_final_failure(self_instance, last_exc)
-            raise last_exc
+            if isinstance(last_exc, HTTPException):
+                raise last_exc
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail=str(last_exc)
+            )
         
         await __handle_retry_delay(attempt)
     
@@ -102,21 +107,21 @@ async def __try_execute_function(func: Callable, stream: bool, *args, **kwargs):
         yield result
 
 
-def __handle_execution_exception(exception: Exception, self_instance) -> Exception:
+async def __handle_execution_exception(exception: Exception, self_instance, resource: ScheduledResource) -> Exception:
     """Handle exceptions during function execution
     
     Returns:
         Exception to raise (or None to continue retrying)
     """
     if isinstance(exception, httpx.HTTPStatusError):
-        return __handle_http_status_error(exception, self_instance)
+        return await __handle_http_status_error(exception, self_instance)
     elif isinstance(exception, httpx.RequestError):
-        return __handle_request_error(exception, self_instance)
+        return __handle_request_error(exception, self_instance, resource)
     else:
         return __handle_general_exception(exception, self_instance)
 
 
-def __handle_http_status_error(error: httpx.HTTPStatusError, self_instance):
+async def __handle_http_status_error(error: httpx.HTTPStatusError, self_instance):
     """Handle HTTP status errors"""
     if hasattr(error, 'response') and hasattr(error.response, 'status_code'):
         status_code = error.response.status_code
@@ -125,8 +130,10 @@ def __handle_http_status_error(error: httpx.HTTPStatusError, self_instance):
         # 4XX: Client request error, return directly
         if __is_client_error(status_code):
             self_instance.req_info.update_state(ReqState.INVALID)
-            logger.warning(f"User request error")
-            raise error
+            raise HTTPException(
+                status_code=status_code, 
+                detail=error.response.text
+            )
     else:
         logger.warning(f"HTTP error, but fail to parse status code: {error}")
 
@@ -137,21 +144,24 @@ def __is_client_error(status_code: int) -> bool:
             status_code < status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def __handle_request_error(error: httpx.RequestError, self_instance):
+def __handle_request_error(error: httpx.RequestError, self_instance, resource: ScheduledResource):
     """Handle HTTP request errors"""
-    logger.warning(f"Request error: {error}")
     self_instance.req_info.update_state(ReqState.EXCEPTION)
     
-    if isinstance(error, httpx.ProxyError):
-        logger.warning("Proxy error")
-    elif isinstance(error, httpx.ConnectError):
-        logger.warning("Connect error")
+    if isinstance(error, httpx.TransportError):
+        InstanceHealthChecker().push_exception_instance(resource.instance, resource.endpoint)
+    
+    if isinstance(error, httpx.NetworkError):
+        logger.warning("Network error: %s", str(error))
     elif isinstance(error, httpx.TimeoutException):
-        logger.warning("Timeout error")
+        logger.warning("Timeout error: %s", str(error))
         self_instance.req_info.update_state(ReqState.TIMEOUT)
     else:
         logger.warning(f"Unknown request error: {str(error)}")
-    raise error
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+        detail=str(error)
+    )
 
 
 def __handle_general_exception(error: Exception, self_instance):
@@ -162,7 +172,10 @@ def __handle_general_exception(error: Exception, self_instance):
     if self_instance.first_chunk_sent:
         logger.error(f"Streaming to client interrupted after response started: {str(error)}")
         self_instance.req_info.update_state(ReqState.EXCEPTION)
-        raise error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Streaming interrupted, {str(error)}"
+        )
 
 
 async def __handle_retry_delay(attempt: int):

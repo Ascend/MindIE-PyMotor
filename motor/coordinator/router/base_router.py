@@ -10,7 +10,6 @@ import httpx
 
 from motor.config.coordinator import CoordinatorConfig
 from motor.coordinator.models.request import RequestInfo, ReqState, ScheduledResource
-from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.coordinator.scheduler.scheduler import Scheduler
 from motor.coordinator.router.request_error_handler import handle_request_errors
 from motor.resources.endpoint import WorkloadAction
@@ -98,22 +97,21 @@ class BaseRouter(ABC):
         logger.debug("Forward stream request: %s", req_data)
         endpoint = resource.endpoint
         headers = {
-            'Content-Type': 'application/json',
+            'Content-Type': 'text/event-stream',
             'X-Request-Id': self.req_info.req_id
         }
         
-        stream_flag = bool(self.req_info.req_data.get("stream", False))
-        
-        async with httpx.AsyncClient(timeout=CoordinatorConfig().exception_config.first_token_timeout if stream_flag 
-                                     else CoordinatorConfig().exception_config.infer_timeout,
+        async with httpx.AsyncClient(timeout=CoordinatorConfig().exception_config.first_token_timeout,
                                     base_url=f"http://{endpoint.ip}:{endpoint.port}",
                                     verify=False) as client:
+            self.first_chunk_sent = False
             async with client.stream("POST",
                                         f"/{self.req_info.api}",
                                         json=req_data,
                                         headers=headers) as response:
-                response.raise_for_status()
-                self.first_chunk_sent = False
+                if not response.is_success:
+                    await response.aread()
+                    response.raise_for_status()
                 async for chunk in response.aiter_bytes():
                     if not self.first_chunk_sent and chunk:
                         self.first_chunk_sent = True

@@ -7,6 +7,7 @@ import uuid
 import threading
 import logging
 from motor.utils.singleton import ThreadSafeSingleton
+from motor.coordinator.models.request import RequestInfo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ class RequestManager(ThreadSafeSingleton):
         self._counter = 0
         self._last_timestamp = 0
         self._lock = threading.Lock()  # Protects counter state
+        
+        self._req_info_dict: dict[str, RequestInfo] = {}
         
         self._initialized = True
         logger.info("RequestManager initialized")
@@ -56,3 +59,34 @@ class RequestManager(ThreadSafeSingleton):
             logger.error(f"Failed to generate request ID: {e}")
             # Emergency fallback
             return uuid.uuid4().hex
+
+    def get_req_info(self, req_id: str) -> RequestInfo:
+        return self._req_info_dict.get(req_id)
+
+    def add_req_info(self, req_info: RequestInfo) -> bool:
+        try:
+            with self._lock:
+                if req_info.req_id in self._req_info_dict:
+                    logger.warning(f"Request ID {req_info.req_id} already exists")
+                    return False
+
+                self._req_info_dict[req_info.req_id] = req_info
+            logger.debug("Added request info for ID: %s", {req_info.req_id})
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add request info for ID {req_info.req_id}: {e}")
+            return False
+
+    def del_req_info(self, req_id: str) -> bool:
+        try:
+            with self._lock:
+                if req_id not in self._req_info_dict:
+                    logger.warning(f"Request ID {req_id} not found for deletion")
+                    return False
+                
+                del self._req_info_dict[req_id]
+                logger.debug("Deleted request info for ID: %s", {req_id})
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete request info for ID {req_id}: {e}")
+            return False
