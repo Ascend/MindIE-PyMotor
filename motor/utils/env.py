@@ -11,8 +11,8 @@ class Env:
         return os.getenv("JOB_NAME", "test_job")
 
     @property
-    def install_path(self):
-        return os.getenv("INSTALL_PATH", "motor/")
+    def config_path(self):
+        return os.getenv("CONFIG_PATH", "motor/")
 
     @property
     def home_hccl_path(self):

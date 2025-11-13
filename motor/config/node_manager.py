@@ -53,7 +53,7 @@ class NodeManagerConfig(ThreadSafeSingleton):
         if hasattr(self, "_initialized"):
             return  # Ensure singleton only initializes once
 
-        config_path = os.path.join(Env.install_path, "config", "node_manager_config.json")
+        config_path = os.path.join(Env.config_path, "config", "node_manager_config.json")
         hccl_path = os.path.join(Env.home_hccl_path, "hccl.json")
 
         NodeManagerConfig.parse_config_json(config_path)

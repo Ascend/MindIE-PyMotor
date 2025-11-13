@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 os.environ['HOME_HCCL_PATH'] = './tests/jsons'
 os.environ['JOB_NAME'] = 'test_job'
 os.environ['POD_IP'] = '192.168.1.100'
-os.environ['INSTALL_PATH'] = './'
+os.environ['CONFIG_PATH'] = './'
 
 from motor.resources.endpoint import Endpoint, EndpointStatus, DeviceInfo
 from motor.resources.http_msg_spec import StartCmdMsg, Ranktable, ServerInfo

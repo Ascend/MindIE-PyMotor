@@ -65,7 +65,7 @@ def engine_manager(config_data, hccl_data):
     """Create EngineManager instance with mocked config"""
     with patch('motor.config.node_manager.safe_open') as mock_safe_open, \
          patch('threading.Thread') as mock_thread_class, \
-         patch.dict('os.environ', {'JOB_NAME': 'test_job', 'INSTALL_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'}):
+         patch.dict('os.environ', {'JOB_NAME': 'test_job', 'CONFIG_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'}):
         
         mock_safe_open.side_effect = create_config_mock(config_data, hccl_data)
         mock_thread = MagicMock()
@@ -113,7 +113,7 @@ class TestEngineManager:
     
     @patch('motor.config.node_manager.safe_open')
     @patch('threading.Thread')
-    @patch.dict('os.environ', {'JOB_NAME': 'test_job', 'INSTALL_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'})
+    @patch.dict('os.environ', {'JOB_NAME': 'test_job', 'CONFIG_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'})
     def test_init_success(self, mock_thread_class, mock_safe_open, config_data, hccl_data):
         """Test EngineManager initialization"""
         mock_safe_open.side_effect = create_config_mock(config_data, hccl_data)
@@ -135,7 +135,7 @@ class TestEngineManager:
     
     @patch('motor.config.node_manager.safe_open')
     @patch('threading.Thread')
-    @patch.dict('os.environ', {'JOB_NAME': 'test_job', 'INSTALL_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'})
+    @patch.dict('os.environ', {'JOB_NAME': 'test_job', 'CONFIG_PATH': './', 'HOME_HCCL_PATH': './tests/jsons'})
     def test_singleton_pattern(self, mock_thread_class, mock_safe_open, config_data, hccl_data):
         """Test singleton pattern"""
         mock_safe_open.side_effect = create_config_mock(config_data, hccl_data)
