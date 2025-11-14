@@ -228,6 +228,8 @@ class InstanceManager(ThreadSafeSingleton):
             event = InsConditionEvent.INSTANCE_NORMAL
             to_state = self.transitions.get((from_state, event), None)
         elif instance.is_have_one_endpoint_abnormal():
+            logger.info("detected instance %s (id:%d) at least have one endpoint abnormal.",
+                        instance.job_name, instance.id)
             event = InsConditionEvent.INSTANCE_ABNORMAL
             to_state = self.transitions.get((from_state, event), None)
         else:
@@ -280,9 +282,10 @@ class InstanceManager(ThreadSafeSingleton):
             for instance in cur_instances:
                 if instance.status == InsStatus.DELTETED:
                     continue
-
                 if instance.is_all_endpoints_alive():
                     continue
+                logger.info("detected Instance %s (id:%d) heartbeat timeout on some endpoints.",
+                            instance.job_name, instance.id)
                 # Instance heartbeat timeout, handle state transition
                 from_state = instance.status
                 event = InsConditionEvent.INSTANCE_HEARTBEAT_TIMEOUT
