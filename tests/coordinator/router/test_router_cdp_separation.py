@@ -170,14 +170,11 @@ class TestRouterCDPSeparation:
                         workload_action, request_length: int) -> bool:
             return True
         
-        def mock_from_string(value):
-            return DeployMode.CDP_SEPARATE
-        
         monkeypatch.setattr(InstanceManager, "is_available", mock_is_available)
         monkeypatch.setattr(InstanceManager, "get_available_instances", mock_get_available_instances)
         monkeypatch.setattr(Scheduler, "select_instance_and_endpoint", mock_select_instance_and_endpoint)
         monkeypatch.setattr(Scheduler, "update_workload", mock_update_workload)
-        monkeypatch.setattr(DeployMode, "from_string", mock_from_string)
+        monkeypatch.setattr(CoordinatorConfig().scheduler_config, "deploy_mode", DeployMode.CDP_SEPARATE)
         monkeypatch.setattr(CoordinatorConfig().exception_config, "retry_delay", 0.0001)
     
     @pytest.mark.asyncio
@@ -187,8 +184,6 @@ class TestRouterCDPSeparation:
         1) Check request status is DecodeEnd
         2) Return normal response
         """
-        monkeypatch.setattr(CoordinatorConfig().http_config, "manage_ip", "test-host")
-        monkeypatch.setattr(CoordinatorConfig().http_config, "manage_port", "8888")
         
         mock_async_client = MockAsyncClient()
         
@@ -219,8 +214,8 @@ class TestRouterCDPSeparation:
             assert kv_transfer_params["request_id"] == mock_async_client.req_headers_from_router["X-Request-Id"]
             assert kv_transfer_params["do_remote_decode"] is False
             assert kv_transfer_params["do_remote_prefill"] is True
-            assert kv_transfer_params["remote_host"] == CoordinatorConfig().mgmt_host
-            assert kv_transfer_params["remote_port"] == str(CoordinatorConfig().mgmt_port)
+            assert kv_transfer_params["remote_host"] == CoordinatorConfig().server_config.mgmt_host
+            assert kv_transfer_params["remote_port"] == str(CoordinatorConfig().server_config.mgmt_port)
 
             # Request info should not be modified by metaserver
             assert req_info.req_id == origin_req_id

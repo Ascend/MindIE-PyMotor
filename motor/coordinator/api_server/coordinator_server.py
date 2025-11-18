@@ -381,7 +381,7 @@ class CoordinatorServer:
         return unified_app
     
     async def run(self):
-        combined_mode = self.coordinator_config.combined_mode
+        combined_mode = self.coordinator_config.server_config.combined_mode
         rate_limit_config = self.coordinator_config.rate_limit_config
         
         mgmt_server = None
@@ -541,14 +541,14 @@ class CoordinatorServer:
         unified_app = self.create_unified_app(rate_limit_config=rate_limit_config)
         logger.info(
             "Starting Unified server %s:%s",
-            self.coordinator_config.combined_host,
-            self.coordinator_config.combined_port
+            self.coordinator_config.server_config.combined_host,
+            self.coordinator_config.server_config.combined_port
         )
         
         unified_config_kwargs = self._create_base_uvicorn_config(
             unified_app,
-            self.coordinator_config.combined_host,
-            self.coordinator_config.combined_port
+            self.coordinator_config.server_config.combined_host,
+            self.coordinator_config.server_config.combined_port
         )
         
         self._apply_timeout_to_config(unified_config_kwargs)
@@ -563,25 +563,25 @@ class CoordinatorServer:
         
         logger.info(
             "Starting Management server %s:%s",
-            self.coordinator_config.mgmt_host,
-            self.coordinator_config.mgmt_port
+            self.coordinator_config.server_config.mgmt_host,
+            self.coordinator_config.server_config.mgmt_port
         )
         logger.info(
             "Starting Inference server %s:%s",
-            self.coordinator_config.inference_host,
-            self.coordinator_config.inference_port
+            self.coordinator_config.server_config.inference_host,
+            self.coordinator_config.server_config.inference_port
         )
         
         mgmt_config_kwargs = self._create_base_uvicorn_config(
             self.management_app,
-            self.coordinator_config.mgmt_host,
-            self.coordinator_config.mgmt_port
+            self.coordinator_config.server_config.mgmt_host,
+            self.coordinator_config.server_config.mgmt_port
         )
         
         inference_config_kwargs = self._create_base_uvicorn_config(
             self.inference_app,
-            self.coordinator_config.inference_host,
-            self.coordinator_config.inference_port
+            self.coordinator_config.server_config.inference_host,
+            self.coordinator_config.server_config.inference_port
         )
         
         self._apply_timeout_to_config(mgmt_config_kwargs)

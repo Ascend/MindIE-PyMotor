@@ -40,13 +40,12 @@ async def handle_request(raw_request: Request) -> StreamingResponse:
 
     req_info = await __create_request_info(raw_request)
 
-    deploy_mode_str = CoordinatorConfig().scheduler_config.get("deploy_mode")
-    deploy_mode = DeployMode.from_string(deploy_mode_str)
+    deploy_mode = CoordinatorConfig().scheduler_config.deploy_mode
     router_impl_class = _ROUTER_MAP.get(deploy_mode)
     if not router_impl_class:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Unknown deploy mode: {deploy_mode_str}"
+            detail=f"Unknown deploy mode: {deploy_mode}"
         )
         
     router_impl = router_impl_class(req_info)
@@ -78,12 +77,11 @@ async def handle_metaserver_request(raw_request: Request) -> httpx.Response:
     """
     req_info = await __create_request_info(raw_request)
     
-    deploy_mode_str = CoordinatorConfig().scheduler_config.get("deploy_mode")
-    deploy_mode = DeployMode.from_string(deploy_mode_str)
+    deploy_mode = CoordinatorConfig().scheduler_config.deploy_mode
     if not deploy_mode or (deploy_mode != DeployMode.CDP_SEPARATE and deploy_mode != DeployMode.PD_SEPARATE):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Unsupport deploy mode: {deploy_mode_str}"
+            detail=f"Unsupport deploy mode: {deploy_mode}"
         )
     
     try:

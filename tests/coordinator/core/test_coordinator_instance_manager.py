@@ -6,10 +6,11 @@ from unittest.mock import patch, MagicMock
 from motor.coordinator.core.instance_manager import (
     InstanceManager, UpdateInstanceMode
 )
+
 from motor.common.resources.instance import Instance, PDRole, Workload
 from motor.common.resources.endpoint import Endpoint
 from motor.common.resources.http_msg_spec import EventType
-from motor.config.coordinator import CoordinatorConfig
+from motor.config.coordinator import CoordinatorConfig, DeployMode
 
 
 class TestInstanceManager:
@@ -67,17 +68,19 @@ class TestInstanceManager:
         assert len(self.instance_manager._hybrid_pool) == 0
         assert len(self.instance_manager._unavailable_pool) == 0
 
-    def test_is_available_pd_disaggregation(self):
-        """Test is_available method in pd_disaggregation mode"""
-        # Mock CoordinatorConfig to return pd_disaggregation mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "pd_disaggregation"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+    def test_is_available_cdp_separate(self):
+        """Test is_available method in cdp_separate mode"""
+        # Mock CoordinatorConfig to return cdp_separate mode
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.CDP_SEPARATE
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Initially should be False
             assert self.instance_manager.is_available() == False
@@ -93,17 +96,19 @@ class TestInstanceManager:
     def test_is_available_pd_separate(self):
         """Test is_available method in pd_separate mode"""
         # Mock CoordinatorConfig to return pd_separate mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "pd_separate"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.PD_SEPARATE
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Initially should be False
-            assert self.instance_manager.is_available() == False
+            self.instance_manager.is_available() == False
             
             # Add prefill instance
             self.instance_manager._add_instance_to_available_pool(self.prefill_instance)
@@ -113,17 +118,19 @@ class TestInstanceManager:
             self.instance_manager._add_instance_to_available_pool(self.decode_instance)
             assert self.instance_manager.is_available() == True  # Now should be True
 
-    def test_is_available_pd_disaggregation_single_container(self):
+    def test_is_available_cpcd_separate(self):
         """Test is_available method in pd_disaggregation_single_container mode"""
         # Mock CoordinatorConfig to return pd_disaggregation_single_container mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "pd_disaggregation_single_container"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.CPCD_SEPARATE
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Initially should be False
             assert self.instance_manager.is_available() == False
@@ -138,47 +145,50 @@ class TestInstanceManager:
 
     def test_is_available_single_node(self):
         """Test is_available method in single_node mode"""
-        # Mock CoordinatorConfig to return single_node mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "single_node"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.SINGLE_NODE
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Initially should be False
             assert self.instance_manager.is_available() == False
             
             # Add hybrid instance
             self.instance_manager._add_instance_to_available_pool(self.hybrid_instance)
-            assert self.instance_manager.is_available() == True
+            assert self.instance_manager.is_available() == True 
 
     def test_is_available_unknown_mode(self):
         """Test is_available method with unknown deploy mode"""
         # Mock CoordinatorConfig to return unknown mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "unknown_mode"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.from_string("unknow_mode")
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Should return False for unknown mode
             assert self.instance_manager.is_available() == False
 
-    def test_is_available_no_digs_config(self):
-        """Test is_available method when digs_scheduler_config is missing"""
-        # Mock CoordinatorConfig with no digs_scheduler_config
+    def test_is_available_no_config(self):
+        """Test is_available method when scheduler_config is missing"""
+        # Mock CoordinatorConfig with no scheduler_config
         with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
             mock_config_instance = MagicMock()
             mock_config_instance.config = {}
             mock_config_new.return_value = mock_config_instance
             
-            # Should return False when digs_scheduler_config is missing
+            # Should return False when scheduler_config is missing
             assert self.instance_manager.is_available() == False
 
     def test_get_available_instances(self):
@@ -857,15 +867,17 @@ class TestInstanceManagerThreadSafety:
 
     def test_concurrent_is_available_calls(self):
         """Test concurrent is_available calls under different conditions with enhanced concurrency"""
-        # Mock CoordinatorConfig to return pd_disaggregation mode
-        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as mock_config_new:
-            mock_config_instance = MagicMock()
-            mock_config_instance.config = {
-                "digs_scheduler_config": {
-                    "deploy_mode": "pd_disaggregation"
-                }
-            }
-            mock_config_new.return_value = mock_config_instance
+        # Mock CoordinatorConfig to return cdp_separate mode
+        mock_scheduler_config = MagicMock()
+        mock_scheduler_config.deploy_mode = DeployMode.CDP_SEPARATE
+        
+        mock_coordinator_config = MagicMock()
+        mock_coordinator_config.scheduler_config = mock_scheduler_config
+        
+        with patch.object(CoordinatorConfig, '__new__', return_value=MagicMock()) as MockCoordinatorConfig:
+            MockCoordinatorConfig.return_value = mock_coordinator_config
+            
+            self.instance_manager = InstanceManager()
             
             # Thread-safe counter for tracking results
             results = []

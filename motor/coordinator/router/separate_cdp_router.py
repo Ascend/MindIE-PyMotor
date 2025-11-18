@@ -113,8 +113,8 @@ class SeparateCDPRouter(BaseRouter):
     def __gen_d_request(self) -> dict:
         """Generate D request parameters"""
         # read management http config
-        host = CoordinatorConfig().mgmt_host
-        port = CoordinatorConfig().mgmt_port
+        host = CoordinatorConfig().server_config.mgmt_host
+        port = CoordinatorConfig().server_config.mgmt_port
         
         req_data = self.req_info.req_data.copy()
         req_data['kv_transfer_params'] = {

@@ -70,14 +70,14 @@ class DummyRequestUtil:
             bool: True if request successful, False otherwise
         """
         try:
-            if not endpoint.ip or not endpoint.port:
+            if not endpoint.ip or not endpoint.business_port:
                 logger.warning(f"Endpoint {endpoint.id} IP or port not available")
                 return False
             
             url_path = getattr(self.config, 'dummy_request_endpoint', '/v1/completions')
             request_data = self._get_completion_request()
             
-            url = f"http://{endpoint.ip}:{endpoint.port}{url_path}"
+            url = f"http://{endpoint.ip}:{endpoint.business_port}{url_path}"
             
             response = self._http_session.post(
                 url,

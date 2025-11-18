@@ -62,7 +62,8 @@ class TestInstanceHealthChecker:
         config.max_consecutive_failures = 2
         config.dummy_request_interval = 0.1
         config.dummy_request_timeout = 5
-        config.controller_base_url = "http://localhost:10000"
+        config.controller_api_dns =  "mindie-ms-controller-service.mindie.svc.cluster.local"
+        config.controller_api_port = 57675
         config.alarm_endpoint = "/v1/alarm/coordinator"
         config.alarm_timeout = 5.0
         config.terminate_instance_endpoint = "/controller/terminate_instance"
@@ -499,7 +500,7 @@ class TestInstanceHealthChecker:
             mock_post.assert_called_once()
             # Verify correct URL was constructed
             call_args = mock_post.call_args
-            assert health_checker.config.controller_base_url in call_args[0][0]
+            assert health_checker.config.controller_api_dns in call_args[0][0]
             assert health_checker.config.alarm_endpoint in call_args[0][0]
 
     def test_call_controller_alarm_failure(self, health_checker):
@@ -533,7 +534,7 @@ class TestInstanceHealthChecker:
             mock_post.assert_called_once()
             # Verify correct URL was constructed
             call_args = mock_post.call_args
-            assert health_checker.config.controller_base_url in call_args[0][0]
+            assert health_checker.config.controller_api_dns in call_args[0][0]
             assert health_checker.config.terminate_instance_endpoint in call_args[0][0]
 
     def test_call_controller_terminate_failure(self, health_checker):

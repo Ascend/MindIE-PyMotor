@@ -26,33 +26,18 @@ class DeployMode(Enum):
             return None
 
 
-class AlgorithmMode(Enum):
+class SchedulerType(Enum):
     LOAD_BALANCE = "load_balance"
-    CACHE_AFFINITY = "cache_affinity"
     ROUND_ROBIN = "round_robin"
 
-
-class HttpConfig:
-    def __init__(self):
-        self.connection_pool_max_conn = 10000
-        self.server_thread_num = 1
-        self.client_thread_num = 1
-        self.http_timeout_seconds = 10
-        self.keep_alive_seconds = 180
-        self.predict_ip = ""
-        self.predict_port = ""
-        self.manage_ip = ""
-        self.manage_port = ""
-        self.alarm_port = ""
-        self.server_name = ""
-        self.user_agent = ""
-        self.allow_all_zero_ip_listening = False
-
-
-class MetricsConfig:
-    def __init__(self):
-        self.enable = False
-        self.trigger_size = 100
+    @classmethod
+    def from_string(cls, value: str) -> Optional['SchedulerType']:
+        """Convert string to SchedulerType enum."""
+        try:
+            return cls[value.upper()]
+        except (KeyError, AttributeError):
+            logging.warning(f"Invalid deploy mode: {value}")
+            return None
 
 
 class PrometheusMetricsConfig:
@@ -64,20 +49,8 @@ class ExceptionConfig:
     def __init__(self):
         self.max_retry = 5
         self.retry_delay = 0.2
-        self.schedule_timeout = 60
         self.first_token_timeout = 60
         self.infer_timeout = 300
-        self.tokenizer_timeout = 300
-
-
-class RequestLimit:
-    def __init__(self):
-        self.conn_max_reqs = 10000
-        self.single_node_max_reqs = 1000
-        self.max_reqs = 10000
-        self.body_limit = 10485760  # 10MB
-        self.req_congestion_alarm_threshold = 0.85
-        self.req_congestion_clear_threshold = 0.75
 
 
 class TlsItems:
@@ -100,7 +73,8 @@ class HealthCheckConfig:
         self.dummy_request_interval: float = 5.0
         self.max_consecutive_failures: int = 3
         self.dummy_request_timeout: float = 10.0
-        self.controller_base_url: str = "http://localhost:10000"
+        self.controller_api_dns: str = "mindie-ms-controller-service.mindie.svc.cluster.local"
+        self.controller_api_port: int = 57675
         self.dummy_request_endpoint: str = '/v1/completions'         
         self.dummy_request_body: dict = {
             'model': 'test-model', 
@@ -110,13 +84,19 @@ class HealthCheckConfig:
             'top_p': 0.9,
             'stream': False,
         }
-        
+        0
         self.alarm_endpoint: str = '/v1/alarm/coordinator'
         self.alarm_timeout: float = 5.
         self.terminate_instance_endpoint: str = '/controller/terminate_instance'
         
         self.thread_join_timeout: float = 5.0
         self.error_retry_interval: float = 1.0
+
+
+class SchedulerConfig:
+    def __init__(self) -> None:
+        self.deploy_mode = DeployMode.PD_SEPARATE
+        self.scheduler_type = SchedulerType.LOAD_BALANCE
 
 
 class TimeoutConfig:
@@ -137,6 +117,18 @@ class APIKeyConfig:
         self.skip_paths = set(["/", "/startup", "/readiness", "/liveness", "/health", "/metrics", 
                                "/instances/refresh",
                                "/docs", "/redoc", "/openapi.json", "/favicon.ico"])
+
+
+class ServerConfig:
+    def __init__(self):
+        self.combined_mode = False
+        self.combined_host = CoordinatorConfig.DEFAULT_HOST
+        self.combined_port = CoordinatorConfig.DEFAULT_INFERENCE_PORT
+        
+        self.mgmt_host = CoordinatorConfig.DEFAULT_HOST
+        self.mgmt_port = CoordinatorConfig.DEFAULT_MGMT_PORT
+        self.inference_port = CoordinatorConfig.DEFAULT_INFERENCE_PORT
+        self.inference_host = CoordinatorConfig.DEFAULT_HOST
 
 
 class RateLimitConfig:
@@ -184,36 +176,16 @@ class CoordinatorConfig(ThreadSafeSingleton):
         
         # Configuration objects
         self.config = {}
-        self.http_config = HttpConfig()
-        self.metrics_config = MetricsConfig()
         self.prometheus_metrics_config = PrometheusMetricsConfig()
         self.exception_config = ExceptionConfig()
-        self.req_limit = RequestLimit()
         self.health_check_config = HealthCheckConfig()
-        self.scheduler_config = {}
-        self.controller_server_tls = TlsItems()
+        self.scheduler_config = SchedulerConfig()
         self.request_server_tls = TlsItems()
-        self.mindie_client_tls = TlsItems()
-        self.mindie_mgmt_tls = TlsItems()
-        self.alarm_client_tls = TlsItems()
         self.health_check_config = HealthCheckConfig()
         self.timeout_config = TimeoutConfig()
         self.api_key_config = APIKeyConfig()
-        self.rate_limit_config = RateLimitConfig()
-        
-        # Runtime flags and settings
-        self.is_master = False
-        self.is_abnormal = False
-        self.backup_enable = False
-        self.str_token_rate = 4.2
-        self.combined_mode = False
-        self.combined_host = self.DEFAULT_HOST
-        self.combined_port = self.DEFAULT_INFERENCE_PORT
-        self.mgmt_host = self.DEFAULT_HOST
-        self.mgmt_port = self.DEFAULT_MGMT_PORT
-        self.inference_host = self.DEFAULT_HOST
-        self.inference_port = self.DEFAULT_INFERENCE_PORT
-
+        self.rate_limit_config = RateLimitConfig()        
+        self.server_config = ServerConfig()
         
         # Auto-initialize on creation
         self._initialize()
@@ -230,9 +202,6 @@ class CoordinatorConfig(ThreadSafeSingleton):
             with open(config_file, 'r', encoding='utf-8') as f:
                 self.config = json.load(f)
             
-            if not self._validate_config():
-                raise ValueError("Configuration validation failed")
-            
             self._load_all_configs()
             self._initialized = True
             logging.info("Coordinator configuration initialized successfully")
@@ -246,28 +215,14 @@ class CoordinatorConfig(ThreadSafeSingleton):
         check_files_env = os.getenv("MINDIE_CHECK_INPUTFILES_PERMISSION", "1")
         return check_files_env != "0"
 
-    def _validate_config(self) -> bool:
-        """Validate overall configuration structure."""
-        try:
-            scheduler_config = self.config.get("digs_scheduler_config", {})
-            return self._is_scheduler_config_valid(scheduler_config)
-        except Exception as e:
-            logging.error(f"Configuration validation error: {e}")
-            return False
-
     def _load_all_configs(self) -> None:
         """Load all configuration sections."""
         config_loaders = [
-            self._load_http_config,
-            self._load_metrics_config,
             self._load_prometheus_metrics_config,
             self._load_exception_config,
-            self._load_request_limit,
             self._load_tls_config,
             self._load_scheduler_config,
-            self._load_str_token_rate,
             self._load_health_check_config,
-            self._load_combined_config,
             self._load_server_config,
             self._load_timeout_config,
             self._load_api_key_config,
@@ -280,48 +235,6 @@ class CoordinatorConfig(ThreadSafeSingleton):
             except Exception as e:
                 logging.error(f"Failed to load configuration section {loader.__name__}: {e}")
                 raise
-
-    def _load_http_config(self) -> None:
-        """Load HTTP configuration section."""
-        config = self.config.get("http_config", {})
-        
-        http_mappings = {
-            "predict_ip": (str, ""),
-            "predict_port": (str, ""),
-            "manage_ip": (str, ""),
-            "manage_port": (str, ""),
-            "alarm_port": (str, ""),
-            "server_thread_num": (int, 1),
-            "client_thread_num": (int, 1),
-            "http_timeout_seconds": (int, 10),
-            "keep_alive_seconds": (int, 180),
-            "server_name": (str, ""),
-            "user_agent": (str, ""),
-            "allow_all_zero_ip_listening": (bool, False)
-        }
-        
-        for field, (field_type, default) in http_mappings.items():
-            value = config.get(field, default)
-            if isinstance(value, field_type):
-                setattr(self.http_config, field, value)
-            else:
-                raise ValueError(f"Invalid type for HTTP config field '{field}': expected {field_type}")
-
-    def _load_metrics_config(self) -> None:
-        """Load metrics configuration section."""
-        config = self.config.get("metrics_config", {})
-        
-        metrics_mappings = {
-            "enable": (bool, False),
-            "trigger_size": (int, 100)
-        }
-        
-        for field, (field_type, default) in metrics_mappings.items():
-            value = config.get(field, default)
-            if isinstance(value, field_type):
-                setattr(self.metrics_config, field, value)
-            else:
-                raise ValueError(f"Invalid type for Metrics config field '{field}': expected {field_type}")
 
     def _load_prometheus_metrics_config(self) -> None:
         """Load Prometheus metrics configuration section."""
@@ -340,10 +253,8 @@ class CoordinatorConfig(ThreadSafeSingleton):
         exception_mappings = {
             "max_retry": (int, 5),
             "retry_delay": (float, 0.2),
-            "schedule_timeout": (int, 60),
             "first_token_timeout": (int, 60),
-            "infer_timeout": (int, 300),
-            "tokenizer_timeout": (int, 300)
+            "infer_timeout": (int, 300)
         }
         
         for field, (field_type, default) in exception_mappings.items():
@@ -353,51 +264,12 @@ class CoordinatorConfig(ThreadSafeSingleton):
             else:
                 raise ValueError(f"Invalid type for Exception config field '{field}': expected {field_type}")
 
-    def _load_request_limit(self) -> None:
-        """Load request limiting configuration section."""
-        config = self.config.get("request_limit", {})
-        
-        request_limit_mappings = {
-            "single_node_max_requests": ("single_node_max_reqs", int, 1000),
-            self.MAX_REQUESTS_KEY: ("max_reqs", int, 10000),
-            "body_limit": ("body_limit", int, 10485760)
-        }
-        
-        for config_field, (attr_field, field_type, default) in request_limit_mappings.items():
-            value = config.get(config_field, default)
-            if isinstance(value, field_type):
-                setattr(self.req_limit, attr_field, value)
-            else:
-                raise ValueError(f"Invalid type for Request Limit config field '{config_field}': expected {field_type}")
-        
-        # Handle environment variable overrides
-        self._handle_request_limit_env()
-
-    def _handle_request_limit_env(self) -> None:
-        """Handle environment variable overrides for request limits."""
-        env_mappings = {
-            "MINDIE_MS_COORDINATOR_CONFIG_SINGLE_NODE_MAX_REQ": "single_node_max_reqs",
-            "MINDIE_MS_COORDINATOR_CONFIG_MAX_REQ": "max_reqs"
-        }
-        
-        for env_var, attr_name in env_mappings.items():
-            env_value = os.getenv(env_var)
-            if env_value:
-                try:
-                    setattr(self.req_limit, attr_name, int(env_value))
-                except ValueError as e:
-                    logging.warning(f"Invalid environment variable {env_var}: {e}")
-
     def _load_tls_config(self) -> None:
         """Load TLS configuration section."""
         config = self.config.get("tls_config", {})
         
         tls_components = [
-            ("controller_server_tls_enable", "controller_server_tls_items", self.controller_server_tls),
             ("request_server_tls_enable", "request_server_tls_items", self.request_server_tls),
-            ("mindie_client_tls_enable", "mindie_client_tls_items", self.mindie_client_tls),
-            ("mindie_management_tls_enable", "mindie_management_tls_items", self.mindie_mgmt_tls),
-            ("alarm_client_tls_enable", "alarm_client_tls_items", self.alarm_client_tls)
         ]
         
         for enable_field, items_field, tls_obj in tls_components:
@@ -421,52 +293,23 @@ class CoordinatorConfig(ThreadSafeSingleton):
 
     def _load_scheduler_config(self) -> None:
         """Load scheduler configuration section."""
-        config = self.config.get("digs_scheduler_config", {})
-        if not self._is_scheduler_config_valid(config):
-            raise ValueError("Invalid scheduler configuration")
-        self.scheduler_config = dict(config.items())
+        config = self.config.get("scheduler_config", {})
 
-    def _is_scheduler_config_valid(self, config: Dict[str, Any]) -> bool:
-        """Validate scheduler configuration structure and values."""
-        required_fields = [
-            ("deploy_mode", str),
-            ("scheduler_type", str),
-            ("algorithm_type", str)
-        ]
-        
-        # Check required fields existence and type
-        for field, field_type in required_fields:
-            if field not in config or not isinstance(config[field], field_type):
-                logging.error(f"Missing or invalid scheduler configuration field: {field}")
-                return False
-        
-        # Validate enum values
-        deploy_mode = DeployMode.from_string(config["deploy_mode"])
-        if not deploy_mode:
-            return False
-            
-        if config["scheduler_type"] not in ["default_scheduler", "digs_scheduler"]:
-            logging.error(f"Invalid scheduler_type: {config['scheduler_type']}")
-            return False
-            
-        algorithm_values = [mode.value for mode in AlgorithmMode]
-        if config["algorithm_type"] not in algorithm_values:
-            logging.error(f"Invalid algorithm_type: {config['algorithm_type']}")
-            return False
-            
-        return True
+        deploy_mode_str = config.get("deploy_mode", "")
+        if not isinstance(deploy_mode_str, str):
+            raise ValueError("deploy_mode must be a string")
+        deploy_mode = DeployMode.from_string(deploy_mode_str)
+        if deploy_mode is None:
+            raise ValueError(f"Invalid deploy_mode: {deploy_mode_str}")
+        self.scheduler_config.deploy_mode = deploy_mode
 
-    def _load_str_token_rate(self) -> None:
-        """Load string token rate configuration."""
-        str_token_rate = self.config.get("string_token_rate", 4.2)
-        
-        if not isinstance(str_token_rate, (int, float)):
-            raise ValueError("string_token_rate must be a number")
-            
-        if not 1.0 <= float(str_token_rate) <= 100.0:
-            raise ValueError("string_token_rate must be in the range [1.0, 100.0]")
-            
-        self.str_token_rate = float(str_token_rate)
+        scheduler_type_str = config.get("scheduler_type", "")
+        if not isinstance(scheduler_type_str, str):
+            raise ValueError("scheduler_type must be a string")
+        scheduler_type = SchedulerType.from_string(scheduler_type_str)
+        if scheduler_type is None:
+            raise ValueError(f"Invalid scheduler_type: {scheduler_type_str}")
+        self.scheduler_config.scheduler_type = scheduler_type
 
     def _load_health_check_config(self) -> None:
         """Load health check configuration section."""
@@ -476,7 +319,8 @@ class CoordinatorConfig(ThreadSafeSingleton):
             "dummy_request_interval": (float, 5.0),
             "max_consecutive_failures": (int, 3),
             "dummy_request_timeout": (float, 10.0),
-            "controller_base_url": (str, "http://localhost:10000")
+            "controller_api_dns": (str, "mindie-ms-controller-service.mindie.svc.cluster.local"),
+            "controller_api_port": (int, 57675)
         }
         
         for field, (field_type, default) in health_check_mappings.items():
@@ -486,49 +330,49 @@ class CoordinatorConfig(ThreadSafeSingleton):
             else:
                 logging.warning(f"Invalid type for Health Check config field '{field}', using default")
 
-    def _load_combined_config(self) -> None:
-        """Load combined mode configuration section."""
-        combined_mode = self.config.get("combined_mode", False)
+    def _load_server_config(self) -> None:
+        """Load server configuration section."""
+        config = self.config.get("server_config", {})
+
+        combined_mode = config.get("combined_mode", False)
         if isinstance(combined_mode, bool):
-            self.combined_mode = combined_mode
+            self.server_config.combined_mode = combined_mode
         else:
             raise ValueError("combined_mode must be a boolean")
 
-        combined_host = self.config.get("combined_host", "0.0.0.0")
+        combined_host = config.get("combined_host", CoordinatorConfig.DEFAULT_HOST)
         if isinstance(combined_host, str):
-            self.combined_host = combined_host
+            self.server_config.combined_host = combined_host
         else:
             raise ValueError("combined_host must be a string")
 
-        combined_port = self.config.get("combined_port", 9999)
+        combined_port = config.get("combined_port", CoordinatorConfig.DEFAULT_INFERENCE_PORT)
         if isinstance(combined_port, int) and 1 <= combined_port <= 65535:
-            self.combined_port = combined_port
+            self.server_config.combined_port = combined_port
         else:
             raise ValueError("combined_port must be an integer between 1 and 65535")
 
-    def _load_server_config(self) -> None:
-        """Load server configuration section."""
-        mgmt_host = self.config.get("mgmt_host", "0.0.0.0")
+        mgmt_host = config.get("mgmt_host", CoordinatorConfig.DEFAULT_HOST)
         if isinstance(mgmt_host, str):
-            self.mgmt_host = mgmt_host
+            self.server_config.mgmt_host = mgmt_host
         else:
             raise ValueError("mgmt_host must be a string")
 
-        mgmt_port = self.config.get("mgmt_port", 9998)
+        mgmt_port = self.config.get("mgmt_port", CoordinatorConfig.DEFAULT_MGMT_PORT)
         if isinstance(mgmt_port, int) and 1 <= mgmt_port <= 65535:
-            self.mgmt_port = mgmt_port
+            self.server_config.mgmt_port = mgmt_port
         else:
             raise ValueError("mgmt_port must be an integer between 1 and 65535")
 
         inference_host = self.config.get("inference_host", "0.0.0.0")
         if isinstance(inference_host, str):
-            self.inference_host = inference_host
+            self.server_config.inference_host = inference_host
         else:
             raise ValueError("inference_host must be a string")
 
-        inference_port = self.config.get("inference_port", 9999)
+        inference_port = self.config.get("inference_port", CoordinatorConfig.DEFAULT_INFERENCE_PORT)
         if isinstance(inference_port, int) and 1 <= inference_port <= 65535:
-            self.inference_port = inference_port
+            self.server_config.inference_port = inference_port
         else:
             raise ValueError("inference_port must be an integer between 1 and 65535")
 

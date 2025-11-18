@@ -9,7 +9,7 @@ from fastapi import FastAPI, status, Request
 from fastapi.testclient import TestClient
 import pytest
 
-from motor.config.coordinator import DeployMode
+from motor.config.coordinator import DeployMode, CoordinatorConfig
 from motor.coordinator.core.instance_manager import InstanceManager
 from motor.coordinator.models.request import ScheduledResource
 from motor.coordinator.router.pd_hybrid_router import PDHybridRouter
@@ -92,14 +92,12 @@ class TestRouterPDHybrid:
                         workload_action, request_length: int) -> bool:
             return True
         
-        def mock_from_string(value):
-            return DeployMode.SINGLE_NODE
-        
         monkeypatch.setattr(InstanceManager, "is_available", mock_is_available)
         monkeypatch.setattr(InstanceManager, "get_available_instances", mock_get_available_instances)
         monkeypatch.setattr(Scheduler, "select_instance_and_endpoint", mock_select_instance_and_endpoint)
         monkeypatch.setattr(Scheduler, "update_workload", mock_update_workload)
-        monkeypatch.setattr(DeployMode, "from_string", mock_from_string)
+        monkeypatch.setattr(CoordinatorConfig().scheduler_config, "deploy_mode", DeployMode.SINGLE_NODE)
+        
     
     @pytest.mark.asyncio
     async def test_pd_hybrid_request_forwarding(self, monkeypatch: MonkeyPatch, setup_pd_hybrid, mock_forward_stream_request):

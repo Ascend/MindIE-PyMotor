@@ -14,7 +14,7 @@ class TestDummyRequestUtil:
         endpoint = Mock(spec=Endpoint)
         endpoint.id = 1
         endpoint.ip = "127.0.0.1"
-        endpoint.port = "8080"
+        endpoint.business_port = "8080"
         return endpoint
 
     @pytest.fixture
@@ -67,7 +67,7 @@ class TestDummyRequestUtil:
             # Verify correct URL was constructed
             dummy_request_util._http_session.post.assert_called_once()
             call_args = dummy_request_util._http_session.post.call_args
-            assert f"http://{mock_endpoint.ip}:{mock_endpoint.port}{dummy_request_util.config.dummy_request_endpoint}" in call_args[0]
+            assert f"http://{mock_endpoint.ip}:{mock_endpoint.business_port}{dummy_request_util.config.dummy_request_endpoint}" in call_args[0]
 
     def test_send_dummy_request_missing_ip_port(self, dummy_request_util):
         """Test dummy request with missing IP or port"""

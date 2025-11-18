@@ -112,14 +112,11 @@ class TestRouterPDSeparation:
                         workload_action, request_length: int) -> bool:
             return True
         
-        def mock_from_string(value):
-            return DeployMode.CPCD_SEPARATE
-        
         monkeypatch.setattr(InstanceManager, "is_available", mock_is_available)
         monkeypatch.setattr(InstanceManager, "get_available_instances", mock_get_available_instances)
         monkeypatch.setattr(Scheduler, "select_instance_and_endpoint", mock_select_instance_and_endpoint)
         monkeypatch.setattr(Scheduler, "update_workload", mock_update_workload)
-        monkeypatch.setattr(DeployMode, "from_string", mock_from_string)
+        monkeypatch.setattr(CoordinatorConfig().scheduler_config, "deploy_mode", DeployMode.CPCD_SEPARATE)
         monkeypatch.setattr(CoordinatorConfig().exception_config, "retry_delay", 0.0001)
     
     @pytest.mark.asyncio

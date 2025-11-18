@@ -8,7 +8,8 @@ from motor.common.utils.logger import get_logger
 from motor.common.resources.instance import Instance, PDRole, Workload, Endpoint
 from motor.common.resources.http_msg_spec import EventType
 from motor.common.utils.singleton import ThreadSafeSingleton
-from motor.config.coordinator import CoordinatorConfig
+from motor.config.coordinator import CoordinatorConfig, DeployMode
+
 
 logger = get_logger(__name__)
     
@@ -46,20 +47,20 @@ class InstanceManager(ThreadSafeSingleton):
         logger.info("InstanceManager started.")
 
     def is_available(self) -> bool:
-        digs_scheduler_config = CoordinatorConfig().config.get("digs_scheduler_config", [])
-        if not digs_scheduler_config:
-            logger.error(f"Digs scheduler config not found in coordinator config, while checking availability")
+        scheduler_config = CoordinatorConfig().scheduler_config
+        if not scheduler_config:
+            logger.error(f"Scheduler config not found in coordinator config, while checking availability")
             return False
-        deploy_mode = digs_scheduler_config.get("deploy_mode", "")
+        deploy_mode = scheduler_config.deploy_mode
         
         # no need to lock here, asynchrony is acceptable
         if deploy_mode in (
-            "pd_disaggregation",
-            "pd_separate",
-            "pd_disaggregation_single_container"
+            DeployMode.CDP_SEPARATE,
+            DeployMode.CPCD_SEPARATE,
+            DeployMode.PD_SEPARATE,
         ):
             return len(self._prefill_pool) > 0 and len(self._decode_pool) > 0
-        elif deploy_mode == "single_node":
+        elif deploy_mode == DeployMode.SINGLE_NODE:
             return len(self._hybrid_pool) > 0
         else:
             logger.error(f"Unknown deploy mode: {deploy_mode}, while checking availability")

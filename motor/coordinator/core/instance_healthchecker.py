@@ -313,7 +313,7 @@ class InstanceHealthChecker(ThreadSafeSingleton):
     def _call_controller_alarm(self, alarm_type: str, message: str, severity: str) -> bool:
         """Call controller report alarm interface"""
         try:
-            url = f"{self.config.controller_base_url}{self.config.alarm_endpoint}"
+            url = f"{self.config.controller_api_dns}:{self.config.controller_api_port}{self.config.alarm_endpoint}"
             response = requests.post(
                 url,
                 json={
@@ -331,7 +331,8 @@ class InstanceHealthChecker(ThreadSafeSingleton):
     def _call_controller_terminate(self, instance_id: int, reason: str) -> bool:
         """Call controller terminate instance interface"""
         try:
-            url = f"{self.config.controller_base_url}{self.config.terminate_instance_endpoint}"
+            url = f"{self.config.controller_api_dns}:{self.config.controller_api_port}\
+                {self.config.terminate_instance_endpoint}"
             response = requests.post(
                 url,
                 json={
