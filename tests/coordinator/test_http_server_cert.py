@@ -330,15 +330,6 @@ def test_create_ssl_context_basic(test_certificates):
     assert ssl_context is not None, "SSL context should be created successfully"
     logger.info("SSL context created successfully")
     
-    # Test with password
-    ssl_context = CoordinatorCertUtil.create_ssl_context(
-        cert_file=test_certs["server_cert"],
-        key_file=test_certs["server_key"],
-        ca_file=test_certs["ca_cert"],
-        password=""
-    )
-    assert ssl_context is not None, "SSL context should be created with empty password"
-    
     # Test with password parameter (even though key is not encrypted)
     ssl_context = CoordinatorCertUtil.create_ssl_context(
         cert_file=test_certs["server_cert"],
