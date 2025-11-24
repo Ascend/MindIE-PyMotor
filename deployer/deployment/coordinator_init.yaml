@@ -92,9 +92,9 @@ metadata:
   namespace: mindie
 spec:
   ports:
-  - port: 1025
-    protocol: TCP
-    targetPort: 1025
+    - port: 1026
+      protocol: TCP
+      targetPort: 1026
   selector:
     app: mindie-ms-coordinator
   sessionAffinity: None
@@ -111,10 +111,13 @@ metadata:
   namespace: mindie
 spec:
   ports:
-    - nodePort: 31016
-      port: 1026
+    - nodePort: 31015
+      port: 1025
       protocol: TCP
-      targetPort: 1026
+      targetPort: 1025
   selector:
     app: mindie-ms-coordinator
   sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}

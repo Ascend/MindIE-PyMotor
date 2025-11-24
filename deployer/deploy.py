@@ -23,6 +23,8 @@ D_POD_NPU_NUM = "d_pod_npu_num"
 ASCEND_910_NPU_NUM = "huawei.com/Ascend910"
 METADATA = "metadata"
 CONTROLLER = "controller"
+COORDINATOR = "coordinator"
+NAMESPACE = "namespace"
 NAME = "name"
 ENV = "env"
 SPEC = "spec"
@@ -37,6 +39,7 @@ ANNOTATIONS = "annotations"
 SP_BLOCK = "sp-block"
 NAME_FLAG = " -n "
 g_controller_service = "mindie-ms-controller-service"
+g_coordinator_service = "mindie-ms-coordinator-service"
 BOOT_SHELL_PATH = "./boot_helper/boot.sh"
 
 
@@ -141,24 +144,16 @@ def generate_unique_id():
     return f"{timestamp}{random_part}"
 
 
-def modify_controller_or_coordinator_yaml(data, json_config):
+def modify_controller_or_coordinator_yaml(data, deploy_config):
     """Modify controller or coordinator YAML configuration"""
-    deploy_config = json_config["motor_deploy_config"]
-    
-    # Handle both single document and multi-document YAML
+    # Modify deployment data
     deployment_data = data[0] if isinstance(data, list) else data
-    service_data = data[1] if isinstance(data, list) and len(data) > 1 else None
-    
-    # Update metadata
-    deployment_data[METADATA]["namespace"] = deploy_config[CONFIG_JOB_ID]
-    
-    # Update container configuration
+    deployment_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
+
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
-    
     container["image"] = deploy_config["image_name"]
     
-    # Add ROLE environment variable based on deployment name
-    role = CONTROLLER if CONTROLLER in deployment_data[METADATA][NAME] else "coordinator"
+    role = CONTROLLER if CONTROLLER in deployment_data[METADATA][NAME] else COORDINATOR
     if ENV not in container:
         container[ENV] = []
     
@@ -167,19 +162,21 @@ def modify_controller_or_coordinator_yaml(data, json_config):
         VALUE: role
     })
     
-    # Update service if exists
-    if service_data:
-        service_data[METADATA]["namespace"] = deploy_config[CONFIG_JOB_ID]
+    # Modify service data
+    service_data = data[1]
+    service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
+    if role == COORDINATOR:
+        external_service_data = data[2]
+        external_service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
 
     if role == CONTROLLER:
-        global g_controller_service
-        g_controller_service = (service_data[METADATA][NAME] +
-                                        "." + deploy_config[CONFIG_JOB_ID] + ".svc.cluster.local")
+        container[ENV].extend([
+            {NAME: "COORDINATOR_SERVICE", VALUE: g_coordinator_service}
+        ])
     else:
-        container[ENV].append({
-            NAME: "CONTROLLER_SERVICE",
-            VALUE: g_controller_service
-        })
+        container[ENV].extend([
+            {NAME: "CONTROLLER_SERVICE", VALUE: g_controller_service}
+        ])
 
 
 def modify_sp_block_num(data, pd_flag, config):
@@ -199,15 +196,13 @@ def modify_sp_block_num(data, pd_flag, config):
         data[METADATA][ANNOTATIONS][SP_BLOCK] = f"{sp_block_num}"
 
 
-def modify_server_yaml(deployment_data, json_config, index, node_type):
-    deploy_config = json_config["motor_deploy_config"]
-
+def modify_server_yaml(deployment_data, deploy_config, index, node_type):
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
 
     deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]["image"] = deploy_config["image_name"]
     
     # Update metadata
-    deployment_data[METADATA]["namespace"] = deploy_config[CONFIG_JOB_ID]
+    deployment_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
     
     # Modify deployment name to make it unique for each instance
     base_name = "mindie-server"
@@ -229,7 +224,8 @@ def modify_server_yaml(deployment_data, json_config, index, node_type):
     container[ENV].extend([
         {NAME: "ROLE", VALUE: role},
         {NAME: "JOB_NAME", VALUE: job_name},
-        {NAME: "CONTROLLER_SERVICE", VALUE: g_controller_service}
+        {NAME: "CONTROLLER_SERVICE", VALUE: g_controller_service},
+        {NAME: "COORDINATOR_SERVICE", VALUE: g_coordinator_service}
     ])
     
     # Modify replicas
@@ -263,7 +259,7 @@ def obtain_server_instance_total(deploy_config):
 
 def generator_yaml(input_yaml, output_file, json_config, single_doc=True):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
-    if CONTROLLER in input_yaml or "coordinator" in input_yaml:
+    if CONTROLLER in input_yaml or COORDINATOR in input_yaml:
         data = load_yaml(input_yaml, single_doc)
         modify_controller_or_coordinator_yaml(data, json_config)
         write_yaml(data, output_file, single_doc)
@@ -279,6 +275,43 @@ def generator_yaml(input_yaml, output_file, json_config, single_doc=True):
             modify_server_yaml(data, json_config, d_index, "d")
             output_file_d = output_file + "_d" + str(d_index) + ".yaml"
             write_yaml(data, output_file_d, single_doc)
+
+
+def generate_yaml_controller_or_coordinator(input_yaml, output_file, deploy_config):
+    logger.info(f"Generating YAML from {input_yaml} to {output_file}")
+    data = load_yaml(input_yaml, False)
+    modify_controller_or_coordinator_yaml(data, deploy_config)
+    write_yaml(data, output_file, False)
+
+
+def generate_yaml_server(input_yaml, output_file, deploy_config):
+    logger.info(f"Generating YAML from {input_yaml} to {output_file}")
+    p_total, d_total = obtain_server_instance_total(deploy_config)
+    for p_index in range(p_total):
+        data = load_yaml(input_yaml, True)
+        modify_server_yaml(data, deploy_config, p_index, "p")
+        output_file_p = output_file + "_p" + str(p_index) + ".yaml"
+        write_yaml(data, output_file_p, True)
+    for d_index in range(d_total):
+        data = load_yaml(input_yaml, True)
+        modify_server_yaml(data, deploy_config, d_index, "d")
+        output_file_d = output_file + "_d" + str(d_index) + ".yaml"
+        write_yaml(data, output_file_d, True)
+
+
+def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, deploy_config):
+
+    controller_data = load_yaml(controller_input_yaml, False)
+    coordinator_data = load_yaml(coordinator_input_yaml, False)
+    controller_service_data = controller_data[1]
+    coordinator_service_data = coordinator_data[1]
+
+    global g_controller_service
+    g_controller_service = (controller_service_data[METADATA][NAME] +
+                                    "." + deploy_config[CONFIG_JOB_ID] + ".svc.cluster.local")
+    global g_coordinator_service
+    g_coordinator_service = (coordinator_service_data[METADATA][NAME] +
+                                    "." + deploy_config[CONFIG_JOB_ID] + ".svc.cluster.local")
 
 
 def exec_all_kubectl_multi(deploy_config, out_path):
@@ -358,15 +391,16 @@ def main():
     server_input_yaml = os.path.join(deploy_yaml_root_path, 'server_init.yaml')
     server_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_server')
 
-    json_config = read_json(user_config_path)
-    deploy_config = json_config["motor_deploy_config"]
+    user_config = read_json(user_config_path)
+    deploy_config = user_config["motor_deploy_config"]
     
     set_env_to_shell(input_conf_root_path)
 
-    # Generate YAML files - pass json_config instead of user_config_path
-    generator_yaml(controller_input_yaml, controller_output_yaml, json_config, False)
-    generator_yaml(coordinator_input_yaml, coordinator_output_yaml, json_config, False)
-    generator_yaml(server_input_yaml, server_output_yaml, json_config, True)
+    # Generate YAML files - pass user_config instead of user_config_path
+    init_service_domain_name(controller_input_yaml, coordinator_input_yaml, deploy_config)
+    generate_yaml_controller_or_coordinator(controller_input_yaml, controller_output_yaml, deploy_config)
+    generate_yaml_controller_or_coordinator(coordinator_input_yaml, coordinator_output_yaml, deploy_config)
+    generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config)
     exec_all_kubectl_multi(deploy_config, output_root_path)
 
     logger.info("all deploy end.")

@@ -43,6 +43,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: CONFIGMAP_PATH
               value: /mnt/configmap
             - name: CONFIG_PATH
@@ -81,6 +85,12 @@ spec:
             mountPath: /dev/shm
           - name: coredump
             mountPath: /var/coredump
+          - name: mnt
+            mountPath: /mnt
+          - name: hccn-tool
+            mountPath: /usr/bin/hccn_tool
+          - name: hccn-conf
+            mountPath: /etc/hccn.conf
       volumes:
       - name: data
         hostPath:
@@ -112,3 +122,12 @@ spec:
         hostPath:
           path: /var/coredump
           type: DirectoryOrCreate
+      - name: mnt
+        hostPath:
+          path: /mnt
+      - name: hccn-tool
+        hostPath:
+          path: /usr/bin/hccn_tool
+      - name: hccn-conf
+        hostPath:
+          path: /etc/hccn.conf

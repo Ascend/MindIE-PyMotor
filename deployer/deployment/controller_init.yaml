@@ -61,6 +61,8 @@ spec:
               subPath: user_config.json
             - name: coredump
               mountPath: /var/coredump
+            - name: mnt
+              mountPath: /mnt
       volumes:
         - name: boot-bash-script
           configMap:
@@ -78,6 +80,9 @@ spec:
           hostPath:
             path: /var/coredump
             type: DirectoryOrCreate
+        - name: mnt
+          hostPath:
+            path: /mnt
 ---
 apiVersion: v1
 kind: Service
@@ -88,13 +93,12 @@ metadata:
   namespace: mindie
 spec:
   ports:
-  - nodePort: 31025
-    port: 1025
+  - port: 57675
     protocol: TCP
-    targetPort: 1025
+    targetPort: 57675
   selector:
     app: mindie-ms-controller
   sessionAffinity: None
-  type: NodePort
+  type: ClusterIP
 status:
   loadBalancer: {}
