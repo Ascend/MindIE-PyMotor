@@ -22,8 +22,23 @@ PARALLEL_CONFIG = 'parallel_config'
 PREFILL_PARALLEL_CONFIG = 'prefill_parallel_config'
 DECODE_PARALLEL_CONFIG = 'decode_parallel_config'
 MODEL_CONFIG = 'model_config'
+ENGINE_CONFIG = 'engine_config'
 PREFILL = 'prefill'
 DECODE = 'decode'
+AIGW = 'aigw'
+ID = 'id'
+MOTOR_ENGINE_PREFILL_CONFIG = 'motor_engine_prefill_config'
+MOTOR_ENGINE_DECODE_CONFIG = 'motor_engine_decode_config'
+MODEL_NAME = 'model_name'
+OBJECT = 'object'
+MODEL = 'model'
+OWNERED_BY = 'owned_by'
+MOTOR = 'motor'
+MAX_MODEL_LEN = 'max_model_len'
+P_MAX_SEQLEN = 'p_max_seqlen'
+D_MAX_SEQLEN = 'd_max_seqlen'
+SLO_TTFT = 'slo_ttft'
+SLO_TPOT = 'slo_tpot'
 
 class ConfigKey(Enum):
     MOTOR_CONTROLLER = "motor_controller_config"
@@ -67,6 +82,23 @@ def update_dict(original, modified):
             else:
                 original[key] = modified[key]
     return original
+
+
+def update_aigw_config(updated_config, user_config_data):
+    updated_aigw_config = updated_config[AIGW]
+    updated_aigw_config[ID] = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG][MODEL_CONFIG][MODEL_NAME]
+    updated_aigw_config[OBJECT] = MODEL
+    updated_aigw_config[OWNERED_BY] = MOTOR
+    updated_aigw_config[P_MAX_SEQLEN] = \
+        user_config_data[MOTOR_ENGINE_PREFILL_CONFIG][ENGINE_CONFIG][MAX_MODEL_LEN]
+    updated_aigw_config[D_MAX_SEQLEN] = \
+        user_config_data[MOTOR_ENGINE_DECODE_CONFIG][ENGINE_CONFIG][MAX_MODEL_LEN]
+    if SLO_TTFT not in updated_aigw_config:
+        updated_aigw_config[SLO_TTFT] = 1000
+        logging.info(f"Set {SLO_TTFT}=1000, while user_config.json does not contain it.")
+    if SLO_TPOT not in updated_aigw_config:
+        updated_aigw_config[SLO_TPOT] = 50
+        logging.info(f"Set {SLO_TPOT}=50, while user_config.json does not contain it.")
 
 
 def update_config_from_user_config(config_file, user_config_file, config_key):
@@ -115,6 +147,8 @@ def update_config_from_user_config(config_file, user_config_file, config_key):
             elif config_key == ConfigKey.MOTOR_COORDINATOR.value:
                 updated_config[HTTP_CONFIG][COORDINATOR_API_HOST] = os.getenv('POD_IP')
                 updated_config[HEALTH_CHECK_CONFIG][CONTROLLER_API_DNS] = os.getenv('CONTROLLER_SERVICE')
+                if AIGW in updated_config:
+                    update_aigw_config(updated_config, user_config_data)
             elif config_key == ConfigKey.MOTOR_NODEMANAGER.value:
                 updated_config[CONTROLLER_API_DNS] = os.getenv('CONTROLLER_SERVICE')
                 role = os.getenv('ROLE')
