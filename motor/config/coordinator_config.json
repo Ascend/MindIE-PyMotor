@@ -90,5 +90,14 @@
         ],
         "error_message": "too many requests, please try again later",
         "error_status_code": 429
+    },
+    "aigw": {
+        "id": "model-id-0",
+        "object": "model",
+        "owned_by": "MindIE Server",
+        "p_max_seqlen": 2048,
+        "d_max_seqlen": 2048,
+        "slo_ttft": 1000,
+        "slo_tpot": 50
     }
 }

@@ -182,9 +182,14 @@ class CoordinatorConfig(ThreadSafeSingleton):
         self.api_key_config = APIKeyConfig()
         self.rate_limit_config = RateLimitConfig()        
         self.http_config = HttpConfig()
+        self.aigw_model: dict[str, Any] | None = None
         
         # Auto-initialize on creation
         self._initialize()
+
+    def get_aigw_models(self) -> Optional[dict[str, Any]]:
+        """Return configured AIGW model."""
+        return self.aigw_model
 
     def _initialize(self) -> None:
         try:
@@ -222,7 +227,8 @@ class CoordinatorConfig(ThreadSafeSingleton):
             self._load_http_config,
             self._load_timeout_config,
             self._load_api_key_config,
-            self._load_rate_limit_config
+            self._load_rate_limit_config,
+            self._load_aigw_models_config
         ]
         
         for loader in config_loaders:
@@ -536,3 +542,15 @@ class CoordinatorConfig(ThreadSafeSingleton):
             skip_paths_str = os.getenv("RATE_LIMIT_SKIP_PATHS", "")
             if skip_paths_str:
                 self.rate_limit_config.skip_paths = [path.strip() for path in skip_paths_str.split(",") if path.strip()]
+
+    def _load_aigw_models_config(self) -> None:
+        """Load AIGW model metadata configuration."""
+        config = self.config.get("aigw")
+        if config is None:
+            self.aigw_model = None
+            return
+
+        if not isinstance(config, dict):
+            raise ValueError("AIGW configuration must be a dictionary")
+
+        self.aigw_model = dict(config)

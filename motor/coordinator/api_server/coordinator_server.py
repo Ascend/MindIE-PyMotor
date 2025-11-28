@@ -19,6 +19,7 @@ from motor.common.resources.http_msg_spec import InsEventMsg
 from motor.common.utils.logger import get_logger, ApiAccessFilter
 from motor.common.utils.cert_util import CoordinatorCertUtil
 from motor.coordinator.core.instance_manager import InstanceManager
+from motor.common.resources.instance import PDRole
 from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.coordinator.middleware.fastapi_middleware import (
     SimpleRateLimitMiddleware, 
@@ -98,6 +99,7 @@ class CoordinatorServer:
         coordinator_config: Optional[CoordinatorConfig] = None
     ):
         self._initialize_config(coordinator_config)
+        self._service_start_timestamp = int(datetime.now(timezone.utc).timestamp())
         self._log_configuration()
         self.instance_manager = InstanceManager()
         self._create_apps()
@@ -612,6 +614,24 @@ class CoordinatorServer:
             self.ssl_config.password = tls_items.get("tls_passwd", "")
         else:
             self.ssl_config.enabled = False
+
+    def _build_models_metadata(self) -> list[dict[str, Any]]:
+        """Construct model metadata from coordinator config and instance state."""
+        base_model = self.coordinator_config.get_aigw_models()
+        if not base_model:
+            logger.warning("No AIGW models configured in coordinator config")
+            return []
+
+        p_instances = len(self.instance_manager.get_available_instances(PDRole.ROLE_P))
+        d_instances = len(self.instance_manager.get_available_instances(PDRole.ROLE_D))
+
+        enriched_model = {
+            **base_model,
+            "p_instances_num": p_instances,
+            "d_instances_num": d_instances,
+            "created": self._service_start_timestamp,
+        }
+        return [enriched_model]
     
     def _timeout_handler(self, timeout_seconds: Optional[float] = None):
         def decorator(func):
@@ -693,6 +713,14 @@ class CoordinatorServer:
         async def metaserver(request: Request):
             """MetaServer API"""
             return await self._handle_metaserver_request(request)
+
+        @self.management_app.get("/v1/models")
+        async def list_models():
+            models = self._build_models_metadata()
+            return {
+                "object": "list",
+                "data": models
+            }
         
         @self.management_app.get("/")
         async def root():
