@@ -21,6 +21,7 @@ from vllm.usage.usage_lib import UsageContext
 from motor.common.utils.logger import get_logger
 from motor.engine_server.core.worker import WorkerManager
 from motor.engine_server.utils.proc import get_child_processes
+from motor.engine_server.constants import constants
 
 
 logger = get_logger("engine_server")
@@ -33,7 +34,7 @@ class ProcManager:
         self.worker_manager: Optional[WorkerManager] = None
         self.core_manager: Optional[CoreEngineProcManager] = None
         self.coordinator: Optional[DPCoordinator] = None
-        self.status: str = "init"
+        self.status: str = constants.INIT_STATUS
 
     def initialize(self):
         cli_env_setup()
@@ -41,7 +42,7 @@ class ProcManager:
 
     def run(self):
         self._run_multi_server()
-        self.status = "normal"
+        self.status = constants.NORMAL_STATUS
 
     def join(self):
         sentinel_to_proc: dict[Any, BaseProcess] = {}
@@ -80,7 +81,7 @@ class ProcManager:
             logger.warning("Exception occurred while engine server: %s", str(e))
             raise
         finally:
-            self.status = "abnormal"
+            self.status = constants.ABNORMAL_STATUS
             logger.info("Terminating remaining processes ...")
             self.shutdown()
 

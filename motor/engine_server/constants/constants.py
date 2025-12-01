@@ -60,7 +60,7 @@ TP_SIZE = "tp_size"
 ENGINE_ID = "engine_id"
 
 # server status
-INIT_STATUS = "init"
+INIT_STATUS = "initial"
 ABNORMAL_STATUS = "abnormal"
 NORMAL_STATUS = "normal"
 FAILED_STATUS = "failed"

@@ -9,6 +9,8 @@ from unittest.mock import patch, MagicMock, Mock
 from multiprocessing.process import BaseProcess
 from typing import Optional, Any
 
+from motor.engine_server.constants import constants
+
 
 @pytest.fixture(autouse=True, scope="module")
 def mock_modules():
@@ -196,7 +198,7 @@ class TestProcManager:
         assert proc_manager.worker_manager is None
         assert proc_manager.core_manager is None
         assert proc_manager.coordinator is None
-        assert proc_manager.status == "init"
+        assert proc_manager.status == constants.INIT_STATUS
     
     def test_initialize(self, proc_manager, mock_modules):
         """Test ProcManager.initialize method"""

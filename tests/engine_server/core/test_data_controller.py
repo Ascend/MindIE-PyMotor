@@ -7,6 +7,8 @@ import pytest
 import threading
 from unittest.mock import Mock, patch, MagicMock
 
+from motor.engine_server.constants import constants
+
 
 @pytest.fixture(autouse=True)
 def mock_logger_module():
@@ -58,7 +60,7 @@ def data_controller():
 def test_initialization(data_controller):
     """test DataController should initialize with correct default properties when created"""
     assert data_controller.collect_interval == 3
-    assert data_controller._core_status == "init"
+    assert data_controller._core_status == constants.INIT_STATUS
     assert data_controller._server_core is None
     assert isinstance(data_controller._stop_event, threading.Event)
     assert isinstance(data_controller._collect_thread, threading.Thread)
@@ -103,7 +105,7 @@ def test_set_server_core(data_controller):
     data_controller.set_server_core(mock_server_core)
     assert data_controller._server_core == mock_server_core
 
-    data_controller._core_status = data_controller._server_core.status() if data_controller._server_core else "init"
+    data_controller._core_status = data_controller._server_core.status() if data_controller._server_core else constants.INIT_STATUS
     assert data_controller._core_status == "normal"
 
 
@@ -133,7 +135,7 @@ def test_get_metrics_data_returns_correct_format(data_controller):
     expected_metrics = {
         "cpu_usage": 0.3,
         "memory_usage": 0.6,
-        "core_status": "init"
+        "core_status": constants.INIT_STATUS,
     }
     assert metrics_data["latest_metrics"] == expected_metrics
     assert metrics_data["collector_name"] == "vllm_collector_test"
@@ -147,7 +149,7 @@ def test_get_health_data_returns_correct_format(data_controller):
     expected_health = {
         "status": "healthy",
         "connections": 10,
-        "core_status": "init"
+        "core_status": constants.INIT_STATUS
     }
     assert health_data["latest_health"] == expected_health
     assert health_data["collector_name"] == "vllm_collector_test"

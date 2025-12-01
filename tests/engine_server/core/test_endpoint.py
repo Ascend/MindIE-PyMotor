@@ -7,6 +7,8 @@ import threading
 from unittest.mock import Mock, MagicMock, patch
 import sys
 
+from motor.engine_server.constants import constants
+
 
 @pytest.fixture(autouse=True)
 def mock_modules():
@@ -116,27 +118,27 @@ def test_initialization(endpoint):
 
 
 def test_status_health_service_none(endpoint):
-    """test /status endpoint should return {"status": "init"} when health service returns empty data"""
+    """test /status endpoint should return {"status": "initial"} when health service returns empty data"""
     endpoint._mock_health.get_data.return_value = {}
     mock_response = Mock()
     status_route = _get_route_by_path(endpoint, "/status")
 
     result = status_route.endpoint(response=mock_response)
     assert mock_response.status_code == 200
-    assert result == {"status": "init"}
+    assert result == {"status": constants.INIT_STATUS}
 
 
 def test_status_server_core_init(endpoint):
-    """test /status endpoint should return {"status": "init"} when server_core_status is init"""
+    """test /status endpoint should return {"status": "initial"} when server_core_status is init"""
     endpoint._mock_health.get_data.return_value = {
-        "latest_health": {"core_status": "init", "status": "success"}
+        "latest_health": {"core_status": constants.INIT_STATUS, "status": "success"}
     }
     mock_response = Mock()
     status_route = _get_route_by_path(endpoint, "/status")
 
     result = status_route.endpoint(response=mock_response)
     assert mock_response.status_code == 200
-    assert result == {"status": "init"}
+    assert result == {"status": constants.INIT_STATUS}
 
 
 def test_status_abnormal(endpoint):
@@ -185,7 +187,7 @@ def test_metrics_service_none(endpoint):
 def test_metrics_server_core_init(endpoint):
     """test /metrics endpoint should return empty body when server_core_status is init"""
     endpoint._mock_metrics.get_data.return_value = {
-        "latest_metrics": {"core_status": "init", "status": "success"}
+        "latest_metrics": {"core_status": constants.INIT_STATUS, "status": "success"}
     }
     mock_response = Mock()
     metrics_route = _get_route_by_path(endpoint, "/metrics")

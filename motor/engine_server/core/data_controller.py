@@ -10,7 +10,7 @@ from motor.engine_server.config.base import IConfig
 from motor.common.utils.logger import get_logger
 from motor.engine_server.factory.collector_factory import CollectorFactory
 from motor.engine_server.utils.reader_writer_lock import ReadPriorityRWLock
-
+from motor.engine_server.constants import constants
 
 logger = get_logger("engine_server")
 
@@ -26,7 +26,7 @@ class DataController:
         }
         self._data_map_lock = ReadPriorityRWLock()
         self._server_core = None
-        self._core_status = "init"
+        self._core_status = constants.INIT_STATUS
         self._stop_event = threading.Event()
         self._collect_thread = threading.Thread(
             target=self._collect_loop,
@@ -63,9 +63,9 @@ class DataController:
             }
 
     def _collect_loop(self):
-        while not self._stop_event.is_set() and self._core_status == "init":
+        while not self._stop_event.is_set() and self._core_status == constants.INIT_STATUS:
             try:
-                self._core_status = self._server_core.status() if self._server_core else "init"
+                self._core_status = self._server_core.status() if self._server_core else constants.INIT_STATUS
             except Exception as e:
                 logger.error(f"Failed to get core status: {str(e)}", exc_info=True)
             time.sleep(1)
