@@ -1,7 +1,7 @@
 #!/bin/bash
 echo -e "NOW EXECUTING [kubectl delete] COMMANDS. THE RESULT IS: \n\n"
 
-NAME_SPACE=mindie
+NAME_SPACE=mindie-pymotor
 if [ -n "$1" ]; then
     NAME_SPACE="$1"
 fi

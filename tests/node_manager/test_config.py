@@ -187,7 +187,7 @@ def test_logging_config_defaults(config_data, hccl_data):
     assert config.logging_config.log_level == "INFO"
     assert config.logging_config.log_max_line_length == 8192
     assert config.logging_config.log_file is None
-    assert config.logging_config.log_format == '%(levelname)s  %(asctime)s  [%(filename)s:%(lineno)d]  %(message)s'
+    assert config.logging_config.log_format == '%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d]  %(message)s'
     assert config.logging_config.log_date_format == '%Y-%m-%d %H:%M:%S'
 
 @pytest.mark.parametrize("invalid_config,expected_error", [

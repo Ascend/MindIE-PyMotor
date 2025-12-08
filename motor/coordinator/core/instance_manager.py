@@ -150,7 +150,7 @@ class InstanceManager(ThreadSafeSingleton):
             else:
                 logger.error(f"Unknown event type: {event_type}, cannot refresh instances")
 
-    def _find_available_pool(self, instance_id: int) -> dict[int, Instance]|None:
+    def _find_available_pool(self, instance_id: int) -> dict[int, Instance] | None:
         # This is a private method that should only be called within locked contexts
         instance = self._available_pool.get(instance_id)
         if instance is None:

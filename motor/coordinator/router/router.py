@@ -77,7 +77,7 @@ async def handle_metaserver_request(raw_request: Request) -> httpx.Response:
     Raises:
         HTTPException: If request body is empty or request fail
     """
-    req_info = await __create_request_info(raw_request)
+    req_info = await __create_request_info(raw_request, True)
     
     deploy_mode = CoordinatorConfig().scheduler_config.deploy_mode
     if not deploy_mode or (deploy_mode != DeployMode.CDP_SEPARATE and deploy_mode != DeployMode.PD_SEPARATE):
@@ -98,7 +98,7 @@ async def handle_metaserver_request(raw_request: Request) -> httpx.Response:
         ) from e
 
 
-async def __create_request_info(raw_request: Request) -> RequestInfo:
+async def __create_request_info(raw_request: Request, metaserver_request: bool = False) -> RequestInfo:
     request_body = await raw_request.body()
     if not request_body:
         raise HTTPException(
@@ -120,7 +120,10 @@ async def __create_request_info(raw_request: Request) -> RequestInfo:
             detail="Empty request json"
         )
     logger.debug("Got request headers: %s, body: %s", raw_request.headers, request_json)
-    req_id = RequestManager().generate_request_id()
+    if metaserver_request:
+        req_id = ""
+    else:
+        req_id = RequestManager().generate_request_id()
     req_len = len(request_body)
     api = raw_request.url.path.lstrip('/')
     

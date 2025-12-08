@@ -84,7 +84,7 @@
   "motor_controller_config": {},
   "motor_nodemanger_config": {},
   "motor_coordinator_config": {
-        "request_limit": {
+      "request_limit": {
       "single_node_max_requests": 4096,
       "max_requests": 10000
     },

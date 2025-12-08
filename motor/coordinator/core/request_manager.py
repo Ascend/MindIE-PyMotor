@@ -5,12 +5,11 @@
 import time
 import uuid
 import threading
-import logging
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.coordinator.models.request import RequestInfo
+from motor.common.utils.logger import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RequestManager(ThreadSafeSingleton):

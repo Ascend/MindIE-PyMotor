@@ -19,7 +19,7 @@ class LoggingConfig:
     log_level: str = 'INFO'  # Logging level: DEBUG, INFO, WARNING, ERROR
     log_max_line_length: int = 8192
     log_file: str | None = None  # Optional log file path
-    log_format: str = '%(levelname)s  %(asctime)s  [%(filename)s:%(lineno)d]  %(message)s'
+    log_format: str = '%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d]  %(message)s'
     log_date_format: str = '%Y-%m-%d %H:%M:%S'
 
 
@@ -211,7 +211,13 @@ def get_logger(
     if log_file is None:
         log_file = config.log_file
 
-    logger = logging.getLogger(name)
+    log_name = name
+    if name.startswith("motor."):
+        parts = name.split('.')
+        if len(parts) >= 2:
+            log_name = parts[1]
+
+    logger = logging.getLogger(log_name)
     if not logger.handlers:
         logger.setLevel(level)
 

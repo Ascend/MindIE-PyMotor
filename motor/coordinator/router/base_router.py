@@ -143,7 +143,7 @@ class BaseRouter(ABC):
             'X-Request-Id': self.req_info.req_id
         }
         base_url = f"http://{endpoint.ip}:{endpoint.business_port}"
-        logger.debug("Forward stream request base_url: %s, api: %s, headers: %s, body: %s, timeout: %d", 
+        logger.debug("Forward post request base_url: %s, api: %s, headers: %s, body: %s, timeout: %d", 
                      base_url, self.req_info.api, headers, req_data, 
                      CoordinatorConfig().exception_config.first_token_timeout)
         timeout = CoordinatorConfig().exception_config.infer_timeout \

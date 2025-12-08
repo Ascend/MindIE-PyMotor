@@ -355,6 +355,7 @@ def set_config_path(config_path: str) -> None:
     CONFIG_PATH_OVERRIDE = config_path
     logger.info(f"Configuration path override set to: {config_path}")
 
+
 def find_config_file():
     """Intelligently find configuration file, prioritize development environment configuration file"""
     # If path override is set, use it
@@ -377,6 +378,7 @@ def find_config_file():
     
     # Finally return package path (even if file does not exist)
     return package_config
+
 
 def get_config_path():
     """Get the current configuration file path"""

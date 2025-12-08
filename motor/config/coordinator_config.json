@@ -3,7 +3,7 @@
         "log_level": "INFO",
         "log_max_line_length": 8192,
         "log_file": null,
-        "log_format": "%(levelname)s  %(asctime)s  [%(filename)s:%(lineno)d]  %(message)s",
+        "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d]  %(message)s",
         "log_date_format": "%Y-%m-%d %H:%M:%S"
     },
     "prometheus_metrics_config": {

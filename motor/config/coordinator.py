@@ -4,13 +4,14 @@
 
 import os
 import json
-import logging
 from typing import Optional, Any
 from enum import Enum
 
 from motor.common.utils.singleton import ThreadSafeSingleton
-from motor.common.utils.logger import LoggingConfig, reconfigure_logging
+from motor.common.utils.logger import LoggingConfig, reconfigure_logging, get_logger
 from motor.config.standby import StandbyConfig
+
+logger = get_logger(__name__)
 
 
 class DeployMode(Enum):
@@ -25,7 +26,7 @@ class DeployMode(Enum):
         try:
             return cls[value.upper()]
         except (KeyError, AttributeError):
-            logging.warning(f"Invalid deploy mode: {value}")
+            logger.warning(f"Invalid deploy mode: {value}")
             return None
 
 
@@ -39,7 +40,7 @@ class SchedulerType(Enum):
         try:
             return cls[value.upper()]
         except (KeyError, AttributeError):
-            logging.warning(f"Invalid deploy mode: {value}")
+            logger.warning(f"Invalid deploy mode: {value}")
             return None
 
 
@@ -194,7 +195,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
             self.check_mounted_files = self._get_check_files()
 
             if not os.path.exists(self.config_file_path):
-                logging.error(f"Configuration file not found: {self.config_file_path}")
+                logger.error(f"Configuration file not found: {self.config_file_path}")
                 raise FileNotFoundError(f"Configuration file not found: {self.config_file_path}")
 
             with open(self.config_file_path, 'r', encoding='utf-8') as f:
@@ -202,10 +203,10 @@ class CoordinatorConfig(ThreadSafeSingleton):
 
             self._load_all_configs()
             self._initialized = True
-            logging.info("Coordinator configuration initialized successfully")
+            logger.info("Coordinator configuration initialized successfully")
 
         except Exception as e:
-            logging.error(f"Failed to initialize coordinator configuration: {e}")
+            logger.error(f"Failed to initialize coordinator configuration: {e}")
             raise
 
     def get_aigw_models(self) -> Optional[dict[str, Any]]:
@@ -216,10 +217,10 @@ class CoordinatorConfig(ThreadSafeSingleton):
         """Reload configuration from file"""
         try:
             if not self.config_file_path or not os.path.exists(self.config_file_path):
-                logging.error("Configuration file path does not exist, cannot reload")
+                logger.error("Configuration file path does not exist, cannot reload")
                 return False
 
-            logging.info(f"Reloading configuration from: {self.config_file_path}")
+            logger.info(f"Reloading configuration from: {self.config_file_path}")
 
             # Re-read the configuration file
             with open(self.config_file_path, 'r', encoding='utf-8') as f:
@@ -231,11 +232,11 @@ class CoordinatorConfig(ThreadSafeSingleton):
             # Reconfigure logging with new settings
             reconfigure_logging(self.logging_config)
 
-            logging.info("Coordinator configuration reloaded successfully")
+            logger.info("Coordinator configuration reloaded successfully")
             return True
 
         except Exception as e:
-            logging.error(f"Failed to reload coordinator configuration: {e}")
+            logger.error(f"Failed to reload coordinator configuration: {e}")
             return False
 
     def _get_check_files(self) -> bool:
@@ -264,7 +265,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
             try:
                 loader()
             except Exception as e:
-                logging.error(f"Failed to load configuration section {loader.__name__}: {e}")
+                logger.error(f"Failed to load configuration section {loader.__name__}: {e}")
                 raise
 
     def _load_logging_config(self) -> None:
@@ -293,7 +294,8 @@ class CoordinatorConfig(ThreadSafeSingleton):
             raise ValueError("log_file must be a string or null")
 
         # Load log format
-        log_format = config.get("log_format", '%(levelname)s  %(asctime)s  [%(filename)s:%(lineno)d]  %(message)s')
+        log_format = config.get("log_format",
+                                '%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d]  %(message)s')
         if isinstance(log_format, str):
             self.logging_config.log_format = log_format
         else:
@@ -413,7 +415,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
             
             if value is None:
                 setattr(self.health_check_config, field, default)
-                logging.debug("Health Check config field '%s' not found, using default", field)
+                logger.debug("Health Check config field '%s' not found, using default", field)
                 continue
             
             converted_value = None
@@ -435,7 +437,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
                 setattr(self.health_check_config, field, converted_value)
                 
             except (TypeError, ValueError) as e:
-                logging.warning(
+                logger.warning(
                     f"Invalid value for Health Check config field '{field}': {e}, "
                     f"using default: {default}"
                 )
@@ -459,7 +461,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
             if isinstance(value, field_type):
                 setattr(self.standby_config, field, value)
             else:
-                logging.warning(f"Invalid type for Standby config field '{field}', using default")
+                logger.warning(f"Invalid type for Standby config field '{field}', using default")
 
     def _load_http_config(self) -> None:
         """Load HTTP configuration section."""
@@ -507,7 +509,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
                     continue
                 
                 if not isinstance(config[field], field_type):
-                    logging.error(f"Invalid timeout configuration parameter: {field}, expected {field_type.__name__}")
+                    logger.error(f"Invalid timeout configuration parameter: {field}, expected {field_type.__name__}")
                     raise ValueError(f"Invalid timeout configuration parameter: {field}")
                 
                 setattr(self.timeout_config, field, config[field])
@@ -528,7 +530,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
             try:
                 setattr(self.timeout_config, attr_name, int(env_value))
             except ValueError:
-                logging.error(f"Invalid {env_var} value: {env_value}")
+                logger.error(f"Invalid {env_var} value: {env_value}")
 
     def _load_api_key_config(self) -> None:
         """Load API key configuration section."""
@@ -539,35 +541,35 @@ class CoordinatorConfig(ThreadSafeSingleton):
                 if isinstance(config[self.ENABLED_KEY], bool):
                     self.api_key_config.enabled = config[self.ENABLED_KEY]
                 else:
-                    logging.error("api_key_config.enabled must be a boolean")
+                    logger.error("api_key_config.enabled must be a boolean")
                     raise ValueError("api_key_config.enabled must be a boolean")
             
             if self.VALID_KEY in config:
                 if isinstance(config[self.VALID_KEY], list):
                     self.api_key_config.valid_keys = set(config[self.VALID_KEY])
                 else:
-                    logging.error("api_key_config.valid_keys must be a list")
+                    logger.error("api_key_config.valid_keys must be a list")
                     raise ValueError("api_key_config.valid_keys must be a list")
             
             if self.HEADER_NAME_KEY in config:
                 if isinstance(config[self.HEADER_NAME_KEY], str):
                     self.api_key_config.header_name = config[self.HEADER_NAME_KEY]
                 else:
-                    logging.error("api_key_config.header_name must be a string")
+                    logger.error("api_key_config.header_name must be a string")
                     raise ValueError("api_key_config.header_name must be a string")
             
             if self.PREFIX_KEY in config:
                 if isinstance(config[self.PREFIX_KEY], str):
                     self.api_key_config.key_prefix = config[self.PREFIX_KEY]
                 else:
-                    logging.error("api_key_config.key_prefix must be a string")
+                    logger.error("api_key_config.key_prefix must be a string")
                     raise ValueError("api_key_config.key_prefix must be a string")
             
             if self.SKIP_PATHS_KEY in config:
                 if isinstance(config[self.SKIP_PATHS_KEY], list):
                     self.api_key_config.skip_paths = set(config[self.SKIP_PATHS_KEY])
                 else:
-                    logging.error("api_key_config.skip_paths must be a list")
+                    logger.error("api_key_config.skip_paths must be a list")
                     raise ValueError("api_key_config.skip_paths must be a list")
 
         # Handle environment variable overrides
@@ -587,7 +589,7 @@ class CoordinatorConfig(ThreadSafeSingleton):
                     set([path.strip() for path in skip_paths_str.split(",") if path.strip()])
 
         if self.api_key_config.enabled and not self.api_key_config.valid_keys:
-            logging.warning("API Key validation enabled but no valid keys configured!")
+            logger.warning("API Key validation enabled but no valid keys configured!")
 
     def _load_rate_limit_config(self) -> None:
         """Load rate limiting configuration section."""
@@ -598,49 +600,49 @@ class CoordinatorConfig(ThreadSafeSingleton):
                 if isinstance(config[self.ENABLED_KEY], bool):
                     self.rate_limit_config.enabled = config[self.ENABLED_KEY]
                 else:
-                    logging.error("rate_limit_config.enabled must be a boolean")
+                    logger.error("rate_limit_config.enabled must be a boolean")
                     raise ValueError("rate_limit_config.enabled must be a boolean")
             
             if self.MAX_REQUESTS_KEY in config:
                 if isinstance(config[self.MAX_REQUESTS_KEY], int):
                     self.rate_limit_config.max_requests = config[self.MAX_REQUESTS_KEY]
                 else:
-                    logging.error("rate_limit_config.max_requests must be an integer")
+                    logger.error("rate_limit_config.max_requests must be an integer")
                     raise ValueError("rate_limit_config.max_requests must be an integer")
             
             if self.WINDOW_SIZE_KEY in config:
                 if isinstance(config[self.WINDOW_SIZE_KEY], int):
                     self.rate_limit_config.window_size = config[self.WINDOW_SIZE_KEY]
                 else:
-                    logging.error("rate_limit_config.window_size must be an integer")
+                    logger.error("rate_limit_config.window_size must be an integer")
                     raise ValueError("rate_limit_config.window_size must be an integer")
             
             if self.SCOPE_KEY in config:
                 if isinstance(config[self.SCOPE_KEY], str):
                     self.rate_limit_config.scope = config[self.SCOPE_KEY]
                 else:
-                    logging.error("rate_limit_config.scope must be a string")
+                    logger.error("rate_limit_config.scope must be a string")
                     raise ValueError("rate_limit_config.scope must be a string")
             
             if self.SKIP_PATHS_KEY in config:
                 if isinstance(config[self.SKIP_PATHS_KEY], list):
                     self.rate_limit_config.skip_paths = config[self.SKIP_PATHS_KEY]
                 else:
-                    logging.error("rate_limit_config.skip_paths must be a list")
+                    logger.error("rate_limit_config.skip_paths must be a list")
                     raise ValueError("rate_limit_config.skip_paths must be a list")
             
             if self.ERROR_MESSAGE_KEY in config:
                 if isinstance(config[self.ERROR_MESSAGE_KEY], str):
                     self.rate_limit_config.error_message = config[self.ERROR_MESSAGE_KEY]
                 else:
-                    logging.error("rate_limit_config.error_message must be a string")
+                    logger.error("rate_limit_config.error_message must be a string")
                     raise ValueError("rate_limit_config.error_message must be a string")
             
             if self.ERROR_STATUS_CODE_KEY in config:
                 if isinstance(config[self.ERROR_STATUS_CODE_KEY], int):
                     self.rate_limit_config.error_status_code = config[self.ERROR_STATUS_CODE_KEY]
                 else:
-                    logging.error("rate_limit_config.error_status_code must be an integer")
+                    logger.error("rate_limit_config.error_status_code must be an integer")
                     raise ValueError("rate_limit_config.error_status_code must be an integer")
 
         # Handle environment variable overrides
@@ -654,14 +656,14 @@ class CoordinatorConfig(ThreadSafeSingleton):
                 try:
                     self.rate_limit_config.max_requests = int(rate_limit_value)
                 except ValueError:
-                    logging.error(f"Invalid RATE_LIMIT_MAX_REQUESTS value: {rate_limit_value}")
+                    logger.error(f"Invalid RATE_LIMIT_MAX_REQUESTS value: {rate_limit_value}")
 
         rate_limit_window_size = os.getenv("RATE_LIMIT_WINDOW_SIZE")
         if rate_limit_window_size is not None:
             try:
                 self.rate_limit_config.window_size = int(rate_limit_window_size)
             except ValueError:
-                logging.error(f"Invalid RATE_LIMIT_WINDOW_SIZE value: {os.getenv('RATE_LIMIT_WINDOW_SIZE')}")
+                logger.error(f"Invalid RATE_LIMIT_WINDOW_SIZE value: {os.getenv('RATE_LIMIT_WINDOW_SIZE')}")
         
         rate_limit_scope = os.getenv("RATE_LIMIT_SCOPE")
         if rate_limit_scope is not None:
