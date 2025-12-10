@@ -22,8 +22,6 @@ class HeartbeatManager(ThreadSafeSingleton):
             return
 
         self._endpoint_lock = threading.Lock()
-        self._reregister_lock = threading.Lock()  # lock for _reregistering flag
-        self._reregister_thread = None
         self.stop_event = threading.Event()
 
         if config is None:
@@ -41,7 +39,9 @@ class HeartbeatManager(ThreadSafeSingleton):
         self._instance_id = -1
         self._endpoints: list[Endpoint] = []
         self._heartbeat_report_thread = threading.Thread(
-            target=self._report_heartbeat_loop, daemon=True, name="heartbeat_report"
+            target=self._report_heartbeat_loop,
+            daemon=True,
+            name="heartbeat_report",
         )
         self._engine_server_status_thread = threading.Thread(
             target=self._refresh_endpoints_status_loop,
@@ -49,7 +49,6 @@ class HeartbeatManager(ThreadSafeSingleton):
             name="endpoint_status_fetch",
         )
         self._thread_started = False
-        self._reregistering = False
         self._engine_status_thread_start_time = None
         self._is_within_grace_period = True
         self._initialized = True
@@ -79,11 +78,6 @@ class HeartbeatManager(ThreadSafeSingleton):
             self._heartbeat_report_thread.join(timeout=2.0)
         if self._engine_server_status_thread.is_alive():
             self._engine_server_status_thread.join(timeout=2.0)
-        if self._reregister_thread and self._reregister_thread.is_alive():
-            self._reregister_thread.join(timeout=2.0)
-        if self._reregistering:
-            with self._reregister_lock:
-                self._reregistering = False
         logger.info("HeartBeatManager stopped.")
 
     def _refresh_endpoints_status_loop(self) -> None:
@@ -198,19 +192,13 @@ class HeartbeatManager(ThreadSafeSingleton):
                     _ = client.post("/controller/heartbeat", heartbeat_msg.model_dump())
             except Exception as e:
                 if "503" in str(e):
-                    with self._reregister_lock:
-                        if self._reregistering is False:
-                            self._reregistering = True
-                            self._reregister_thread = threading.Thread(
-                                target=self._reregister, daemon=True, name="reregister"
-                            )
-                            self._reregister_thread.start()
-                        else:
-                            logger.info("already in reregistering, skip reregister")
-                logger.error(
-                    "Exception occurred while reporting endpoint status to controller at %s ",
-                    self.controller_api_url,
-                )
+                    logger.warning("Received 503, maybe controller has been restarted, reregistering...")
+                    self._reregister()
+                else:
+                    logger.error(
+                        "Exception occurred while reporting endpoint status to controller at %s ",
+                        self.controller_api_url,
+                    )
 
             time.sleep(self.heartbeat_interval_seconds)
 
@@ -218,7 +206,5 @@ class HeartbeatManager(ThreadSafeSingleton):
         ret = EngineManager().post_reregister_msg()
         if ret is False:
             logger.error("reregister failed")
-            return
-        with self._reregister_lock:
-            self._reregistering = False
-        logger.info("reregister success")
+        else:
+            logger.info("reregister success")

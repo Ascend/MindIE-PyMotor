@@ -154,8 +154,6 @@ class TestHeartBeatManager:
         assert heart_beat_manager._endpoints == []
         assert heart_beat_manager.stop_event.is_set() is False
         assert heart_beat_manager._thread_started is False
-        assert heart_beat_manager._reregistering is False
-        assert hasattr(heart_beat_manager, '_reregister_lock')
 
     def test_update_endpoint(self, heart_beat_manager, sample_start_cmd_msg):
         """test update endpoint"""
@@ -368,12 +366,8 @@ class TestHeartBeatManager:
         mock_engine_manager.post_reregister_msg.return_value = True
         mock_engine_manager_class.return_value = mock_engine_manager
         
-        with heart_beat_manager._reregister_lock:
-            heart_beat_manager._reregistering = True
-        
         heart_beat_manager._reregister()
         
-        assert heart_beat_manager._reregistering is False
         mock_engine_manager.post_reregister_msg.assert_called_once()
     
     @patch('motor.node_manager.core.heartbeat_manager.EngineManager')
@@ -383,13 +377,8 @@ class TestHeartBeatManager:
         mock_engine_manager.post_reregister_msg.return_value = False
         mock_engine_manager_class.return_value = mock_engine_manager
         
-        with heart_beat_manager._reregister_lock:
-            heart_beat_manager._reregistering = True
-        
         heart_beat_manager._reregister()
         
-        # On failure, _reregistering should remain True
-        assert heart_beat_manager._reregistering is True
         mock_engine_manager.post_reregister_msg.assert_called_once()
     
     @patch('motor.node_manager.core.heartbeat_manager.threading.Thread')
