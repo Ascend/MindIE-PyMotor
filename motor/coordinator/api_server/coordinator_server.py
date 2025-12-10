@@ -740,9 +740,14 @@ class CoordinatorServer:
             """MetaServer API"""
             return await self._handle_metaserver_request(request)
 
-        @self.management_app.get("/v1/models")
+        @self.inference_app.get("/v1/models")
         async def list_models():
             models = self._build_models_metadata()
+            if not models:
+                raise HTTPException(
+                    status_code=HTTP_STATUS_SERVICE_UNAVAILABLE,
+                    detail="AIGW model configuration is not available. Please configure aigw in user_config.json."
+                )
             return {
                 "object": "list",
                 "data": models
