@@ -3,11 +3,25 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
 import signal
+import time
+from typing import Optional
+
+import requests
+import vllm
+from vllm.entrypoints.utils import cli_env_setup
+from vllm.entrypoints.openai.api_server import setup_server
+from vllm.usage.usage_lib import UsageContext
+from vllm.v1.executor.abstract import Executor
+from vllm.v1.engine.utils import launch_core_engines
+from vllm.entrypoints.cli.serve import run_api_server_worker_proc
+from vllm.v1.utils import APIServerProcessManager
+from vllm.v1.engine.coordinator import DPCoordinator
+from vllm.v1.engine.utils import CoreEngineProcManager
 
 from motor.engine_server.config.base import IConfig
 from motor.engine_server.core.base_core import BaseServerCore
-from motor.engine_server.core.vllm.vllm_engine_proc_mgr import ProcManager
 from motor.common.utils.logger import get_logger
+from motor.engine_server.constants import constants
 
 logger = get_logger("engine_server")
 
@@ -15,28 +29,33 @@ logger = get_logger("engine_server")
 class VLLMServerCore(BaseServerCore):
     def __init__(self, config: IConfig):
         super().__init__(config)
-        self.engine_proc_manager = ProcManager(self.config.get_args())
+        self.args = config.get_args()
+        self.api_server_manager: Optional[APIServerProcessManager] = None
+        self.core_manager: Optional[CoreEngineProcManager] = None
+        self.coordinator: Optional[DPCoordinator] = None
+        self._status: str = constants.INIT_STATUS
+        self._check_url = f"http://{self.args.host}:{self.args.port}/health"
 
     def initialize(self) -> None:
         self._register_signal_handlers()
         super().initialize()
-        self.engine_proc_manager.initialize()
+        cli_env_setup()
         self.data_controller.set_server_core(self)
 
     def run(self) -> None:
         super().run()
-        self.engine_proc_manager.run()
+        self._run_multi_server()
 
     def join(self) -> None:
-        self.engine_proc_manager.join()
+        super().join()
 
     def shutdown(self) -> None:
+        self._status = constants.ABNORMAL_STATUS
         super().shutdown()
-        self.engine_proc_manager.shutdown()
         logger.info(f"[VLLMServerCore] vLLM shutdown completed")
 
     def status(self) -> str:
-        return self.engine_proc_manager.status
+        return self._status
 
     def _signal_handler(self, sig: int, frame) -> None:
         logger.info(f"[VLLMServerCore] Received signal {sig} (SIGINT/SIGTERM), initiating shutdown")
@@ -44,7 +63,71 @@ class VLLMServerCore(BaseServerCore):
 
     def _register_signal_handlers(self) -> None:
         def handle_signal(signum, frame):
-            self.shutdown()
+            self._signal_handler(signum, frame)
 
         for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
             signal.signal(sig, handle_signal)
+
+    def _run_multi_server(self):
+        server_instance_count = self.args.api_server_count
+        bind_address, listening_socket = setup_server(self.args)
+
+        engine_config = vllm.AsyncEngineArgs.from_cli_args(self.args)
+        setattr(engine_config, "_api_process_count", server_instance_count)
+        setattr(engine_config, "_api_process_rank", -1)
+
+        server_usage_context = UsageContext.OPENAI_API_SERVER
+        vllm_server_config = engine_config.create_engine_config(usage_context=server_usage_context)
+
+        selected_executor = Executor.get_class(vllm_server_config)
+        enable_statistics = not engine_config.disable_log_stats
+
+        parallel_setup = vllm_server_config.parallel_config
+        dp_rank_value = parallel_setup.data_parallel_rank
+        use_external_load_balancing = parallel_setup.data_parallel_external_lb
+        use_hybrid_load_balancing = parallel_setup.data_parallel_hybrid_lb
+
+        if not (use_external_load_balancing or use_hybrid_load_balancing or dp_rank_value == 0):
+            validation_msg = f"Invalid configuration: external_dp_lb={use_external_load_balancing}, "
+            validation_msg += f"hybrid_dp_lb={use_hybrid_load_balancing}, dp_rank={dp_rank_value}"
+            raise ValueError(validation_msg)
+
+        with launch_core_engines(vllm_server_config, selected_executor, enable_statistics, server_instance_count
+                                 ) as (self.core_manager, self.coordinator, server_addresses):
+            api_server_settings = dict(
+                target_server_fn=run_api_server_worker_proc,
+                listen_address=bind_address,
+                sock=listening_socket,
+                args=self.args,
+                num_servers=server_instance_count,
+                input_addresses=server_addresses.inputs,
+                output_addresses=server_addresses.outputs,
+                stats_update_address=self.coordinator.get_stats_publish_address()
+                if self.coordinator
+                else None,
+            )
+            should_initialize_manager = (dp_rank_value == 0 or
+                                         not (use_external_load_balancing or use_hybrid_load_balancing))
+            if should_initialize_manager:
+                self.api_server_manager = APIServerProcessManager(**api_server_settings)
+
+        if self.api_server_manager is None:
+            api_server_settings["stats_update_address"] = (
+                server_addresses.frontend_stats_publish_address
+            )
+            self.api_server_manager = APIServerProcessManager(**api_server_settings)
+
+        retry = 0
+        while self._status == constants.INIT_STATUS and retry < constants.API_READY_CHECK_TIMES:
+            retry += 1
+            self._check_api_server_ready()
+            time.sleep(1)
+
+    def _check_api_server_ready(self):
+        try:
+            response = requests.get(self._check_url, timeout=1)
+            response.raise_for_status()
+            self._status = constants.NORMAL_STATUS
+            logger.info(f"API server health check passed, status change to: {self._status}")
+        except Exception as e:
+            logger.warning(f"Failed to check API server health: {e}, try again")

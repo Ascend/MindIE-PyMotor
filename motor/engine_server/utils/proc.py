@@ -3,59 +3,96 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import contextlib
-import os
-import signal
 import time
-from multiprocessing.process import BaseProcess
-from typing import List
+from typing import Set
+
 import psutil
 
+from motor.common.utils.logger import get_logger
 
-def get_child_processes(base_processes: List[BaseProcess], recursive: bool = False) -> List[psutil.Process]:
-    processes = []
-    for base in base_processes:
-        if not base.is_alive():
-            continue
+logger = get_logger("engine_server")
+
+
+class ProcManager:
+    def __init__(self, main_pid: int):
+        """
+        Initialize process manager
+        :param main_pid: Main process ID to monitor
+        """
+        self.main_pid = main_pid
+        self.child_pids: Set[int] = set()
+        self._shutdown_triggered = False
+
+        if not self._is_process_exist(main_pid):
+            raise ValueError(f"process {main_pid} does not exist")
+
+    @staticmethod
+    def _kill_process(pid: int) -> None:
         try:
-            base_util = psutil.Process(base.pid)
-            for child in base_util.children(recursive=recursive):
-                processes.append(child)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return processes
-
-
-def exit_process(procs: List[BaseProcess]):
-    for proc in procs:
-        if proc.is_alive():
+            proc = psutil.Process(pid)
             proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                proc.kill()
+        except Exception as e:
+            logger.warning(f"process {pid} exited with error: {e}")
 
-    deadline = time.monotonic() + 5
-    for proc in procs:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        if proc.is_alive():
-            proc.join(remaining)
+    @staticmethod
+    def _is_process_exist(pid: int) -> bool:
+        try:
+            proc = psutil.Process(pid)
+            return proc.is_running() and not proc.status() == psutil.STATUS_ZOMBIE
+        except Exception as e:
+            logger.warning(f"check process {pid} with error: {e}")
+            return False
 
-    for proc in procs:
-        pid = proc.pid
-        if proc.is_alive() and pid is not None:
-            kill_process_tree(pid)
+    @staticmethod
+    def _get_all_children_pids(pid: int) -> Set[int]:
+        children_pids = set()
+        try:
+            parent_process = psutil.Process(pid)
+            all_children = parent_process.children(recursive=True)
+            # Extract PIDs from Process objects
+            children_pids.update(child.pid for child in all_children)
+        except Exception as e:
+            logger.warning(f"get children pids error: {e}")
+        return children_pids
 
+    def shutdown(self) -> None:
+        if self._shutdown_triggered:
+            return
+        logger.info(f"Shutting down process manager {self.main_pid}")
+        self._shutdown_triggered = True
 
-def kill_process_tree(pid: int):
-    try:
-        parent = psutil.Process(pid)
-    except psutil.NoSuchProcess:
-        return
+        for pid in self.child_pids:
+            self._kill_process(pid)
+        self._kill_process(self.main_pid)
 
-    children = parent.children(recursive=True)
+    def join(self) -> None:
+        if self._shutdown_triggered:
+            return
+        self._update_child_pids()
+        try:
+            while len(self.child_pids) > 0:
+                dead_pids = []
+                for pid in self.child_pids:
+                    if not self._is_process_exist(pid):
+                        logger.warning(f"process {pid} exited, prepare to shutdown")
+                        dead_pids.append(pid)
 
-    for child in children:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(child.pid, signal.SIGKILL)
+                if len(dead_pids) > 0:
+                    self.shutdown()
+                    break
 
-    with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
+                time.sleep(5)
+        except Exception as e:
+            logger.error(f"exception occur while join: {e}")
+            self.shutdown()
+
+    def _update_child_pids(self) -> None:
+        if self._shutdown_triggered:
+            return
+        self.child_pids.clear()
+        if self._is_process_exist(self.main_pid):
+            self.child_pids.update(self._get_all_children_pids(self.main_pid))

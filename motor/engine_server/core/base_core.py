@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # coding=utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
-
+import os
 from abc import ABC, abstractmethod
 
 from motor.engine_server.config.base import IConfig
@@ -9,6 +9,7 @@ from motor.engine_server.core.data_controller import DataController
 from motor.engine_server.core.endpoint import Endpoint
 from motor.engine_server.core.service import MetricsService, HealthService
 from motor.engine_server.constants.constants import METRICS_SERVICE, HEALTH_SERVICE
+from motor.engine_server.utils.proc import ProcManager
 
 
 class IServerCore(ABC):
@@ -47,6 +48,7 @@ class BaseServerCore(IServerCore):
             HEALTH_SERVICE: HealthService(self.data_controller),
         }
         self.endpoint = Endpoint(self.config.get_server_config(), self.services)
+        self.proc_manager = ProcManager(os.getpid())
 
     def initialize(self) -> None:
         pass
@@ -56,11 +58,12 @@ class BaseServerCore(IServerCore):
         self.endpoint.run()
 
     def join(self) -> None:
-        pass
+        self.proc_manager.join()
 
     def shutdown(self) -> None:
         self.endpoint.shutdown()
         self.data_controller.shutdown()
+        self.proc_manager.shutdown()
 
     def status(self) -> str:
         pass

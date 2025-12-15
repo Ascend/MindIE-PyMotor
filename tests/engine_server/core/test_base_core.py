@@ -22,11 +22,12 @@ def mock_config():
 
 @pytest.fixture
 def mock_dependencies():
-    """Mock core dependencies (DataController, Services, Endpoint)"""
+    """Mock core dependencies (DataController, Services, Endpoint, ProcManager)"""
     with patch("motor.engine_server.core.base_core.DataController") as mock_dc_cls, \
             patch("motor.engine_server.core.base_core.MetricsService") as mock_metrics_cls, \
             patch("motor.engine_server.core.base_core.HealthService") as mock_health_cls, \
-            patch("motor.engine_server.core.base_core.Endpoint") as mock_endpoint_cls:
+            patch("motor.engine_server.core.base_core.Endpoint") as mock_endpoint_cls, \
+            patch("motor.engine_server.core.base_core.ProcManager") as mock_proc_manager_cls:
         # Create mock instances
         mock_dc = Mock()
         mock_dc_cls.return_value = mock_dc
@@ -40,6 +41,9 @@ def mock_dependencies():
         mock_endpoint = Mock()
         mock_endpoint_cls.return_value = mock_endpoint
 
+        mock_proc_manager = Mock()
+        mock_proc_manager_cls.return_value = mock_proc_manager
+
         yield {
             "mock_dc_cls": mock_dc_cls,
             "mock_dc": mock_dc,
@@ -48,7 +52,9 @@ def mock_dependencies():
             "mock_health_cls": mock_health_cls,
             "mock_health": mock_health,
             "mock_endpoint_cls": mock_endpoint_cls,
-            "mock_endpoint": mock_endpoint
+            "mock_endpoint": mock_endpoint,
+            "mock_proc_manager_cls": mock_proc_manager_cls,
+            "mock_proc_manager": mock_proc_manager
         }
 
 
@@ -98,6 +104,10 @@ def test_base_server_core_initialization(base_server_core, mock_config, mock_dep
     )
     assert base_server_core.endpoint == deps["mock_endpoint"]
 
+    # Verify ProcManager is initialized with current process ID
+    deps["mock_proc_manager_cls"].assert_called_once()
+    assert base_server_core.proc_manager == deps["mock_proc_manager"]
+
 
 def test_initialize_method(base_server_core):
     """test BaseServerCore.initialize() should execute without errors (no-op implementation)"""
@@ -117,14 +127,18 @@ def test_run_method(base_server_core, mock_dependencies):
     deps["mock_endpoint"].run.assert_called_once()
 
 
-def test_join_method(base_server_core):
-    """test BaseServerCore.join() should execute without errors (no-op implementation)"""
-    # Verify no exception is raised
+def test_join_method(base_server_core, mock_dependencies):
+    """test BaseServerCore.join() should call join() on ProcManager when executed"""
+    deps = mock_dependencies
+
     base_server_core.join()
+
+    # Verify ProcManager.join() is called
+    deps["mock_proc_manager"].join.assert_called_once()
 
 
 def test_shutdown_method(base_server_core, mock_dependencies):
-    """test BaseServerCore.shutdown() should call shutdown() on Endpoint and DataController when executed"""
+    """test BaseServerCore.shutdown() should call shutdown() on Endpoint, DataController and ProcManager when executed"""
     deps = mock_dependencies
 
     base_server_core.shutdown()
@@ -133,6 +147,8 @@ def test_shutdown_method(base_server_core, mock_dependencies):
     deps["mock_endpoint"].shutdown.assert_called_once()
     # Verify DataController.shutdown() is called
     deps["mock_dc"].shutdown.assert_called_once()
+    # Verify ProcManager.shutdown() is called
+    deps["mock_proc_manager"].shutdown.assert_called_once()
 
 
 def test_status_method(base_server_core):

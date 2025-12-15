@@ -106,3 +106,6 @@ STATUS_INTERFACE = "/status"
 # service type
 METRICS_SERVICE = "metrics_service"
 HEALTH_SERVICE = "health_service"
+
+# vllm api server ready check times
+API_READY_CHECK_TIMES = 60
