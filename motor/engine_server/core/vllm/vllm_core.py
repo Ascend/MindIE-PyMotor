@@ -12,8 +12,6 @@ from vllm.entrypoints.utils import cli_env_setup
 from vllm.entrypoints.openai.api_server import setup_server
 from vllm.usage.usage_lib import UsageContext
 from vllm.v1.executor.abstract import Executor
-from vllm.v1.engine.utils import launch_core_engines
-from vllm.entrypoints.cli.serve import run_api_server_worker_proc
 from vllm.v1.utils import APIServerProcessManager
 from vllm.v1.engine.coordinator import DPCoordinator
 from vllm.v1.engine.utils import CoreEngineProcManager
@@ -22,6 +20,8 @@ from motor.engine_server.config.base import IConfig
 from motor.engine_server.core.base_core import BaseServerCore
 from motor.common.utils.logger import get_logger
 from motor.engine_server.constants import constants
+from motor.engine_server.core.vllm.launch_engine import engine_server_launch_vllm_core_engines
+from motor.engine_server.core.vllm.launch_server import engine_server_run_api_server_worker_proc
 
 logger = get_logger("engine_server")
 
@@ -92,10 +92,13 @@ class VLLMServerCore(BaseServerCore):
             validation_msg += f"hybrid_dp_lb={use_hybrid_load_balancing}, dp_rank={dp_rank_value}"
             raise ValueError(validation_msg)
 
-        with launch_core_engines(vllm_server_config, selected_executor, enable_statistics, server_instance_count
-                                 ) as (self.core_manager, self.coordinator, server_addresses):
+        with engine_server_launch_vllm_core_engines(
+                vllm_server_config,
+                selected_executor,
+                enable_statistics,
+                server_instance_count) as (self.core_manager, self.coordinator, server_addresses):
             api_server_settings = dict(
-                target_server_fn=run_api_server_worker_proc,
+                target_server_fn=engine_server_run_api_server_worker_proc,
                 listen_address=bind_address,
                 sock=listening_socket,
                 args=self.args,
@@ -130,4 +133,4 @@ class VLLMServerCore(BaseServerCore):
             self._status = constants.NORMAL_STATUS
             logger.info(f"API server health check passed, status change to: {self._status}")
         except Exception as e:
-            logger.warning(f"Failed to check API server health: {e}, try again")
+            logger.debug(f"Failed to check API server health: {e}, try again")

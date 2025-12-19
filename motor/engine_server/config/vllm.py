@@ -7,7 +7,6 @@ import json
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
-from vllm.utils import FlexibleArgumentParser
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
 
 from motor.engine_server.config.base import BaseConfig, ServerConfig
@@ -78,6 +77,10 @@ class VLLMConfig(BaseConfig):
 
         sys.argv = ["serve"] + arg_list
 
+        try:
+            from vllm.utils import FlexibleArgumentParser
+        except ImportError:
+            from vllm.utils.argparse_utils import FlexibleArgumentParser
         parser = FlexibleArgumentParser(description="vLLM parser")
         parser = make_arg_parser(parser)
         self.args = parser.parse_args()

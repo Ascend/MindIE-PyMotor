@@ -3,19 +3,9 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
 # log dir permission
-LOG_PRIVILEGE = 0o640
+MOTOR_CUSTOM_ZMQ_PRIVILEGE = 0o640
+MOTOR_CUSTOM_ZMQ_DIR_PRIVILEGE = 0o750
 MUSK_PRIVILEGE = 0o777
-LOG_DIR_PRIVILEGE = 0o750
-LOG_BAK_PRIVILEGE = 0o440
-
-# log level for flush into log file
-ENGINE_SERVER_FILE_LOG_LEVEL = "ENGINE_SERVER_FILE_LOG_LEVEL"
-# log level for print to screen
-ENGINE_SERVER_STD_LOG_LEVEL = "ENGINE_SERVER_STD_LOG_LEVEL"
-# to determine whether to print log into screen
-ENGINE_SERVER_LOG_STDOUT = 'ENGINE_SERVER_LOG_STDOUT'
-# log path to save
-ENGINE_SERVER_LOG_PATH = 'TASKD_LOG_PATH'
 
 # logger default config
 LOG_MAX_LINE_LENGTH = 1023
@@ -108,4 +98,4 @@ METRICS_SERVICE = "metrics_service"
 HEALTH_SERVICE = "health_service"
 
 # vllm api server ready check times
-API_READY_CHECK_TIMES = 60
+API_READY_CHECK_TIMES = 3600

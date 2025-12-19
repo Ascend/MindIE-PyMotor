@@ -8,7 +8,7 @@ import sys
 from requests.exceptions import ConnectionError, Timeout, HTTPError, RequestException
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_logger_module():
     module_name = 'motor.common.utils.logger'
     original_logger = sys.modules.get(module_name)
@@ -18,15 +18,14 @@ def mock_logger_module():
     mock_logger_module.get_logger = MagicMock(return_value=mock_logger)
     sys.modules[module_name] = mock_logger_module
 
-    with patch('motor.engine_server.core.vllm.vllm_collector.logger', mock_logger):
-        try:
-            yield
-        finally:
-            if original_logger is not None:
-                sys.modules[module_name] = original_logger
-            else:
-                if module_name in sys.modules:
-                    del sys.modules[module_name]
+    try:
+        yield
+    finally:
+        if original_logger is not None:
+            sys.modules[module_name] = original_logger
+        else:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
 
 
 from motor.engine_server.core.vllm.vllm_collector import VLLMCollector
@@ -34,7 +33,15 @@ from motor.engine_server.config.base import IConfig
 
 
 @pytest.fixture(scope="function")
-def vllm_collector():
+def vllm_collector(mock_logger_module):
+    # Clear module from cache if it exists to ensure fresh import with mocks
+    if 'motor.engine_server.core.vllm.vllm_collector' in sys.modules:
+        del sys.modules['motor.engine_server.core.vllm.vllm_collector']
+    
+    # Reimport with fresh mocks
+    from motor.engine_server.core.vllm.vllm_collector import VLLMCollector
+    from motor.engine_server.config.base import IConfig
+    
     with patch("motor.engine_server.core.vllm.vllm_collector.logger") as mock_logger:
         mock_config = Mock(spec=IConfig)
         mock_server_config = Mock()
@@ -52,7 +59,7 @@ def vllm_collector():
         yield collector
 
 
-def test_initialization(vllm_collector):
+def test_initialization(vllm_collector, mock_logger_module):
     """test VLLMCollector should initialize with correct properties and log info when created"""
     expected_name = f"{vllm_collector._mock_config.get_server_config().engine_type}_metrics_and_health_collector"
     assert vllm_collector.name == expected_name
@@ -69,7 +76,7 @@ def test_initialization(vllm_collector):
 @patch("motor.engine_server.core.vllm.vllm_collector.VLLMCollector._do_collect_health")
 @patch("motor.engine_server.core.vllm.vllm_collector.VLLMCollector._do_collect_metrics")
 @patch("motor.engine_server.core.vllm.vllm_collector.time.time")
-def test_collect_returns_combined_data(mock_time, mock_do_metrics, mock_do_health, vllm_collector):
+def test_collect_returns_combined_data(mock_time, mock_do_metrics, mock_do_health, vllm_collector, mock_logger_module):
     """test VLLMCollector._collect() should return combined metrics and health data with timestamp when called"""
     mock_time.return_value = 1718000000.0
     expected_timestamp = int(mock_time.return_value * 1000)
@@ -86,7 +93,7 @@ def test_collect_returns_combined_data(mock_time, mock_do_metrics, mock_do_healt
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_metrics_success(mock_get, vllm_collector):
+def test_do_collect_metrics_success(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_metrics() should return success data when request succeeds"""
     mock_response = Mock()
     mock_response.status_code = 200
@@ -102,7 +109,7 @@ def test_do_collect_metrics_success(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_metrics_connection_error(mock_get, vllm_collector):
+def test_do_collect_metrics_connection_error(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_metrics() should return failed result with error log when connection fails"""
     mock_get.side_effect = ConnectionError("Connection refused")
     result = vllm_collector._do_collect_metrics()
@@ -115,7 +122,7 @@ def test_do_collect_metrics_connection_error(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_metrics_timeout(mock_get, vllm_collector):
+def test_do_collect_metrics_timeout(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_metrics() should return failed result when request times out"""
     mock_get.side_effect = Timeout("Request timed out")
     result = vllm_collector._do_collect_metrics()
@@ -125,7 +132,7 @@ def test_do_collect_metrics_timeout(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_metrics_http_error(mock_get, vllm_collector):
+def test_do_collect_metrics_http_error(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_metrics() should return failed result with status code when HTTP error occurs"""
     mock_response = Mock()
     mock_response.status_code = 404
@@ -137,7 +144,7 @@ def test_do_collect_metrics_http_error(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_metrics_generic_request_error(mock_get, vllm_collector):
+def test_do_collect_metrics_generic_request_error(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_metrics() should return failed result for generic request errors"""
     mock_get.side_effect = RequestException("Unknown error")
     result = vllm_collector._do_collect_metrics()
@@ -147,7 +154,7 @@ def test_do_collect_metrics_generic_request_error(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_health_success(mock_get, vllm_collector):
+def test_do_collect_health_success(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_health() should return success result when health check succeeds"""
     mock_response = Mock()
     mock_response.status_code = 200
@@ -160,7 +167,7 @@ def test_do_collect_health_success(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_health_non_200_status(mock_get, vllm_collector):
+def test_do_collect_health_non_200_status(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_health() should return failed result with error log when status is non-200"""
     mock_response = Mock()
     mock_response.status_code = 503
@@ -173,7 +180,7 @@ def test_do_collect_health_non_200_status(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.requests.get")
-def test_do_collect_health_connection_error(mock_get, vllm_collector):
+def test_do_collect_health_connection_error(mock_get, vllm_collector, mock_logger_module):
     """test VLLMCollector._do_collect_health() should return failed result when connection fails"""
     mock_get.side_effect = ConnectionError("Cannot connect")
     result = vllm_collector._do_collect_health()
@@ -182,7 +189,7 @@ def test_do_collect_health_connection_error(mock_get, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.time.time")
-def test_build_error_result(mock_time, vllm_collector):
+def test_build_error_result(mock_time, vllm_collector, mock_logger_module):
     """test VLLMCollector._build_error_result() should return error data with correct format when called with status code"""
     mock_time.return_value = 1718000000.0
     expected_collect_time = int(mock_time.return_value * 1000)
@@ -200,7 +207,7 @@ def test_build_error_result(mock_time, vllm_collector):
 
 
 @patch("motor.engine_server.core.vllm.vllm_collector.time.time")
-def test_build_error_result_no_http_status(mock_time, vllm_collector):
+def test_build_error_result_no_http_status(mock_time, vllm_collector, mock_logger_module):
     """test VLLMCollector._build_error_result() should return error data without status code when not provided"""
     mock_time.return_value = 1718000000.0
     result = VLLMCollector._build_error_result(

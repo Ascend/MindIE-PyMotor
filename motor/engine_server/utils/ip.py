@@ -21,3 +21,11 @@ def ip_valid_check(ip_str: str) -> None:
 def port_valid_check(port: int) -> None:
     if port < 1024 or port > 65535:
         raise ValueError(f"{port} port must be between 1024 and 65535")
+
+
+def is_valid_ipv6_address(address: str) -> bool:
+    try:
+        ipaddress.IPv6Address(address)
+        return True
+    except ValueError:
+        return False

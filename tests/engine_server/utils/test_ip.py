@@ -4,7 +4,7 @@
 
 import pytest
 
-from motor.engine_server.utils.ip import ip_valid_check, port_valid_check
+from motor.engine_server.utils.ip import ip_valid_check, port_valid_check, is_valid_ipv6_address
 
 
 class TestIpUtils:
@@ -120,3 +120,47 @@ class TestIpUtils:
             with pytest.raises(ValueError) as excinfo:
                 port_valid_check(port)
             assert "port must be between 1024 and 65535" in str(excinfo.value)
+
+    def test_is_valid_ipv6_address_valid(self):
+        """Test is_valid_ipv6_address with valid IPv6 addresses"""
+        valid_ipv6s = [
+            "::1",  # Loopback
+            "2001:0db8:85a3:0000:0000:8a2e:0370:7334",  # Public IP (full)
+            "2001:db8:85a3::8a2e:370:7334",  # Public IP (shortened)
+            "fe80::1",  # Link-local
+            "fd00::1",  # Unique local
+            "0000:0000:0000:0000:0000:0000:0000:0001",  # Full loopback
+            "2001:0db8::1",  # Double colon at end
+            "::2001:0db8"  # Double colon at start
+        ]
+
+        for ipv6 in valid_ipv6s:
+            assert is_valid_ipv6_address(ipv6) is True
+
+    def test_is_valid_ipv6_address_invalid(self):
+        """Test is_valid_ipv6_address with invalid IPv6 addresses"""
+        invalid_ipv6s = [
+            "not_an_ip",
+            "::g::",  # Invalid character
+            "2001:::3",  # Too many colons
+            "2001:0db8:85a3:0000:0000:8a2e:0370:7334:7335",  # Too many groups
+            "2001:0db8:85a3:0000:0000:8a2e:0370",  # Too few groups
+            "256.0.0.1",  # Invalid IPv4 (should still return False for IPv6 check)
+            "192.168.1.1",  # IPv4 (should return False)
+            ""
+        ]
+
+        for ipv6 in invalid_ipv6s:
+            assert is_valid_ipv6_address(ipv6) is False
+
+    def test_is_valid_ipv6_address_ipv4(self):
+        """Test is_valid_ipv6_address with IPv4 addresses (should return False)"""
+        ipv4_addresses = [
+            "127.0.0.1",  # Loopback
+            "192.168.1.1",  # Private
+            "8.8.8.8",  # Public
+            "0.0.0.0"  # All zeros
+        ]
+
+        for ipv4 in ipv4_addresses:
+            assert is_valid_ipv6_address(ipv4) is False

@@ -79,7 +79,7 @@ class Endpoint:
                 server_core_status = health_data.get(LATEST_HEALTH, {}).get(CORE_STATUS, INIT_STATUS)
                 collect_status = health_data.get(LATEST_HEALTH, {}).get(STATUS_KEY, INIT_STATUS)
             if server_core_status == INIT_STATUS:
-                logger.info("Server core is initializing.")
+                logger.debug("Server core is initializing.")
                 return {
                     STATUS_KEY: INIT_STATUS
                 }
@@ -102,7 +102,7 @@ class Endpoint:
                 collect_status = metrics_data.get(LATEST_METRICS, {}).get(STATUS_KEY, INIT_STATUS)
 
             if server_core_status == INIT_STATUS:
-                logger.info("Server core is initializing.")
+                logger.debug("Server core is initializing.")
                 return Response(
                     content="",
                     media_type=TEXT_PLAIN,
