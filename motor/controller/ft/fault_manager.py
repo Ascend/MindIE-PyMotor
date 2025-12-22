@@ -12,7 +12,6 @@ from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.controller import ControllerConfig
 from motor.common.resources.instance import Instance, ReadOnlyInstance, NodeManagerInfo
 from motor.controller.core import Observer, ObserverEvent, InstanceManager
-from motor.controller.core.instance_manager import InsStatus
 from motor.controller.ft.cluster_grpc import cluster_fault_pb2, ClusterNodeClient
 from motor.controller.ft.strategy import StrategyBase, generate_strategy_map
 from motor.common.utils.etcd_client import EtcdClient

@@ -71,6 +71,25 @@ for proto_file in $PROTO_FILES; do
             
             echo "  Fixed import paths in ${proto_base}_pb2_grpc.py"
         fi
+
+        pb2_file="${proto_dir}/${proto_base}_pb2.py"
+        if [ -f "$pb2_file" ]; then
+            proto_rel_path=$(echo "$proto_file" | sed 's|^\./||' | sed 's|\.proto$||')
+            package_path=$(dirname "$proto_rel_path" | sed 's|/|.|g')
+            [ "$package_path" = "." ] && package_path=""
+
+            if [ -n "$package_path" ]; then
+                # regex to match 'import xxx_pb2' not followed by more word chars (avoid matching xxx_pb2_extra)
+                # Also handle 'as' alias
+                if ! grep -q "^from ${package_path} import [a-zA-Z0-9_]*_pb2" "$pb2_file"; then
+                    # Replace plain imports: import b_pb2 -> from pkg import b_pb2
+                    sed -i "s|^import \([a-zA-Z0-9_]*_pb2\)\([^_a-zA-Z0-9].*\)\?$|from ${package_path} import \1\2|g" "$pb2_file"
+                    # Replace aliased imports: import b_pb2 as c -> from pkg import b_pb2 as c
+                    sed -i "s|^import \([a-zA-Z0-9_]*_pb2\) as \(.*\)$|from ${package_path} import \1 as \2|g" "$pb2_file"
+                fi
+            fi
+            echo "  Fixed import paths in ${proto_base}_pb2.py"
+        fi
     else
         echo "✗ Failed to generate code from $proto_file"
         exit 1

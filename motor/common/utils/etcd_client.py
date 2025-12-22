@@ -4,53 +4,64 @@
 import json
 import os
 import threading
-from typing import Any, Type, TypeVar
 from contextlib import contextmanager
-from etcd3gw.client import Etcd3Client as Etcd3GwClient
-from etcd3gw.lease import Lease
-from etcd3gw.lock import Lock
+from typing import Any, Type, TypeVar
+
+import grpc
 from pydantic import BaseModel
 
+from motor.common.utils.proto import rpc_pb2, rpc_pb2_grpc
+from motor.common.utils import locks
 from motor.common.utils.logger import get_logger
-
-
-logger = get_logger(__name__)
 
 T = TypeVar('T', bound=BaseModel)
 
 namespace = os.getenv("POD_NAMESPACE")
+logger = get_logger(__name__)
+UTF8_ENCODING = "utf-8"
+RB = 'rb'
 
 
 class EtcdClient:
     """Etcd client with lease lock management and JSON data storage"""
 
-    def __init__(
-        self,
-        host: str = 'localhost',
-        port: int = 2379,
-        ca_cert: str | None = None,
-        cert_key: str | None = None,
-        cert_cert: str | None = None,
-        timeout: int = 5
-    ) -> None:
+    def __init__(self, host: str = "localhost", port: int = 2379, ca_cert: str | None = None,
+                 cert_key: str | None = None, cert_cert: str | None = None, timeout: int = 5) -> None:
         self.host = host
         self.port = port
+        self.ca_cert = ca_cert
+        self.cert_key = cert_key
+        self.cert_cert = cert_cert
         self.timeout = timeout
-
-        kwargs = {'host': host, 'port': port, 'timeout': timeout}
-        if ca_cert and cert_key and cert_cert:
-            kwargs.update({
-                'ca_cert': ca_cert,
-                'cert_key': cert_key,
-                'cert_cert': cert_cert,
-                "protocol": "https"
-            })
-
-        self.client = Etcd3GwClient(**kwargs)
-        self._leases: dict[str, Lease] = {}
+        self.channel = None
+        self.kv_stub = None
+        self.lease_stub = None
+        self._leases: dict[str, int] = {}  # lock_key -> lease_id
         self._lock = threading.Lock()
 
-        logger.info("EtcdClient initialized with host=%s:%d", host, port)
+        try:
+            if ca_cert and cert_key and cert_cert:
+                with open(ca_cert, RB) as f:
+                    root_cert = f.read()
+                with open(cert_key, RB) as f:
+                    private_key = f.read()
+                with open(cert_cert, RB) as f:
+                    cert_chain = f.read()
+                creds = grpc.ssl_channel_credentials(
+                    root_certificates=root_cert,
+                    private_key=private_key,
+                    certificate_chain=cert_chain
+                )
+                self.channel = grpc.secure_channel(f'{host}:{port}', creds)
+            else:
+                self.channel = grpc.insecure_channel(f'{host}:{port}')
+
+            self.kv_stub = rpc_pb2_grpc.KVStub(self.channel)
+            self.lease_stub = rpc_pb2_grpc.LeaseStub(self.channel)
+        except Exception as e:
+            logger.error("etcd_client init error: %s", e)
+            if self.channel:
+                self.channel.close()
 
     def __enter__(self):
         return self
@@ -60,32 +71,42 @@ class EtcdClient:
 
     @staticmethod
     def get_key_with_namespace(key: str) -> str:
+        """ key must start with / """
+        if key.startswith(namespace + "/"):
+            return key
         return namespace + key
 
+    @staticmethod
+    def _prefix_range_end(prefix: str):
+        """Create a bytestring that can be used as a range_end for a prefix."""
+        bytes_prefix = prefix.encode(UTF8_ENCODING)
+        s = bytearray(bytes_prefix)
+        for i in reversed(range(len(s))):
+            if s[i] < 0xff:
+                s[i] = s[i] + 1
+                break
+        return bytes(s)
+
     def acquire_lock(self, lock_key: str, ttl: int = 30) -> str | None:
-        """Acquire a lease lock"""
         try:
             with self._lock:
                 lock_key = self.get_key_with_namespace(lock_key)
                 if lock_key in self._leases:
-                    logger.warning("Lock %s already exists", lock_key)
+                    logger.error("Lock %s already exists", lock_key)
                     return None
 
-                lock = Lock(lock_key, ttl=ttl, client=self.client)
-                success = lock.acquire()
+                lock = locks.Lock(lock_key, ttl, etcd_client=self)
+                success = lock.acquire(self.timeout)
 
                 if success:
-                    self._leases[lock_key] = lock.lease
-                    logger.info("Acquired lock %s with lease %s",
-                                lock_key,
-                                lock.lease.uuid if hasattr(lock.lease, 'uuid') else lock.uuid)
-                    return str(lock.lease.uuid if hasattr(lock.lease, 'uuid') else lock.uuid)
+                    self._leases[lock_key] = lock.lease_id
+                    logger.info("Acquired lock %s with lease %s", lock_key, lock.lease_id)
+                    return str(lock.uuid)
                 else:
                     logger.error("Failed to acquire lock %s", lock_key)
                     return None
-
         except Exception as e:
-            logger.error("Error acquiring lock %s: %s", lock_key, e)
+            logger.error("Failed to acquire lock %s: %s", lock_key, e)
             return None
 
     def renew_lease(self, lock_key: str) -> bool:
@@ -94,16 +115,29 @@ class EtcdClient:
             with self._lock:
                 lock_key = self.get_key_with_namespace(lock_key)
                 if lock_key not in self._leases:
-                    logger.warning("Lock %s does not exist", lock_key)
+                    logger.error("Lock %s does not exist", lock_key)
                     return False
 
-                lease = self._leases[lock_key]
-                lease.refresh()
-                logger.info("Renewed lease for lock %s", lock_key)
-                return True
+                lease_id = self._leases[lock_key]
 
+                keep_alive_req = rpc_pb2.LeaseKeepAliveRequest(ID=lease_id)
+
+                # 2. Call LeaseKeepAlive (this is a streaming API)
+                # An iterator must be passed in, and the returned response iterator must be obtained.
+                response_stream = self.lease_stub.LeaseKeepAlive(iter([keep_alive_req]), timeout=self.timeout)
+                # 3. Read the response (this step is critical—it confirms that the lease renewal was successful
+                #    and retrieves the latest TTL) If you don't read the next response, the request might still
+                #    be buffered and not actually sent, or errors may go undetected.
+                response = next(response_stream)
+                new_ttl = response.TTL
+
+                if new_ttl <= 0:
+                    # If the returned TTL is <= 0, it means the lease has already expired.
+                    raise Exception("Lease expired (TTL=%s) during renewal", new_ttl)
+                logger.info("Renewed lease for lock %s. New TTL: %s", lock_key, new_ttl)
+                return True
         except Exception as e:
-            logger.error("Error renewing lease for lock %s: %s, will release", lock_key, e)
+            logger.error("Failed to renew lease for lock  %s: %s, will release", lock_key, e)
             self.release_lock(lock_key)
             return False
 
@@ -116,22 +150,21 @@ class EtcdClient:
                     logger.warning("Lock %s does not exist", lock_key)
                     return False
 
-                lease = self._leases[lock_key]
-                lease.revoke()
+                lease_id = self._leases[lock_key]
+                self.lease_stub.LeaseRevoke(rpc_pb2.LeaseRevokeRequest(ID=lease_id), timeout=self.timeout)
                 del self._leases[lock_key]
-                logger.info("Released lock %s", lock_key)
+                logger.info("Released lock for lock %s", lock_key)
                 return True
-
         except Exception as e:
-            logger.error("Error releasing lock %s: %s", lock_key, e)
+            logger.error("Failed to release lock %s: %s", lock_key, e)
             del self._leases[lock_key]
             return False
 
     def put_json(
-        self,
-        key: str,
-        data: BaseModel | dict[str, Any],
-        lease: Lease | None = None
+            self,
+            key: str,
+            data: BaseModel | dict[str, Any],
+            lease: int = None
     ) -> bool:
         """Store JSON data (pydantic compatible)"""
         try:
@@ -140,116 +173,51 @@ class EtcdClient:
             else:
                 json_data = json.dumps(data, ensure_ascii=False)
 
-            # etcd3gw expects string, not bytes
             value = json_data
 
             key = self.get_key_with_namespace(key)
             if lease:
-                self.client.put(key, value, lease=lease)
+                self.kv_stub.Put(
+                    rpc_pb2.PutRequest(key=key.encode(UTF8_ENCODING), value=value.encode(UTF8_ENCODING), lease=lease),
+                    timeout=self.timeout)
             else:
-                self.client.put(key, value)
+                self.kv_stub.Put(rpc_pb2.PutRequest(key=key.encode(UTF8_ENCODING), value=value.encode(UTF8_ENCODING)),
+                                 timeout=self.timeout)
 
-            logger.debug("Stored JSON data at key %s", key)
+            logger.info("Stored JSON data for key %s", key)
             return True
-
         except Exception as e:
             logger.error("Error storing JSON data at key %s: %s", key, e)
             return False
-
-    def get_json(
-        self,
-        key: str,
-        model_class: Type[T] | None = None
-    ) -> dict[str, Any] | T | None:
-        """Retrieve JSON data"""
-        try:
-            key = self.get_key_with_namespace(key)
-            value = self.client.get(key)
-
-            if value is None:
-                logger.debug("Key %s not found", key)
-                return None
-
-            # etcd3gw get() returns decoded string directly
-            data = json.loads(value)
-
-            if model_class:
-                return model_class(**data)
-            else:
-                return data
-
-        except Exception as e:
-            logger.error("Error retrieving JSON data from key %s: %s", key, e)
-            return None
-
-    def put_instances(self, instances: dict[int, Any], prefix: str = "/instances") -> bool:
-        """Store instances dictionary"""
-        try:
-            self.delete_prefix(prefix)
-
-            for instance_id, instance in instances.items():
-                key = f"{prefix}/{instance_id}"
-                if not self.put_json(key, instance):
-                    logger.error("Failed to store instance %d", instance_id)
-                    return False
-
-            logger.info("Stored %d instances with prefix %s", len(instances), prefix)
-            return True
-
-        except Exception as e:
-            logger.error("Error storing instances: %s", e)
-            return False
-
-    def get_instances(
-        self,
-        prefix: str = "/instances",
-        model_class: Type[T] | None = None
-    ) -> dict[int, dict[str, Any] | T]:
-        """Retrieve instances dictionary"""
-        instances = {}
-        try:
-            prefix = self.get_key_with_namespace(prefix)
-            for value, metadata in self.client.get_prefix(prefix):
-                key = metadata['key']  # etcd3gw returns dict, not object
-                instance_id = int(key.split('/')[-1])
-
-                json_str = value  # etcd3gw already decodes
-                data = json.loads(json_str)
-
-                if model_class:
-                    instances[instance_id] = model_class(**data)
-                else:
-                    instances[instance_id] = data
-
-            logger.debug("Retrieved %d instances with prefix %s", len(instances), prefix)
-            return instances
-
-        except Exception as e:
-            logger.error("Error retrieving instances: %s", e)
-            return {}
 
     def delete_prefix(self, prefix: str) -> bool:
         """Delete all keys with given prefix"""
         try:
             prefix = self.get_key_with_namespace(prefix)
-            self.client.delete_prefix(prefix)
-            logger.debug("Deleted all keys with prefix %s", prefix)
+            resp = self.kv_stub.DeleteRange(
+                rpc_pb2.DeleteRangeRequest(key=prefix.encode(UTF8_ENCODING), range_end=self._prefix_range_end(prefix)),
+                timeout=self.timeout)
+            deleted_count = resp.deleted
+            logger.info("Deleted %d keys with prefix %s", deleted_count, prefix)
             return True
-
         except Exception as e:
-            logger.error("Error deleting prefix %s: %s", prefix, e)
+            logger.error("Failed to delete prefix %s: %s", prefix, e)
             return False
 
     def delete_key(self, key: str) -> bool:
         """Delete a specific key"""
         try:
             key = self.get_key_with_namespace(key)
-            self.client.delete(key)
-            logger.debug("Deleted key %s", key)
+            resp = self.kv_stub.DeleteRange(rpc_pb2.DeleteRangeRequest(key=key.encode(UTF8_ENCODING)),
+                                            timeout=self.timeout)
+            deleted_count = resp.deleted
+            if deleted_count == 0:
+                logger.info("key %s not found", key)
+            else:
+                logger.info("Deleted key %s", key)
             return True
-
         except Exception as e:
-            logger.error("Error deleting key %s: %s", key, e)
+            logger.error("Failed to delete key %s: %s", key, e)
             return False
 
     @contextmanager
@@ -266,17 +234,14 @@ class EtcdClient:
                 self.release_lock(lock_key)
 
     def close(self):
-        """Close the etcd client"""
+        """Close the proto client"""
         try:
             with self._lock:
-                for lock_key in list(self._leases.keys()):
-                    self.release_lock(lock_key)
-
-            # etcd3gw doesn't have close method
+                if self.channel:
+                    self.channel.close()
             logger.info("EtcdClient closed")
-
         except Exception as e:
-            logger.error("Error closing EtcdClient: %s", e)
+            logger.error("Failed to close EtcdClient: %s", e)
 
     def persist_data(self, key_prefix: str, data: dict[str, Any]) -> bool:
         """Persist data dictionary with key prefix"""
@@ -289,20 +254,19 @@ class EtcdClient:
                 for data_key, data_value in data.items():
                     full_key = f"{key_prefix}/{data_key}"
                     if not self.put_json(full_key, data_value):
-                        logger.error("Failed to persist data for key %s", data_key)
+                        logger.error("Failed to persist data for key %s", full_key)
                         return False
-
                 logger.info("Persisted %d items with prefix %s", len(data), key_prefix)
                 return True
 
         except Exception as e:
-            logger.error("Error persisting data with prefix %s: %s", key_prefix, e)
+            logger.error("Failed to persist data with prefix %s: %s", key_prefix, e)
             return False
 
     def restore_data(
-        self,
-        key_prefix: str,
-        model_class: Type[T] | None = None
+            self,
+            key_prefix: str,
+            model_class: Type[T] | None = None
     ) -> dict[str, dict[str, Any] | T] | None:
         """Restore data dictionary from key prefix"""
         try:
@@ -312,33 +276,40 @@ class EtcdClient:
             return data
 
         except Exception as e:
-            logger.error("Error restoring data with prefix %s: %s", key_prefix, e)
+            logger.error("Failed to restore data with prefix %s: %s", key_prefix, e)
             return None
 
     def get_prefix_data(
-        self,
-        key_prefix: str,
-        model_class: Type[T] | None = None
+            self,
+            key_prefix: str,
+            model_class: Type[T] | None = None
     ) -> dict[str, dict[str, Any] | T]:
         """Get all data under a prefix as dictionary"""
         data = {}
         try:
             key_prefix = self.get_key_with_namespace(key_prefix)
-            for value, metadata in self.client.get_prefix(key_prefix):
-                key = metadata['key']  # etcd3gw returns dict
-                # Extract the relative key after prefix
-                relative_key = key[len(key_prefix) + 1:]  # +1 for the '/'
+            resp = self.kv_stub.Range(
+                rpc_pb2.RangeRequest(key=key_prefix.encode(UTF8_ENCODING), range_end=self._prefix_range_end(key_prefix),
+                                     limit=0,
+                                     keys_only=False), timeout=self.timeout)
 
-                json_str = value  # etcd3gw already decodes
+            for kv_pair in resp.kvs:
+                full_key_bytes = kv_pair.key
+                full_key = full_key_bytes.decode(UTF8_ENCODING)
+
+                prefix_len = len(key_prefix)
+                relative_key = full_key[prefix_len + 1:]  # skip '/'
+
+                value_bytes = kv_pair.value  # gRPC return value is bytes type
+                json_str = value_bytes.decode(UTF8_ENCODING)  # decode to JSON
                 item_data = json.loads(json_str)
 
                 if model_class:
                     data[relative_key] = model_class(**item_data)
                 else:
                     data[relative_key] = item_data
-
             return data
 
         except Exception as e:
-            logger.error("Error getting prefix data for %s: %s", key_prefix, e)
+            logger.error("Failed to get prefix data with prefix %s: %s", key_prefix, e)
             return {}
