@@ -1,4 +1,5 @@
 import time
+import hashlib
 import pytest
 from unittest.mock import MagicMock, patch, call
 
@@ -712,13 +713,40 @@ def test_checksum_calculation(instance_assembler, test_config):
     # Create test metadata
     metadata = create_assembled_instance(instance_assembler, "test_checksum", test_config)
 
-    checksum = instance_assembler._calculate_metadata_checksum(metadata)
+    # Create a persistent state to test checksum calculation
+    metadata_data = {
+        "job_name": metadata.instance.job_name,
+        "model_name": metadata.instance.model_name,
+        "instance_id": metadata.instance.id,
+        "role": metadata.instance.role.value if hasattr(metadata.instance.role, 'value') else str(metadata.instance.role),
+        "parallel_config": metadata.instance.parallel_config.model_dump() if hasattr(metadata.instance.parallel_config, 'model_dump') else metadata.instance.parallel_config,
+        "endpoints": {
+            pod_ip: {eid: endpoint.model_dump() for eid, endpoint in endpoints.items()}
+            for pod_ip, endpoints in metadata.instance.endpoints.items()
+        },
+        "node_managers": [
+            (nm.pod_ip, nm.host_ip, nm.port) for nm in metadata.instance.node_managers
+        ],
+        "register_status": metadata.register_status.value,
+        "start_command_send_times": metadata.start_command_send_times,
+        "register_timestamp": metadata.register_timestamp,
+        "is_reregister": metadata.is_reregister
+    }
+
+    state = PersistentAssembleInstanceMetadataState(
+        metadata_data=metadata_data,
+        version=1,
+        timestamp=time.time(),
+        checksum=""
+    )
+
+    checksum = state.calculate_checksum()
 
     assert isinstance(checksum, str)
     assert len(checksum) > 0
 
     # Same data should produce same checksum
-    checksum2 = instance_assembler._calculate_metadata_checksum(metadata)
+    checksum2 = state.calculate_checksum()
     assert checksum == checksum2
 
 
@@ -726,13 +754,22 @@ def test_ins_id_cnt_checksum(instance_assembler):
     """Test checksum calculation for ins_id_cnt"""
     instance_assembler.ins_id_cnt = 42
 
-    checksum = instance_assembler._calculate_ins_id_cnt_checksum()
+    # Create a persistent state for ins_id_cnt
+    ins_id_cnt_data = {"ins_id_cnt": instance_assembler.ins_id_cnt}
+    state = PersistentAssembleInstanceMetadataState(
+        metadata_data=ins_id_cnt_data,
+        version=1,
+        timestamp=time.time(),
+        checksum=""
+    )
+
+    checksum = state.calculate_checksum()
 
     assert isinstance(checksum, str)
     assert len(checksum) > 0
 
     # Same value should produce same checksum
-    checksum2 = instance_assembler._calculate_ins_id_cnt_checksum()
+    checksum2 = state.calculate_checksum()
     assert checksum == checksum2
 
 
@@ -789,7 +826,10 @@ def test_restore_data_reconstruction_exception(instance_assembler):
                     "model_name": "test_model",
                     "instance_id": 0,
                     "role": "prefill",
-                    "parallel_config": {"dp_size": 1, "cp_size": 1, "tp_size": 1, "sp_size": 1, "ep_size": 1, "pp_size": 1, "world_size": 1},
+                    "parallel_config": {
+                        "dp_size": 1, "cp_size": 1, "tp_size": 1, "sp_size": 1,
+                        "ep_size": 1, "pp_size": 1, "world_size": 1
+                    },
                     "endpoints": {},
                     "node_managers": [],
                     "register_status": 0,
@@ -816,9 +856,36 @@ def test_checksum_calculation_exception_handling(instance_assembler, test_config
     # Create test metadata
     metadata = create_assembled_instance(instance_assembler, "test_checksum_exception", test_config)
 
+    # Create a persistent state to test checksum calculation
+    metadata_data = {
+        "job_name": metadata.instance.job_name,
+        "model_name": metadata.instance.model_name,
+        "instance_id": metadata.instance.id,
+        "role": metadata.instance.role.value if hasattr(metadata.instance.role, 'value') else str(metadata.instance.role),
+        "parallel_config": metadata.instance.parallel_config.model_dump() if hasattr(metadata.instance.parallel_config, 'model_dump') else metadata.instance.parallel_config,
+        "endpoints": {
+            pod_ip: {eid: endpoint.model_dump() for eid, endpoint in endpoints.items()}
+            for pod_ip, endpoints in metadata.instance.endpoints.items()
+        },
+        "node_managers": [
+            (nm.pod_ip, nm.host_ip, nm.port) for nm in metadata.instance.node_managers
+        ],
+        "register_status": metadata.register_status.value,
+        "start_command_send_times": metadata.start_command_send_times,
+        "register_timestamp": metadata.register_timestamp,
+        "is_reregister": metadata.is_reregister
+    }
+
+    state = PersistentAssembleInstanceMetadataState(
+        metadata_data=metadata_data,
+        version=1,
+        timestamp=time.time(),
+        checksum=""
+    )
+
     # Mock hashlib.sha256 to raise an exception
-    with patch('motor.controller.core.instance_assembler.hashlib.sha256', side_effect=Exception("Hash calculation failed")):
-        checksum = instance_assembler._calculate_metadata_checksum(metadata)
+    with patch.object(hashlib, 'sha256', side_effect=Exception("Hash calculation failed")):
+        checksum = state.calculate_checksum()
 
         assert checksum == ""  # Should return empty string on exception
 
@@ -827,9 +894,18 @@ def test_ins_id_cnt_checksum_exception_handling(instance_assembler):
     """Test ins_id_cnt checksum calculation exception handling"""
     instance_assembler.ins_id_cnt = 42
 
+    # Create a persistent state for ins_id_cnt
+    ins_id_cnt_data = {"ins_id_cnt": instance_assembler.ins_id_cnt}
+    state = PersistentAssembleInstanceMetadataState(
+        metadata_data=ins_id_cnt_data,
+        version=1,
+        timestamp=time.time(),
+        checksum=""
+    )
+
     # Mock hashlib.sha256 to raise an exception
-    with patch('motor.controller.core.instance_assembler.hashlib.sha256', side_effect=Exception("Hash calculation failed")):
-        checksum = instance_assembler._calculate_ins_id_cnt_checksum()
+    with patch.object(hashlib, 'sha256', side_effect=Exception("Hash calculation failed")):
+        checksum = state.calculate_checksum()
 
         assert checksum == ""  # Should return empty string on exception
 
@@ -845,7 +921,7 @@ def test_persistent_state_is_valid_method():
     )
 
     # Manually set correct checksum
-    valid_state.checksum = valid_state._calculate_checksum()
+    valid_state.checksum = valid_state.calculate_checksum()
     assert valid_state.is_valid() == True
 
     # Create invalid state with wrong checksum
@@ -856,6 +932,111 @@ def test_persistent_state_is_valid_method():
         checksum="wrong_checksum"
     )
     assert invalid_state.is_valid() == False
+
+
+def test_restore_data_with_type_conversion():
+    """Test restoration with string-formatted data from ETCD (type conversion)"""
+    # Simulate metadata data as it would come from ETCD - all values are strings
+    etcd_string_metadata = {
+        "job_name": "test_type_conversion",
+        "model_name": "test_model",
+        "instance_id": "208",  # int as string
+        "role": "prefill",
+        "parallel_config": None,
+        "endpoints": {},  # dict
+        "node_managers": [],  # list
+        "register_status": "2",  # enum value as string from ETCD
+        "start_command_send_times": "0",  # int as string
+        "register_timestamp": str(time.time()),  # float as string
+        "is_reregister": "False"  # bool as string
+    }
+
+    # Mock persistent state with string-formatted metadata
+    mock_persistent_states = {
+        "test_type_conversion": PersistentAssembleInstanceMetadataState(
+            metadata_data=etcd_string_metadata,
+            version=1,
+            timestamp=time.time(),
+            checksum=""  # Will be calculated
+        )
+    }
+
+    # Calculate correct checksum for the string metadata
+    mock_persistent_states["test_type_conversion"].checksum = mock_persistent_states["test_type_conversion"].calculate_checksum()
+
+    with patch('motor.controller.core.instance_assembler.EtcdClient') as mock_etcd_class:
+        mock_client = MagicMock()
+        mock_client.restore_data.return_value = mock_persistent_states
+        mock_etcd_class.return_value = mock_client
+
+        # Create assembler with ETCD enabled
+        from motor.config.controller import ControllerConfig
+        config = ControllerConfig()
+        config.etcd_config.enable_etcd_persistence = True
+
+        with patch('threading.Thread'):
+            assembler = InstanceAssembler(config)
+            result = assembler.restore_data()
+
+        # Should succeed - Pydantic should handle type conversion
+        assert result == True
+        assert "test_type_conversion" in assembler.instances
+
+        metadata = assembler.instances["test_type_conversion"]
+        assert metadata.instance.id == 208  # string "208" converted to int 208
+        assert metadata.register_status == RegisterStatus.ASSEMBLED  # string "2" converted to enum
+        assert metadata.start_command_send_times == 0  # string "0" converted to int 0
+        assert metadata.is_reregister == False  # string "False" converted to bool False
+
+
+def test_restore_data_with_invalid_enum_value():
+    """Test restoration fails gracefully with invalid enum values in metadata"""
+    # Simulate corrupted metadata with invalid enum value
+    corrupted_metadata = {
+        "job_name": "test_invalid_enum",
+        "model_name": "test_model",
+        "instance_id": "209",
+        "role": "prefill",
+        "parallel_config": None,
+        "endpoints": {},
+        "node_managers": [],
+        "register_status": "999",  # Invalid enum value as string
+        "start_command_send_times": "0",
+        "register_timestamp": str(time.time()),
+        "is_reregister": "False"
+    }
+
+    mock_persistent_states = {
+        "test_invalid_enum": PersistentAssembleInstanceMetadataState(
+            metadata_data=corrupted_metadata,
+            version=1,
+            timestamp=time.time(),
+            checksum=""  # Will be calculated
+        )
+    }
+
+    # Calculate checksum for corrupted metadata
+    mock_persistent_states["test_invalid_enum"].checksum = mock_persistent_states["test_invalid_enum"].calculate_checksum()
+
+    with patch('motor.controller.core.instance_assembler.EtcdClient') as mock_etcd_class:
+        mock_client = MagicMock()
+        mock_client.restore_data.return_value = mock_persistent_states
+        mock_etcd_class.return_value = mock_client
+
+        # Create assembler with ETCD enabled
+        from motor.config.controller import ControllerConfig
+        config = ControllerConfig()
+        config.etcd_config.enable_etcd_persistence = True
+
+        with patch('threading.Thread'):
+            assembler = InstanceAssembler(config)
+
+            # This should succeed (data restoration succeeds) but metadata reconstruction fails
+            result = assembler.restore_data()
+            assert result == True
+
+            # Instance should not be restored due to validation error
+            assert "test_invalid_enum" not in assembler.instances
 
 
 def test_start_method(mock_config):
@@ -892,9 +1073,6 @@ def test_stop_method(mock_config):
             # Verify threads were joined
             mock_thread1.join.assert_called_once()
             mock_thread2.join.assert_called_once()
-
-            # Verify ETCD client was closed
-            assembler.etcd_client.close.assert_called_once()
 
 
 def test_instances_assembler_loop_stop_event(instance_assembler, test_config):
@@ -985,3 +1163,202 @@ def test_update_config(instance_assembler):
             cert_cert=new_config.etcd_config.etcd_cert_cert,
             timeout=30.0
         )
+
+
+# ===== Persistence and Recovery Tests =====
+
+def test_persist_and_restore_data_success(instance_assembler, test_config):
+    """Test successful persist and restore of instance assembler data"""
+    # Create test instance
+    metadata = create_assembled_instance(instance_assembler, "test_persist", test_config)
+
+    # Enable persistence in config
+    instance_assembler.etcd_config.enable_etcd_persistence = True
+
+    # Mock successful ETCD operations
+    with patch.object(instance_assembler.etcd_client, 'persist_data', return_value=True) as mock_persist:
+        with patch.object(instance_assembler.etcd_client, 'restore_data') as mock_restore:
+            # Persist data
+            persist_result = instance_assembler.persist_data()
+            assert persist_result == True
+
+            # Verify persist was called
+            mock_persist.assert_called_once()
+            args, kwargs = mock_persist.call_args
+            assert "/controller/instance_assembler" in args[0]
+
+            # Create mock persistent states for restore
+            mock_persistent_states = {}
+
+            # Add ins_id_cnt state
+            ins_id_cnt_state = PersistentAssembleInstanceMetadataState(
+                metadata_data={"ins_id_cnt": instance_assembler.ins_id_cnt},
+                version=1,
+                timestamp=time.time(),
+                checksum=""
+            )
+            ins_id_cnt_state.checksum = ins_id_cnt_state.calculate_checksum()
+            mock_persistent_states["ins_id_cnt"] = ins_id_cnt_state
+
+            # Add instance state
+            metadata_data = {
+                "job_name": metadata.instance.job_name,
+                "model_name": metadata.instance.model_name,
+                "instance_id": metadata.instance.id,
+                "role": metadata.instance.role.value if hasattr(metadata.instance.role, 'value') else str(metadata.instance.role),
+                "parallel_config": metadata.instance.parallel_config.model_dump() if hasattr(metadata.instance.parallel_config, 'model_dump') else metadata.instance.parallel_config,
+                "endpoints": {
+                    pod_ip: {eid: endpoint.model_dump() for eid, endpoint in endpoints.items()}
+                    for pod_ip, endpoints in metadata.instance.endpoints.items()
+                },
+                "node_managers": [
+                    (nm.pod_ip, nm.host_ip, nm.port) for nm in metadata.instance.node_managers
+                ],
+                "register_status": metadata.register_status.value,
+                "start_command_send_times": metadata.start_command_send_times,
+                "register_timestamp": metadata.register_timestamp,
+                "is_reregister": metadata.is_reregister
+            }
+
+            instance_state = PersistentAssembleInstanceMetadataState(
+                metadata_data=metadata_data,
+                version=1,
+                timestamp=time.time(),
+                checksum=""
+            )
+            instance_state.checksum = instance_state.calculate_checksum()
+            mock_persistent_states["test_persist"] = instance_state
+
+            mock_restore.return_value = mock_persistent_states
+
+            # Create new assembler instance for restore test
+            with patch('threading.Thread'), patch('motor.controller.core.instance_assembler.EtcdClient'):
+                # Create a mock config similar to the original
+                from motor.config.controller import ControllerConfig
+                new_config = ControllerConfig()
+                new_config.etcd_config.enable_etcd_persistence = True
+                new_config.instance_config.instance_assemble_timeout = 1.0
+                new_config.instance_config.instance_assembler_check_internal = 0.1
+                new_config.instance_config.instance_assembler_cmd_send_internal = 0.1
+                new_config.instance_config.send_cmd_retry_times = 3
+                new_assembler = InstanceAssembler(new_config)
+
+                # Restore data
+                restore_result = new_assembler.restore_data()
+                assert restore_result == True
+
+                # Verify data was restored
+                assert new_assembler.ins_id_cnt == instance_assembler.ins_id_cnt
+                assert "test_persist" in new_assembler.instances
+                restored_metadata = new_assembler.instances["test_persist"]
+                assert restored_metadata.instance.job_name == metadata.instance.job_name
+                assert restored_metadata.register_status == metadata.register_status
+
+
+def test_persist_data_with_checksum_validation(instance_assembler, test_config):
+    """Test that persisted data includes correct checksums"""
+    # Create test instance
+    metadata = create_assembled_instance(instance_assembler, "test_checksum", test_config)
+
+    # Enable persistence
+    instance_assembler.etcd_config.enable_etcd_persistence = True
+
+    with patch.object(instance_assembler.etcd_client, 'persist_data', return_value=True) as mock_persist:
+        # Persist data
+        result = instance_assembler.persist_data()
+        assert result == True
+
+        # Verify the data passed to persist_data
+        args, kwargs = mock_persist.call_args
+        persisted_data = args[1]
+
+        # Should contain ins_id_cnt and the instance
+        assert "ins_id_cnt" in persisted_data
+        assert "test_checksum" in persisted_data
+
+        # Verify checksums are present and non-empty
+        for key, data_dict in persisted_data.items():
+            assert "checksum" in data_dict
+            assert len(data_dict["checksum"]) > 0
+
+            # Verify checksum is valid by reconstructing the state
+            state = PersistentAssembleInstanceMetadataState(**data_dict)
+            assert state.is_valid()
+
+
+def test_restore_data_with_invalid_checksum(instance_assembler, test_config):
+    """Test restore skips data with invalid checksums"""
+    # Create mock persistent states with invalid checksum
+    mock_persistent_states = {
+        "ins_id_cnt": PersistentAssembleInstanceMetadataState(
+            metadata_data={"ins_id_cnt": 5},
+            version=1,
+            timestamp=time.time(),
+            checksum="invalid_checksum"  # Wrong checksum
+        )
+    }
+
+    with patch.object(instance_assembler.etcd_client, 'restore_data', return_value=mock_persistent_states):
+        result = instance_assembler.restore_data()
+
+        # Should succeed but skip invalid data
+        assert result == True
+        assert instance_assembler.ins_id_cnt == 1  # Should not restore invalid data
+
+
+def test_persistence_disabled_in_config(instance_assembler, test_config):
+    """Test that persistence is properly disabled when config flag is False"""
+    # Ensure persistence is disabled
+    instance_assembler.etcd_config.enable_etcd_persistence = False
+
+    # Create test instance
+    create_assembled_instance(instance_assembler, "test_disabled", test_config)
+
+    # Register should not call persist (only called when enable_persistence is True)
+    with patch.object(instance_assembler.etcd_client, 'persist_data', return_value=True) as mock_persist:
+        # Try to persist manually - should still work but not be called from register
+        result = instance_assembler.persist_data()
+        assert result == True  # persist_data always calls etcd_client.persist_data regardless of flag
+
+        # But register should not call persist when disabled
+        msg = create_register_msg("test_register_disabled", test_config['pod_ip1'], test_config)
+        instance_assembler.register(msg)
+
+        # persist_data should not have been called again (only once from manual call above)
+        assert mock_persist.call_count == 1
+
+
+def test_persist_empty_state(instance_assembler):
+    """Test persisting when no instances exist"""
+    # Enable persistence
+    instance_assembler.etcd_config.enable_etcd_persistence = True
+
+    with patch.object(instance_assembler.etcd_client, 'persist_data', return_value=True) as mock_persist:
+        result = instance_assembler.persist_data()
+        assert result == True
+
+        # Verify data was persisted
+        args, kwargs = mock_persist.call_args
+        persisted_data = args[1]
+
+        # Should only contain ins_id_cnt
+        assert len(persisted_data) == 1
+        assert "ins_id_cnt" in persisted_data
+
+        # Verify ins_id_cnt data
+        ins_id_cnt_data = persisted_data["ins_id_cnt"]
+        assert ins_id_cnt_data["metadata_data"]["ins_id_cnt"] == instance_assembler.ins_id_cnt
+        assert ins_id_cnt_data["version"] >= 1
+        assert ins_id_cnt_data["timestamp"] > 0
+        assert len(ins_id_cnt_data["checksum"]) > 0
+
+
+def test_restore_no_data_available(instance_assembler):
+    """Test restore when no data is available in ETCD"""
+    with patch.object(instance_assembler.etcd_client, 'restore_data', return_value=None):
+        result = instance_assembler.restore_data()
+
+        # Should succeed with empty state
+        assert result == True
+        assert len(instance_assembler.instances) == 0
+        assert instance_assembler.ins_id_cnt == 1  # Default value

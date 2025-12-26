@@ -17,6 +17,8 @@ show_help() {
     echo "  - Test files: */tests/*"
     echo "  - Cache files: */__pycache__/*"
     echo "  - gRPC generated files: */cluster_grpc/*_pb2*.py, */cluster_grpc/*_grpc.py"
+    echo "  - Proto generated files: */motor/common/utils/proto/*_pb2*.py, */motor/common/utils/proto/*_grpc.py"
+    echo "  - Proto cache files: */motor/common/utils/proto/__pycache__/*"
     echo ""
     echo "Examples:"
     echo "  $0 --cov --cov-report=html tests/controller/"
@@ -45,6 +47,9 @@ DEFAULT_EXCLUDES=(
     "*/__pycache__/*"
     "*/cluster_grpc/*_pb2*.py"
     "*/cluster_grpc/*_grpc.py"
+    "*/motor/common/utils/proto/*_pb2*.py"
+    "*/motor/common/utils/proto/*_grpc.py"
+    "*/motor/common/utils/proto/__pycache__/*"
 )
 
 # Set PYTHONPATH

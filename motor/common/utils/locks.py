@@ -40,7 +40,7 @@ class Lock(object):
             lease_resp = self.lease_stub.LeaseGrant(lease_req, timeout=timeout)
             self.lease_id = lease_resp.ID
 
-            logger.info("lease id is : %s", self.lease_id)
+            logger.debug("lease id is: %s", self.lease_id)
 
             # step2: write key when key not exist
             compare = rpc__pb2.Compare(

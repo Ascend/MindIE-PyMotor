@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 
 INOTIFY_MAX_USER_INSTANCES_PATH = "/proc/sys/fs/inotify/max_user_instances"
+INOTIFY_MAX_USER_WATCHES_PATH = "/proc/sys/fs/inotify/max_user_watches"
 
 
 class ConfigFileHandler(FileSystemEventHandler):
@@ -112,6 +113,15 @@ class ConfigWatcher:
         except (FileNotFoundError, ValueError):
             return -1
 
+    @staticmethod
+    def _get_inotify_watch_limit() -> int:
+        """Get current inotify max_user_watches limit"""
+        try:
+            with open(INOTIFY_MAX_USER_WATCHES_PATH, 'r') as f:
+                return int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            return -1
+
     def start(self):
         """Start watching the configuration file"""
         if not os.path.exists(self.config_path):
@@ -139,6 +149,13 @@ class ConfigWatcher:
                 logger.error("You can temporarily fix this by running: "
                              "echo 1024 | sudo tee %s", INOTIFY_MAX_USER_INSTANCES_PATH)
                 logger.error("For permanent fix, add 'fs.inotify.max_user_instances=1024' to /etc/sysctl.conf")
+            elif "inotify watch limit reached" in str(e):
+                logger.error("Failed to start config watcher: inotify watch limit reached. "
+                             "Please increase fs.inotify.max_user_watches limit. "
+                             "Current limit: %s", self._get_inotify_watch_limit())
+                logger.error("You can temporarily fix this by running: "
+                             "echo 524288 | sudo tee %s", INOTIFY_MAX_USER_WATCHES_PATH)
+                logger.error("For permanent fix, add 'fs.inotify.max_user_watches=524288' to /etc/sysctl.conf")
             else:
                 logger.error("Failed to start config watcher: %s", e)
             raise

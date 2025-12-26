@@ -213,7 +213,6 @@ class Instance(BaseModel):
                         return False
             return True
 
-    # Check if all endpoints of the instance are normal
     def is_all_endpoints_ready(self) -> bool:
         with self._lock:
             for pod_endpoints in self.endpoints.values():
@@ -222,13 +221,20 @@ class Instance(BaseModel):
                         return False
             return True
 
-    # Check if there is an endpoint with abnormal status
     def is_have_one_endpoint_abnormal(self) -> bool:
+        abnormal_endpoints: dict[str, list[int]] = {}  # pod_ip -> [endpoint_id]
         with self._lock:
             for pod_endpoints in self.endpoints.values():
                 for endpoint in pod_endpoints.values():
                     if endpoint.status == EndpointStatus.ABNORMAL:
-                        return True
+                        if endpoint.ip not in abnormal_endpoints:
+                            abnormal_endpoints[endpoint.ip] = []
+                        abnormal_endpoints[endpoint.ip].append(endpoint.id)
+
+            if abnormal_endpoints and len(abnormal_endpoints) > 0:
+                logger.warning("Instance %s(id:%d)'s endpoints %s have ABNORMAL status",
+                               self.job_name, self.id, abnormal_endpoints)
+                return True
             return False
 
     def is_ip_in_endpoints(self, ip: str) -> bool:

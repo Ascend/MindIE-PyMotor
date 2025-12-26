@@ -4,8 +4,9 @@
 import time
 import threading
 import hashlib
+import json
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Any
 
 from motor.common.utils.logger import get_logger
@@ -48,15 +49,34 @@ class PersistentAssembleInstanceMetadataState:
     timestamp: float
     checksum: str
 
+    def calculate_checksum(self) -> str:
+        """Calculate checksum for data integrity verification"""
+        try:
+            # Calculate checksum using raw data (not normalized) for performance
+            # Type consistency is handled in is_valid() method
+            sorted_data = str(sorted(self.metadata_data.items()))
+            data_str = f"{sorted_data}{self.version}{self.timestamp}"
+            return hashlib.sha256(data_str.encode()).hexdigest()
+        except Exception as e:
+            logger.error("Error calculating checksum: %s", e)
+            return ""
+
     def is_valid(self) -> bool:
         """Validate data integrity using checksum"""
-        current_checksum = self._calculate_checksum()
-        return self.checksum == current_checksum
+        # Try both original format checksum and JSON normalized checksum for compatibility
+        current_checksum = self.calculate_checksum()
+        if self.checksum == current_checksum:
+            return True
 
-    def _calculate_checksum(self) -> str:
-        """Calculate checksum for data integrity verification"""
-        data_str = f"{self.metadata_data}{self.version}{self.timestamp}"
-        return hashlib.sha256(data_str.encode()).hexdigest()
+        # Also try with JSON normalized data for cases where data was stored with different types
+        try:
+            normalized_data = json.loads(json.dumps(self.metadata_data, sort_keys=True))
+            normalized_checksum = hashlib.sha256(
+                f"{normalized_data}{self.version}{self.timestamp}".encode()
+            ).hexdigest()
+            return self.checksum == normalized_checksum
+        except Exception:
+            return False
 
 
 class InstanceAssembler(ThreadSafeSingleton):
@@ -115,8 +135,8 @@ class InstanceAssembler(ThreadSafeSingleton):
         # it will start with empty state.
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if enable_persistence:
-            self.restore_data()
+        if enable_persistence and not self.restore_data():
+            logger.warning("Failed to restore instance assembler data from ETCD, starting with empty state")
 
         # Create instance assembler threads
         self.assemble_instance_thread = threading.Thread(
@@ -149,10 +169,6 @@ class InstanceAssembler(ThreadSafeSingleton):
             and self.start_command_thread.is_alive()
         ):
             self.start_command_thread.join()
-
-        # Close ETCD client
-        if hasattr(self, 'etcd_client'):
-            self.etcd_client.close()
 
         logger.info("InstanceAssembler stopped.")
 
@@ -233,8 +249,8 @@ class InstanceAssembler(ThreadSafeSingleton):
         # Persist data on state change
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if enable_persistence:
-            self.persist_data()
+        if enable_persistence and not self.persist_data():
+            logger.warning("Failed to persist instance assembler data to ETCD")
 
         return 0
 
@@ -286,8 +302,8 @@ class InstanceAssembler(ThreadSafeSingleton):
         # Persist data on state change
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if enable_persistence:
-            self.persist_data()
+        if enable_persistence and not self.persist_data():
+            logger.warning("Failed to persist instance assembler data to ETCD after reregistration")
 
         return 0
 
@@ -301,14 +317,14 @@ class InstanceAssembler(ThreadSafeSingleton):
                 persistent_states = {}
                 # Persist ins_id_cnt
                 ins_id_cnt_data = {"ins_id_cnt": self.ins_id_cnt}
-                ins_id_cnt_checksum = self._calculate_ins_id_cnt_checksum()
-
-                persistent_states["ins_id_cnt"] = PersistentAssembleInstanceMetadataState(
+                ins_id_cnt_state = PersistentAssembleInstanceMetadataState(
                     metadata_data=ins_id_cnt_data,
                     version=next_version,
                     timestamp=current_time,
-                    checksum=ins_id_cnt_checksum
+                    checksum=""  # Will be calculated
                 )
+                ins_id_cnt_state.checksum = ins_id_cnt_state.calculate_checksum()
+                persistent_states["ins_id_cnt"] = ins_id_cnt_state
 
                 # Persist instances metadata
                 for job_name, metadata in self.instances.items():
@@ -339,16 +355,18 @@ class InstanceAssembler(ThreadSafeSingleton):
                         "register_timestamp": metadata.register_timestamp,
                         "is_reregister": metadata.is_reregister
                     }
-                    checksum = self._calculate_metadata_checksum(metadata)
-
-                    persistent_states[job_name] = PersistentAssembleInstanceMetadataState(
+                    persistent_state = PersistentAssembleInstanceMetadataState(
                         metadata_data=metadata_data,
                         version=next_version,
                         timestamp=current_time,
-                        checksum=checksum
+                        checksum=""  # Will be calculated
                     )
+                    persistent_state.checksum = persistent_state.calculate_checksum()
+                    persistent_states[job_name] = persistent_state
 
-                success = self.etcd_client.persist_data("/controller/instance_assembler", persistent_states)
+                # Convert dataclass objects to dict for etcd storage
+                dict_states = {key: asdict(state) for key, state in persistent_states.items()}
+                success = self.etcd_client.persist_data("/controller/instance_assembler", dict_states)
                 if success:
                     logger.info("Successfully persisted %d instance assembler states with version %d",
                                 len(persistent_states), next_version)
@@ -418,12 +436,26 @@ class InstanceAssembler(ThreadSafeSingleton):
                                     instance.add_node_mgr(pod_ip, host_ip, port)
 
                                 # Create metadata
+                                # Handle type conversion for data from ETCD (may be strings)
+                                register_status_value = metadata_data["register_status"]
+                                if isinstance(register_status_value, str):
+                                    register_status_value = int(register_status_value)
+                                start_command_send_times_value = metadata_data["start_command_send_times"]
+                                if isinstance(start_command_send_times_value, str):
+                                    start_command_send_times_value = int(start_command_send_times_value)
+                                register_timestamp_value = metadata_data["register_timestamp"]
+                                if isinstance(register_timestamp_value, str):
+                                    register_timestamp_value = float(register_timestamp_value)
+                                is_reregister_value = metadata_data["is_reregister"]
+                                if isinstance(is_reregister_value, str):
+                                    is_reregister_value = is_reregister_value.lower() == 'true'
+
                                 metadata = AssembleInstanceMetadata(
                                     instance=instance,
-                                    register_status=RegisterStatus(metadata_data["register_status"]),
-                                    start_command_send_times=metadata_data["start_command_send_times"],
-                                    register_timestamp=metadata_data["register_timestamp"],
-                                    is_reregister=metadata_data["is_reregister"]
+                                    register_status=RegisterStatus(register_status_value),
+                                    start_command_send_times=start_command_send_times_value,
+                                    register_timestamp=register_timestamp_value,
+                                    is_reregister=is_reregister_value
                                 )
 
                                 self.instances[key] = metadata
@@ -466,6 +498,10 @@ class InstanceAssembler(ThreadSafeSingleton):
             with self.lock:
                 job_names = list(self.instances.keys())
 
+            with self.config_lock:
+                max_retry_times = self.send_cmd_retry_times
+
+            state_changed = False
             for job_name in job_names:
                 with self.lock:
                     if job_name not in self.instances:
@@ -475,17 +511,12 @@ class InstanceAssembler(ThreadSafeSingleton):
                         if metadata.register_status != RegisterStatus.ASSEMBLED:
                             continue
 
-                with self.config_lock:
-                    enable_persistence = self.etcd_config.enable_etcd_persistence
-                    max_retry_times = self.send_cmd_retry_times
-
                 if self._send_start_command(metadata):
                     logger.info("Start command sent for instance %s successfully.", job_name)
                     with self.lock:
                         self.instances.pop(job_name, None)
                     # Persist data on state change (instance removed after successful start command)
-                    if enable_persistence:
-                        self.persist_data()
+                    state_changed = True
                 else:
                     retry_times = metadata.start_command_send_times + 1
                     if retry_times < max_retry_times:
@@ -493,19 +524,23 @@ class InstanceAssembler(ThreadSafeSingleton):
                                        job_name, retry_times, max_retry_times)
                         metadata.start_command_send_times = retry_times
                         # Persist data on state change (retry count updated)
-                        if enable_persistence:
-                            self.persist_data()
+                        state_changed = True
                     else:
                         logger.error("Failed to send start command to instance %s with (%d/%d) times, "
                                      "abort it.", job_name, retry_times, max_retry_times)
                         with self.lock:
                             self.instances.pop(job_name, None)
                         # Persist data on state change (instance removed after max retries)
-                        if enable_persistence:
-                            self.persist_data()
+                        state_changed = True
 
             with self.config_lock:
+                enable_persistence = self.etcd_config.enable_etcd_persistence
                 sleep_interval = self.instance_assembler_cmd_send_internal
+
+            # Persist data if any state changes occurred and persistence is enabled
+            if state_changed and enable_persistence and not self.persist_data():
+                logger.warning("Failed to persist instance assembler data to ETCD after sending start command")
+
             time.sleep(sleep_interval)
 
     def _send_start_command(self, metadata: AssembleInstanceMetadata) -> bool:
@@ -586,35 +621,11 @@ class InstanceAssembler(ThreadSafeSingleton):
         # Persist data on state change
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if need_persist and enable_persistence:
-            self.persist_data()
+        if need_persist and enable_persistence and not self.persist_data():
+            logger.warning("Failed to persist instance assembler data to ETCD")
 
     def _get_next_version(self) -> int:
         """Get next data version for persistence"""
         with self._version_lock:
             self._data_version += 1
             return self._data_version
-
-    def _calculate_metadata_checksum(self, metadata: AssembleInstanceMetadata) -> str:
-        """Calculate checksum for metadata data integrity"""
-        try:
-            # Calculate checksum using key fields
-            data_str = (f"{metadata.instance.job_name}{metadata.instance.id}"
-                        f"{metadata.register_status.value}{metadata.start_command_send_times}"
-                        f"{metadata.register_timestamp}{metadata.is_reregister}")
-            # Include endpoint information
-            for pod_ip, endpoints in metadata.instance.endpoints.items():
-                data_str += f"{pod_ip}:{len(endpoints)}"
-            return hashlib.sha256(data_str.encode()).hexdigest()
-        except Exception as e:
-            logger.error("Error calculating checksum for metadata %s: %s", metadata.instance.job_name, e)
-            return ""
-
-    def _calculate_ins_id_cnt_checksum(self) -> str:
-        """Calculate checksum for ins_id_cnt data integrity"""
-        try:
-            data_str = f"ins_id_cnt:{self.ins_id_cnt}"
-            return hashlib.sha256(data_str.encode()).hexdigest()
-        except Exception as e:
-            logger.error("Error calculating checksum for ins_id_cnt: %s", e)
-            return ""

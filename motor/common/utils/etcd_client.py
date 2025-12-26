@@ -17,6 +17,7 @@ from motor.common.utils.logger import get_logger
 T = TypeVar('T', bound=BaseModel)
 
 namespace = os.getenv("POD_NAMESPACE", "")
+job_name = os.getenv("JOB_NAME", "")
 logger = get_logger(__name__)
 UTF8_ENCODING = "utf-8"
 RB = 'rb'
@@ -25,8 +26,15 @@ RB = 'rb'
 class EtcdClient:
     """Etcd client with lease lock management and JSON data storage"""
 
-    def __init__(self, host: str = "localhost", port: int = 2379, ca_cert: str | None = None,
-                 cert_key: str | None = None, cert_cert: str | None = None, timeout: int = 5) -> None:
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 2379,
+        ca_cert: str | None = None,
+        cert_key: str | None = None,
+        cert_cert: str | None = None,
+        timeout: int = 5
+    ) -> None:
         self.host = host
         self.port = port
         self.ca_cert = ca_cert
@@ -70,11 +78,11 @@ class EtcdClient:
         self.close()
 
     @staticmethod
-    def get_key_with_namespace(key: str) -> str:
+    def get_key_with_namespace_and_job_name(key: str) -> str:
         """ key must start with / """
-        if key.startswith(namespace + "/"):
+        if key.startswith(namespace + "/" + job_name + "/"):
             return key
-        return namespace + key
+        return namespace + "/" + job_name + key
 
     @staticmethod
     def _prefix_range_end(prefix: str):
@@ -90,7 +98,7 @@ class EtcdClient:
     def acquire_lock(self, lock_key: str, ttl: int = 30) -> str | None:
         try:
             with self._lock:
-                lock_key = self.get_key_with_namespace(lock_key)
+                lock_key = self.get_key_with_namespace_and_job_name(lock_key)
                 if lock_key in self._leases:
                     logger.error("Lock %s already exists", lock_key)
                     return None
@@ -113,7 +121,7 @@ class EtcdClient:
         """Renew lease for a lock"""
         try:
             with self._lock:
-                lock_key = self.get_key_with_namespace(lock_key)
+                lock_key = self.get_key_with_namespace_and_job_name(lock_key)
                 if lock_key not in self._leases:
                     logger.error("Lock %s does not exist", lock_key)
                     return False
@@ -145,7 +153,7 @@ class EtcdClient:
         """Release a lease lock"""
         try:
             with self._lock:
-                lock_key = self.get_key_with_namespace(lock_key)
+                lock_key = self.get_key_with_namespace_and_job_name(lock_key)
                 if lock_key not in self._leases:
                     logger.warning("Lock %s does not exist", lock_key)
                     return False
@@ -175,14 +183,24 @@ class EtcdClient:
 
             value = json_data
 
-            key = self.get_key_with_namespace(key)
+            key = self.get_key_with_namespace_and_job_name(key)
             if lease:
                 self.kv_stub.Put(
-                    rpc_pb2.PutRequest(key=key.encode(UTF8_ENCODING), value=value.encode(UTF8_ENCODING), lease=lease),
-                    timeout=self.timeout)
+                    rpc_pb2.PutRequest(
+                        key=key.encode(UTF8_ENCODING),
+                        value=value.encode(UTF8_ENCODING),
+                        lease=lease
+                    ),
+                    timeout=self.timeout
+                )
             else:
-                self.kv_stub.Put(rpc_pb2.PutRequest(key=key.encode(UTF8_ENCODING), value=value.encode(UTF8_ENCODING)),
-                                 timeout=self.timeout)
+                self.kv_stub.Put(
+                    rpc_pb2.PutRequest(
+                        key=key.encode(UTF8_ENCODING),
+                        value=value.encode(UTF8_ENCODING)
+                    ),
+                    timeout=self.timeout
+                )
 
             logger.info("Stored JSON data for key %s", key)
             return True
@@ -193,10 +211,14 @@ class EtcdClient:
     def delete_prefix(self, prefix: str) -> bool:
         """Delete all keys with given prefix"""
         try:
-            prefix = self.get_key_with_namespace(prefix)
+            prefix = self.get_key_with_namespace_and_job_name(prefix)
             resp = self.kv_stub.DeleteRange(
-                rpc_pb2.DeleteRangeRequest(key=prefix.encode(UTF8_ENCODING), range_end=self._prefix_range_end(prefix)),
-                timeout=self.timeout)
+                rpc_pb2.DeleteRangeRequest(
+                    key=prefix.encode(UTF8_ENCODING),
+                    range_end=self._prefix_range_end(prefix)
+                ),
+                timeout=self.timeout
+            )
             deleted_count = resp.deleted
             logger.info("Deleted %d keys with prefix %s", deleted_count, prefix)
             return True
@@ -207,9 +229,11 @@ class EtcdClient:
     def delete_key(self, key: str) -> bool:
         """Delete a specific key"""
         try:
-            key = self.get_key_with_namespace(key)
-            resp = self.kv_stub.DeleteRange(rpc_pb2.DeleteRangeRequest(key=key.encode(UTF8_ENCODING)),
-                                            timeout=self.timeout)
+            key = self.get_key_with_namespace_and_job_name(key)
+            resp = self.kv_stub.DeleteRange(
+                rpc_pb2.DeleteRangeRequest(key=key.encode(UTF8_ENCODING)),
+                timeout=self.timeout
+            )
             deleted_count = resp.deleted
             if deleted_count == 0:
                 logger.info("key %s not found", key)
@@ -256,7 +280,7 @@ class EtcdClient:
                     if not self.put_json(full_key, data_value):
                         logger.error("Failed to persist data for key %s", full_key)
                         return False
-                logger.info("Persisted %d items with prefix %s", len(data), key_prefix)
+                logger.debug("Persisted %d items with prefix %s", len(data), key_prefix)
                 return True
 
         except Exception as e:
@@ -272,7 +296,7 @@ class EtcdClient:
         try:
             data = self.get_prefix_data(key_prefix, model_class)
             if data:
-                logger.info("Restored %d items with prefix %s", len(data), key_prefix)
+                logger.debug("Restored %d items with prefix %s", len(data), key_prefix)
             return data
 
         except Exception as e:
@@ -287,12 +311,18 @@ class EtcdClient:
         """Get all data under a prefix as dictionary"""
         data = {}
         try:
-            key_prefix = self.get_key_with_namespace(key_prefix)
+            key_prefix = self.get_key_with_namespace_and_job_name(key_prefix)
             resp = self.kv_stub.Range(
-                rpc_pb2.RangeRequest(key=key_prefix.encode(UTF8_ENCODING), range_end=self._prefix_range_end(key_prefix),
-                                     limit=0,
-                                     keys_only=False), timeout=self.timeout)
+                rpc_pb2.RangeRequest(
+                    key=key_prefix.encode(UTF8_ENCODING),
+                    range_end=self._prefix_range_end(key_prefix),
+                    limit=0,
+                    keys_only=False
+                ),
+                timeout=self.timeout
+            )
 
+            logger.info("Getting %d items with prefix %s", len(resp.kvs), key_prefix)
             for kv_pair in resp.kvs:
                 full_key_bytes = kv_pair.key
                 full_key = full_key_bytes.decode(UTF8_ENCODING)

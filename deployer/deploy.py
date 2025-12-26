@@ -168,6 +168,15 @@ def modify_controller_or_coordinator_yaml(data, user_config):
         VALUE: role
     })
 
+    # Generate unique job name
+    uuid_spec = generate_unique_id()
+    job_name = f"{deploy_config[CONFIG_JOB_ID]}-{role}-{uuid_spec}"
+    deployment_data[METADATA][LABELS]["job-name"] = job_name
+    container[ENV].append({
+        NAME: "JOB_NAME",
+        VALUE: job_name
+    })
+
     # Modify service data
     service_data = data[1]
     service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
@@ -336,11 +345,11 @@ def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, depl
     coordinator_service_data = coordinator_data[1]
 
     global g_controller_service
-    g_controller_service = (controller_service_data[METADATA][NAME] +
-                                    "." + deploy_config[CONFIG_JOB_ID] + ".svc.cluster.local")
+    controller_name = controller_service_data[METADATA][NAME]
+    g_controller_service = f"{controller_name}.{deploy_config[CONFIG_JOB_ID]}.svc.cluster.local"
     global g_coordinator_service
-    g_coordinator_service = (coordinator_service_data[METADATA][NAME] +
-                                    "." + deploy_config[CONFIG_JOB_ID] + ".svc.cluster.local")
+    coordinator_name = coordinator_service_data[METADATA][NAME]
+    g_coordinator_service = f"{coordinator_name}.{deploy_config[CONFIG_JOB_ID]}.svc.cluster.local"
 
 
 def exec_all_kubectl_multi(deploy_config, out_path, user_config_path):

@@ -196,8 +196,8 @@ class FaultManager(ThreadSafeSingleton, Observer):
         # it will start with empty state.
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if enable_persistence:
-            self.restore_data()
+        if enable_persistence and not self.restore_data():
+            logger.warning("Failed to restore fault manager data from ETCD, starting with empty state")
 
         self.server_status_subscriber_thread.start()
         self.ft_strategy_center_thread.start()
@@ -219,10 +219,6 @@ class FaultManager(ThreadSafeSingleton, Observer):
             and self.ft_strategy_center_thread.is_alive()
         ):
             self.ft_strategy_center_thread.join()
-
-        # Close ETCD client
-        if hasattr(self, 'etcd_client'):
-            self.etcd_client.close()
 
         logger.info("FaultManager stopped.")
 
@@ -586,10 +582,9 @@ class FaultManager(ThreadSafeSingleton, Observer):
         # Active persistence whenever hardware fault info is updated
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
-        if enable_persistence:
-            logger.debug("Instance %d fault status updated to %s:%s, triggering persistence",
-                         instance_id, final_level, str(fault_code))
-            self.persist_data()
+        if enable_persistence and not self.persist_data():
+            logger.warning("Failed to persist fault manager data to ETCD after instance status updated",
+                           instance_id, final_level, str(fault_code))
 
     def _eval_server_status(self, pod_ip: str) -> DeviceFaultInfo | None:
         server_metadata = None
@@ -680,9 +675,8 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     # Active persistence whenever strategy completes
                     with self.config_lock:
                         enable_persistence = self.etcd_config.enable_etcd_persistence
-                    if enable_persistence:
-                        logger.debug("Strategy for instance %d finished, triggering persistence", ins_id)
-                        self.persist_data()
+                    if enable_persistence and not self.persist_data():
+                        logger.warning("Failed to persist fault manager data to ETCD after strategy completion")
                 else:
                     # New strategy and have unfinished strategy will both reach here.
                     ins_metadata.fault_level = fault_level

@@ -125,8 +125,9 @@ class StandbyManager(ThreadSafeSingleton):
         """Set current pod role"""
         with self.role_lock:
             if self.current_role != role:
+                old_role = self.current_role
                 self.current_role = role
-                logger.info("Role changed from %s to %s", self.current_role.value, role.value)
+                logger.info("Role changed from %s to %s", old_role.value, role.value)
 
     def _master_standby_loop(self) -> None:
         """Master/standby management loop"""
