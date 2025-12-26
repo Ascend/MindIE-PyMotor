@@ -57,6 +57,9 @@ class MockAsyncClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
     
+    async def aclose(self):
+        pass
+
     async def post(self, url, json=None, headers=None):
         self.post_count += 1
         if self.post_exc and self.post_fail_count < self.post_fail_times:

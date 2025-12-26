@@ -17,6 +17,7 @@ from motor.coordinator.scheduler.scheduler import Scheduler
 from motor.coordinator.router.request_error_handler import handle_request_errors
 from motor.common.resources.endpoint import WorkloadAction
 from motor.common.resources.instance import PDRole
+from motor.common.utils.http_client import AsyncSafeHTTPSClient
 from motor.common.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,6 +85,7 @@ class BaseRouter(ABC):
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
                     detail=f"Scheduling failed, role:{role}"
                 )
+            time.sleep(0.1)
         self.logger.debug("Scheduled instance: %s, role: %s", ins.job_name, role)
 
         # If scheduler returns normally, it means allocation was successful
@@ -121,10 +123,9 @@ class BaseRouter(ABC):
         timeout = CoordinatorConfig().exception_config.first_token_timeout \
             if CoordinatorConfig().exception_config.first_token_timeout != 0 else None
 
-        async with httpx.AsyncClient(
-            timeout=timeout,
+        async with AsyncSafeHTTPSClient(
             base_url=base_url,
-            verify=False
+            timeout=timeout
         ) as client:
             self.first_chunk_sent = False
             async with client.stream(
@@ -166,9 +167,10 @@ class BaseRouter(ABC):
         timeout = CoordinatorConfig().exception_config.infer_timeout \
             if CoordinatorConfig().exception_config.infer_timeout != 0 else None
 
-        async with httpx.AsyncClient(timeout=timeout,
-                                     base_url=base_url,
-                                     verify=False) as client:
+        async with AsyncSafeHTTPSClient(
+            base_url=base_url, 
+            timeout=timeout
+        ) as client:
 
             response = await client.post(f"/{self.req_info.api}",
                                          json=req_data,

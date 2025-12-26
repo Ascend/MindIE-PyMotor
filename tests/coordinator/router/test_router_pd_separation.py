@@ -43,6 +43,9 @@ class MockAsyncClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         pass
     
+    async def aclose(self):
+        pass
+
     def stream(self, method, url, json=None, headers=None):
         if self.fail_count < self.fail_times:
             self.fail_count += 1

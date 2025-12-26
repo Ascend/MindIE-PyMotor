@@ -2,9 +2,12 @@
 # Copyright (c) 2025, HUAWEI CORPORATION.  All rights reserved.
 
 import os
+import ssl
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
+
 import requests
+import httpx
 
 
 class ConnectionMode(Enum):
@@ -87,3 +90,38 @@ class SafeHTTPSClient:
 
     def close(self) -> None:
         self.session.close()
+
+
+class AsyncSafeHTTPSClient():
+    
+    def __init__(
+        self,
+        base_url: str,
+        cert_file: Optional[str] = None,
+        key_file: Optional[str] = None,
+        ca_file: Optional[str] = None,
+        **client_kwargs
+    ):
+        
+        self.verify = True
+
+        if cert_file and key_file and ca_file:
+            if not os.path.exists(cert_file) or not os.path.exists(key_file):
+                raise FileNotFoundError("can not find cert file or key file or CA cert file.")
+            ssl_context = ssl.create_default_context(cafile=ca_file)
+            ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+            self.verify = ssl_context
+        
+        self._client: httpx.AsyncClient = httpx.AsyncClient(base_url=base_url,
+                                                            verify=self.verify,
+                                                            **client_kwargs)
+    
+    async def __aenter__(self):
+        return self._client
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    async def close(self):
+        await self._client.aclose()
+        self._client = None
