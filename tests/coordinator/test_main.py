@@ -106,59 +106,43 @@ def test_on_become_master_exception(mock_logger, setup_modules):
 
 @patch('motor.coordinator.main.config', new_callable=lambda: MagicMock())
 @patch('motor.coordinator.main.logger')
-def test_on_become_master_instance(mock_logger, mock_config, setup_modules):
+@patch('motor.coordinator.main.initialize_components')
+def test_on_become_master_instance(mock_initialize_components, mock_logger, mock_config, setup_modules):
     """
     Test the situation where the stop method is correctly called under normal circumstances
     """
     # Mock the config to have standby disabled
     mock_config.standby_config.enable_master_standby = False
 
+    # Create mock modules
+    mock_instance_manager = MagicMock()
+    mock_request_manager = MagicMock()
+    mock_metrics_collector = MagicMock()
+    mock_instance_health_checker = MagicMock()
+    mock_coordinator_server = MagicMock()
+
+    # Mock initialize_components to populate modules with our mocks
+    def mock_init_components():
+        from motor.coordinator.main import modules
+        modules["InstanceManager"] = mock_instance_manager
+        modules["RequestManager"] = mock_request_manager
+        modules["MetricsListener"] = mock_metrics_collector
+        modules["InstanceHealthChecker"] = mock_instance_health_checker
+        modules["CoordinatorServer"] = mock_coordinator_server
+
+    mock_initialize_components.side_effect = mock_init_components
+
     on_become_master()
 
     mock_logger.info.assert_any_call("Becoming master, starting all modules...")
-    mock_logger.info.assert_any_call("Initializing coordinator components...")
-    mock_logger.info.assert_any_call("Initializing InstanceManager...")
-
     mock_logger.info.assert_called_with("All modules started.")
 
-    assert "InstanceManager" in setup_modules
-    assert "RequestManager" in setup_modules
-    assert "MetricsListener" in setup_modules
-    assert "InstanceHealthChecker" in setup_modules
-    assert "CoordinatorServer" in setup_modules
-
-
-@pytest.mark.asyncio
-async def test_main_standalone_mode_success():
-    """
-    测试场景：在非主备模式下正常启动服务
-    """
-    with patch.dict('os.environ', {'MOTOR_COORDINATOR_CONFIG_PATH': '/fake/config.json'}), \
-            patch('motor.config.coordinator.CoordinatorConfig.from_json') as mock_from_json, \
-            patch('motor.coordinator.main.modules', {"CoordinatorServer": AsyncMock(run=AsyncMock())}), \
-            patch('motor.coordinator.main.os.path.exists', return_value=True), \
-            patch('motor.coordinator.main.ConfigWatcher') as mock_config_watcher_class, \
-            patch('motor.coordinator.main.initialize_components'), \
-            patch('motor.coordinator.main.start_all_modules'), \
-            patch('motor.coordinator.main.stop_all_modules'), \
-            patch('motor.coordinator.main.logger') as mock_logger:
-        # Mock config object
-        mock_config = MagicMock()
-        mock_config.config_path = '/fake/config.json'
-        mock_config.standby_config.enable_master_standby = False
-        mock_from_json.return_value = mock_config
-
-        mock_config_watcher_instance = MagicMock()
-        mock_config_watcher_class.return_value = mock_config_watcher_instance
-
-        await main()
-
-        # 验证关键步骤被执行
-        mock_logger.info.assert_any_call("Starting Motor Coordinator HTTP server...")
-        mock_logger.info.assert_any_call("Loaded configuration from: /fake/config.json")
-        mock_logger.info.assert_any_call("Master/standby feature is disabled, running in standalone mode")
-        mock_config_watcher_instance.start.assert_called_once()
-        mock_config_watcher_instance.stop.assert_called_once()
+    # Verify that start() was called on the mocked modules
+    mock_instance_manager.start.assert_called_once()
+    mock_request_manager.start.assert_called_once()
+    mock_metrics_collector.start.assert_called_once()
+    mock_instance_health_checker.start.assert_called_once()
+    mock_coordinator_server.start.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -20,9 +20,6 @@ from motor.coordinator.scheduler.scheduler import Scheduler
 from tests.coordinator.router.mock_openai_request import MockStreamResponse, create_mock_request_info
 import motor.coordinator.router.router as router
 from motor.coordinator.scheduler.scheduler import Scheduler
-from motor.common.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 app = FastAPI()
 @app.post("/v1/chat/completions")
@@ -88,7 +85,6 @@ class MockAsyncClient:
             
         from urllib.parse import urlparse
         client = TestClient(app)
-        logger.info(f"req_data_from_router header: {headers}, body:{json}")
         self.req_headers_from_router = headers
         
         url = json["kv_transfer_params"]["metaserver"]
@@ -104,7 +100,6 @@ class MockAsyncClient:
                 "remote_host": parsed_url.hostname,
                 "remote_port": str(parsed_url.port)
             })
-            logger.debug(f"metaserver response : {response.text}")
             response.raise_for_status()
         except Exception as e:
             return MockStreamResponse(json or {}, recomputed=False, exc=httpx.HTTPStatusError(
@@ -397,7 +392,6 @@ class TestRouterCDPSeparation:
             async for chunk in response.body_iterator:
                 chunks.append(chunk)
             chunk_str = b"".join(chunks).decode('utf-8')
-        logger.info(f"chunk_str:{chunk_str}")
         assert error_message in chunk_str
         assert mock_async_client.stream_count == 1
         assert mock_async_client.stream_fail_count == 1

@@ -20,9 +20,6 @@ from motor.common.resources.instance import Endpoint, PDRole, Instance, InsStatu
 from tests.coordinator.router.mock_openai_request import MockStreamResponse, create_mock_request_info
 from motor.coordinator.scheduler.scheduler import Scheduler
 import motor.coordinator.router.router as router
-from motor.common.utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 app = FastAPI()
 @app.post("/v1/chat/completions")
@@ -182,7 +179,6 @@ class TestRouterPDSeparation:
         async def mock_forward_post_request(self, req_data: dict, resource: ScheduledResource):
             nonlocal generated_prefill_request
             generated_prefill_request = req_data
-            logger.info(f"Generated P request: {generated_prefill_request}")
             # Return a mock response for P request
             mock_response = Mock()
             mock_response.json.return_value = {
@@ -200,7 +196,6 @@ class TestRouterPDSeparation:
         async def mock_forward_stream_request(self, req_data: dict, resource: ScheduledResource):
             nonlocal generated_decode_request
             generated_decode_request = req_data
-            logger.info(f"Generated D request: {generated_decode_request}")
             # Yield a simple response for D request
             yield b'{"choices": [{"delta": {"content": "Hello"}}]}'
         monkeypatch.setattr(SeparatePDRouter, "forward_stream_request", mock_forward_stream_request)
@@ -261,7 +256,6 @@ class TestRouterPDSeparation:
                 "model": "test-model", 
                 "messages": [{"role": "user", "content": "Hello"}]
             })
-            logger.info(f"Response status code: {response.text}")
             
         assert error_message in response.text
         # Should get a 4XX error
@@ -509,7 +503,6 @@ class TestRouterPDSeparation:
     async def test_engine_server_stream_recompute(self, client, monkeypatch: MonkeyPatch, setup_pd_separation):
         # Mock the HTTP forwarding functions
         async def mock_forward_post_request(self, req_data: dict, resource: ScheduledResource):
-            logger.info(f"Prefill request: {req_data}")
             # Return a mock response for P request
             mock_response = Mock()
             mock_response.json.return_value = {
@@ -538,7 +531,6 @@ class TestRouterPDSeparation:
             for chunk in response.iter_lines():
                 if not chunk: continue
                 
-                logger.info(f"Received: {chunk}")
                 # Process SSE format data
                 if chunk.startswith("data: "):
                     chunk = chunk[6:]  # Remove "data: " prefix
@@ -551,7 +543,6 @@ class TestRouterPDSeparation:
                             if "content" in delta:
                                 result += delta["content"]
                 except json.JSONDecodeError:
-                    logger.error("JSONDecodeError")
                     continue
         
             assert result == ",1,2,3,4,5,6,7,8,9,10"
@@ -562,7 +553,6 @@ class TestRouterPDSeparation:
         
         # Mock the HTTP forwarding functions
         async def mock_forward_post_request(self, req_data: dict, resource: ScheduledResource):
-            logger.info(f"Prefill request: {req_data}")
             # Return a mock response for P request
             mock_response = Mock()
             mock_response.json.return_value = {
@@ -591,7 +581,6 @@ class TestRouterPDSeparation:
             for chunk in response.iter_lines():
                 if not chunk: continue
                 
-                logger.info(f"Received: {chunk}")
                 try:
                     chunk_json = json.loads(chunk)  # Validate if it's valid JSON
                     if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
@@ -599,7 +588,6 @@ class TestRouterPDSeparation:
                             if "content" in message:
                                 result += message["content"]
                 except json.JSONDecodeError:
-                    logger.error("JSONDecodeError")
                     continue
         
             assert result == ",1,2,3,4,5,6,7,8,9,10"

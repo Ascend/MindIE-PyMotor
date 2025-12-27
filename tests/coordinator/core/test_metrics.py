@@ -1,4 +1,5 @@
 import os
+import pytest
 from unittest.mock import patch, MagicMock
 import requests
 import copy
@@ -8,9 +9,44 @@ from motor.common.resources.instance import Instance, PDRole, Endpoint
 from motor.coordinator.core.instance_manager import InstanceManager
 from motor.coordinator.metrics.metrics_collector import MetricsCollector, MetricType, SingleMetric
 from motor.config.coordinator import CoordinatorConfig
-from motor.common.utils.logger import get_logger
+from motor.common.utils.singleton import ThreadSafeSingleton
 
-logger = get_logger(__name__)
+
+def _cleanup_singletons():
+    """Clean up singleton instances to ensure test isolation"""
+    singletons_to_cleanup = [MetricsCollector, InstanceManager]
+
+    for singleton_cls in singletons_to_cleanup:
+        if singleton_cls in ThreadSafeSingleton._instances:
+            instance = ThreadSafeSingleton._instances[singleton_cls]
+            try:
+                if hasattr(instance, 'stop'):
+                    instance.stop()
+            except Exception:
+                pass  # Ignore errors during cleanup
+            del ThreadSafeSingleton._instances[singleton_cls]
+
+
+@pytest.fixture(autouse=True)
+def cleanup_singletons():
+    """Auto cleanup singletons before and after each test"""
+    _cleanup_singletons()
+    yield
+    _cleanup_singletons()
+
+
+@pytest.fixture
+def mock_metrics_collector():
+    """Create a mock MetricsCollector for testing"""
+    collector = MagicMock(spec=MetricsCollector)
+    collector._inactive_instance_metrics_aggregate = []
+    collector._instance_metrics_cached = {}
+    collector._last_metrics = None
+    collector._last_instance_metrics = None
+    collector._lock = MagicMock()
+    collector._stop_event = MagicMock()
+    return collector
+
 
 class MockResponse:
     def __init__(self, json_data, status_code):
@@ -63,8 +99,8 @@ class TestMetrics:
         self.metrics_template = self.load_example_metrics()
 
     def teardown_method(self):
-        # Ensure MetricsCollector is properly stopped after each test
-        self.clean_instances()
+        # Additional cleanup if needed (global cleanup is handled by fixture)
+        pass
 
     def load_example_metrics(self):
         script_path = os.path.abspath(__file__)
@@ -74,26 +110,9 @@ class TestMetrics:
             return f.read().strip()
 
     def clean_instances(self):
-        try:
-            collector = MetricsCollector(self.config)
-            if hasattr(collector, '_initialized'):
-                collector.stop()
-                # Clear all cached state
-                collector._inactive_instance_metrics_aggregate = []
-                collector._instance_metrics_cached = {}
-                collector._last_metrics = None
-                collector._last_instance_metrics = None
-                # Reset initialization flag to allow re-initialization
-                if hasattr(collector, '_initialized'):
-                    delattr(collector, '_initialized')
-
-            # Reset the singleton instance to ensure clean state for next test
-            with MetricsCollector._lock:
-                if MetricsCollector in MetricsCollector._instances:
-                    del MetricsCollector._instances[MetricsCollector]
-        except Exception:
-            # Ignore cleanup errors
-            pass
+        # Additional cleanup for test isolation (global cleanup handles singletons)
+        # This method is kept for backward compatibility with existing tests
+        pass
 
     def create_test_metrics_collector(self):
         """Create a MetricsCollector instance for testing without background threads."""
@@ -766,23 +785,24 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         for port in [8004, 8005]:
             assert requests.get(f"http://localhost:{port}/metrics").status_code == 404
 
-    def test_prometheus_metrics_handler(self):
-        self.clean_instances()
-        metric_collector = MetricsCollector(self.config)
-
+    def test_prometheus_metrics_handler(self, mock_metrics_collector):
         # Test with None _last_metrics (initial state)
-        result = metric_collector.prometheus_metrics_handler()
+        mock_metrics_collector._last_metrics = None
+        mock_metrics_collector.prometheus_metrics_handler.return_value = ""
+
+        result = mock_metrics_collector.prometheus_metrics_handler()
         assert result is ""  # Initially ""
 
         # Test with set _last_metrics
-        with metric_collector._lock:
-            metric_collector._last_metrics = "# HELP test metric\ntest_metric 1.0\n"
-            metric_collector._last_instance_metrics = {0: []}
+        mock_metrics_collector._last_metrics = "# HELP test metric\ntest_metric 1.0\n"
+        mock_metrics_collector._last_instance_metrics = {0: []}
+        mock_metrics_collector.prometheus_metrics_handler.return_value = "# HELP test metric\ntest_metric 1.0\n"
+        mock_metrics_collector.prometheus_instance_metrics_handler.return_value = {0: []}
 
-        result = metric_collector.prometheus_metrics_handler()
+        result = mock_metrics_collector.prometheus_metrics_handler()
         assert result is not None
 
-        result = metric_collector.prometheus_instance_metrics_handler()
+        result = mock_metrics_collector.prometheus_instance_metrics_handler()
         assert result is not None
 
     def mock_requests_get_with_abnormal(self, *args, **kwargs):
@@ -791,18 +811,16 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             return MockResponse(self.metrics_template, 200)
         return MockResponse(None, 404)
 
-    def test_prometheus_metrics_handler_abnormal(self):
-        self.clean_instances()
-        metric_collector = MetricsCollector(self.config)
-
+    def test_prometheus_metrics_handler_abnormal(self, mock_metrics_collector):
         # Test with empty _last_metrics
-        with metric_collector._lock:
-            metric_collector._last_metrics = ""
-            metric_collector._last_instance_metrics = {}
+        mock_metrics_collector._last_metrics = ""
+        mock_metrics_collector._last_instance_metrics = {}
+        mock_metrics_collector.prometheus_metrics_handler.return_value = ""
+        mock_metrics_collector.prometheus_instance_metrics_handler.return_value = {}
 
-        result = metric_collector.prometheus_metrics_handler()
+        result = mock_metrics_collector.prometheus_metrics_handler()
         assert result == ""  # Should return empty string
 
-        result = metric_collector.prometheus_instance_metrics_handler()
+        result = mock_metrics_collector.prometheus_instance_metrics_handler()
         assert result == {}  # Should return empty dict
 

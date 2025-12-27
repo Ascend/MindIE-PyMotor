@@ -8,6 +8,9 @@ show_help() {
     echo "  -v, --verbose     Show detailed test output"
     echo "  -s                Show test output content"
     echo "  -x                Stop immediately on first failure"
+    echo "  -n NUM            Run tests in parallel using NUM processes (default: 6, requires pytest-xdist)"
+    echo "  --serial          Run tests serially (disable parallel execution)"
+    echo "  --durations=N     Show slowest N test durations"
     echo "  --cov             Enable code coverage statistics"
     echo "  --cov-report=    Specify coverage report format (term/html/xml)"
     echo "  --exclude=        Exclude files/directories from coverage (supports wildcards)"
@@ -40,6 +43,9 @@ PYTEST_ARGS=""
 COVERAGE_ENABLED=false
 COVERAGE_REPORT="term"
 COVERAGE_EXCLUDE=()
+PARALLEL_PROCESSES="6"  # Default to 6 parallel processes
+DISABLE_PARALLEL=false
+HAS_WARNINGS=false
 
 # Default excluded files/directories (generated files, test files, etc.)
 DEFAULT_EXCLUDES=(
@@ -62,6 +68,18 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             show_help
             exit 0
+            ;;
+        -n)
+            PARALLEL_PROCESSES="$2"
+            shift 2
+            ;;
+        -n*)
+            PARALLEL_PROCESSES="${1#-n}"
+            shift
+            ;;
+        --serial)
+            DISABLE_PARALLEL=true
+            shift
             ;;
         --cov)
             COVERAGE_ENABLED=true
@@ -90,6 +108,7 @@ check_dependencies() {
     python3 -c "import pytest" 2>/dev/null || { echo "Installing pytest..."; pip install pytest; }
     python3 -c "import pytest_cov" 2>/dev/null || { echo "Installing pytest-cov..."; pip install pytest-cov; }
     python3 -c "import pytest_asyncio" 2>/dev/null || { echo "Installing pytest-asyncio..."; pip install pytest-asyncio; }
+    python3 -c "import pytest_xdist" 2>/dev/null || { echo "Installing pytest-xdist..."; pip install pytest-xdist; }
     
     # Check project core dependencies
     echo "Checking project core dependencies..."
@@ -138,6 +157,11 @@ if ! echo " $PYTEST_ARGS " | grep -qE " (--color=|--color )"; then
     CMD="$CMD --color=yes"
 fi
 
+# If parallel execution is enabled and not disabled
+if [ "$DISABLE_PARALLEL" = false ] && [ -n "$PARALLEL_PROCESSES" ]; then
+    CMD="$CMD -n $PARALLEL_PROCESSES"
+fi
+
 # If coverage statistics are enabled
 if [ "$COVERAGE_ENABLED" = true ]; then
     # Create temporary .coveragerc configuration file
@@ -147,18 +171,18 @@ if [ "$COVERAGE_ENABLED" = true ]; then
 source = motor
 omit = 
 EOF
-    
+
     # Add exclusion file configuration (default exclusion rules + user-specified rules)
     for exclude_pattern in "${DEFAULT_EXCLUDES[@]}"; do
         echo "    $exclude_pattern" >> "$COVERAGERC_FILE"
     done
-    
+
     if [ ${#COVERAGE_EXCLUDE[@]} -gt 0 ]; then
         for exclude_pattern in "${COVERAGE_EXCLUDE[@]}"; do
             echo "    $exclude_pattern" >> "$COVERAGERC_FILE"
         done
     fi
-    
+
     # Specify source code path and test path
     CMD="$CMD --cov=motor --cov-report=$COVERAGE_REPORT --cov-config=$COVERAGERC_FILE"
 fi
@@ -198,51 +222,45 @@ show_test_summary() {
             summary_line=$(grep -E "[0-9]+ (passed|failed|error)" "$output_file" | grep -E "in [0-9]+\.[0-9]+s" | tail -1)
         fi
         
+        # Initialize variables
+        passed=0
+        failed=0
+        errors=0
+        skipped=0
+        warnings=0
+
         # Extract counts for various test states from the summary line
         if [ -n "$summary_line" ]; then
-            passed=$(echo "$summary_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
-            failed=$(echo "$summary_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1)
-            errors=$(echo "$summary_line" | grep -oE "[0-9]+ error" | grep -oE "[0-9]+" | head -1)
-            skipped=$(echo "$summary_line" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" | head -1)
+            passed=$(echo "$summary_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
+            failed=$(echo "$summary_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
+            errors=$(echo "$summary_line" | grep -oE "[0-9]+ error" | grep -oE "[0-9]+" | head -1 || echo "0")
+            skipped=$(echo "$summary_line" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" | head -1 || echo "0")
             # Extract warnings (supports both "warning" and "warnings")
-            warnings=$(echo "$summary_line" | grep -oE "[0-9]+ warnings?" | grep -oE "[0-9]+" | head -1)
+            warnings=$(echo "$summary_line" | grep -oE "[0-9]+ warnings?" | grep -oE "[0-9]+" | head -1 || echo "0")
         else
             # Fallback: try to extract from last lines without summary line format
-            passed=$(echo "$last_lines" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1)
-            failed=$(echo "$last_lines" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1)
-            errors=$(echo "$last_lines" | grep -oE "[0-9]+ error" | grep -oE "[0-9]+" | head -1)
-            skipped=$(echo "$last_lines" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" | head -1)
-            warnings=$(echo "$last_lines" | grep -oE "[0-9]+ warnings?" | grep -oE "[0-9]+" | head -1)
+            passed=$(echo "$last_lines" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
+            failed=$(echo "$last_lines" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
+            errors=$(echo "$last_lines" | grep -oE "[0-9]+ error" | grep -oE "[0-9]+" | head -1 || echo "0")
+            skipped=$(echo "$last_lines" | grep -oE "[0-9]+ skipped" | grep -oE "[0-9]+" | head -1 || echo "0")
+            warnings=$(echo "$last_lines" | grep -oE "[0-9]+ warnings?" | grep -oE "[0-9]+" | head -1 || echo "0")
         fi
 
-        # Ensure variables are set to "0" if empty (no matches found)
-        passed=${passed:-0}
-        failed=${failed:-0}
-        errors=${errors:-0}
-        skipped=${skipped:-0}
-        warnings=${warnings:-0}
         
         # If still not found, try searching the entire file
         if [ -z "$passed" ] || [ "$passed" = "0" ]; then
-            passed=$(grep -oE "[0-9]+ passed" "$output_file" | grep -oE "[0-9]+" | head -1)
-            failed=$(grep -oE "[0-9]+ failed" "$output_file" | grep -oE "[0-9]+" | head -1)
-            errors=$(grep -oE "[0-9]+ error" "$output_file" | grep -oE "[0-9]+" | head -1)
-            skipped=$(grep -oE "[0-9]+ skipped" "$output_file" | grep -oE "[0-9]+" | head -1)
+            passed=$(grep -oE "[0-9]+ passed" "$output_file" | grep -oE "[0-9]+" | head -1 || echo "0")
+            failed=$(grep -oE "[0-9]+ failed" "$output_file" | grep -oE "[0-9]+" | head -1 || echo "0")
+            errors=$(grep -oE "[0-9]+ error" "$output_file" | grep -oE "[0-9]+" | head -1 || echo "0")
+            skipped=$(grep -oE "[0-9]+ skipped" "$output_file" | grep -oE "[0-9]+" | head -1 || echo "0")
             # Also search for warnings in the entire file
             if [ -z "$warnings" ] || [ "$warnings" = "0" ]; then
-                warnings=$(grep -oE "[0-9]+ warnings?" "$output_file" | grep -oE "[0-9]+" | head -1)
+                warnings=$(grep -oE "[0-9]+ warnings?" "$output_file" | grep -oE "[0-9]+" | head -1 || echo "0")
             fi
 
-            # Ensure variables are set to "0" if empty
-            passed=${passed:-0}
-            failed=${failed:-0}
-            errors=${errors:-0}
-            skipped=${skipped:-0}
-            warnings=${warnings:-0}
         fi
         
         # Check if there are warnings (from summary line)
-        HAS_WARNINGS=false
         if [ -n "$warnings" ] && [ "$warnings" != "0" ]; then
             HAS_WARNINGS=true
         fi
@@ -310,7 +328,7 @@ show_test_summary() {
         fi
         
         # If there are failures or errors, show hint for failure details location
-        if [ "$failed" != "0" ] || [ "$errors" != "0" ]; then
+        if [ "$failed" -gt 0 ] 2>/dev/null || [ "$errors" -gt 0 ] 2>/dev/null; then
             echo ""
             echo "Hint: Check the output above for detailed information about failed tests"
         fi
@@ -359,6 +377,9 @@ if [ $TEST_EXIT_CODE -eq 0 ] && [ "$HAS_WARNINGS" = true ]; then
     echo ""
     echo "⚠ Detected warnings - treating as failure"
     TEST_EXIT_CODE=1
+elif [ $TEST_EXIT_CODE -eq 0 ] && [ "$HAS_WARNINGS" = false ]; then
+    echo ""
+    echo "✓ All tests passed successfully with no warnings"
 fi
 
 # Clean up temporary files
