@@ -90,19 +90,21 @@ def test_init_with_missing_certificates():
         assert client.host == "test_host"
 
 
-def test_get_key_with_namespace_already_has_namespace(monkeypatch):
+def test_get_key_with_namespace_and_job_name_already_has_namespace(monkeypatch):
     test_namespace = "test_namespace"
     monkeypatch.setattr("motor.common.utils.etcd_client.namespace", test_namespace)
-    key = "test_namespace/key"
-    result = EtcdClient.get_key_with_namespace(key)
+    job_name = "test_job_name"
+    monkeypatch.setattr("motor.common.utils.etcd_client.job_name", job_name)
+    key = "test_namespace/test_job_name/key"
+    result = EtcdClient.get_key_with_namespace_and_job_name(key)
     assert result == key
 
 
-def test_get_key_with_namespace_no_prefix_has_namespace(monkeypatch):
+def test_get_key_with_namespace_and_job_name_no_prefix_has_namespace(monkeypatch):
     test_namespace = "test_namespace"
     monkeypatch.setattr("motor.common.utils.etcd_client.namespace", test_namespace)
     key = "key"
-    result = EtcdClient.get_key_with_namespace(key)
+    result = EtcdClient.get_key_with_namespace_and_job_name(key)
     assert result != key
 
 
@@ -152,7 +154,7 @@ def test_renew_lease_success(base_client_with_ssl):
     new_ttl = 60
 
     base_client_with_ssl._leases[lock_key] = lease_id
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
 
     # Mock LeaseKeepAlive response
     response = MagicMock()
@@ -171,7 +173,7 @@ def test_renew_lease_success(base_client_with_ssl):
 def test_renew_lease_lock_not_found(base_client_with_ssl):
     # Set up mock behavior
     lock_key = "test_lock"
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name.return_value = lock_key
 
     # Call method
     result = base_client_with_ssl.renew_lease(lock_key)
@@ -188,7 +190,7 @@ def test_renew_lease_expired(base_client_with_ssl):
     new_ttl = 0
 
     base_client_with_ssl._leases[lock_key] = lease_id
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
 
     # Mock LeaseKeepAlive response
     response = MagicMock()
@@ -210,7 +212,7 @@ def test_renew_lease_exception(base_client_with_ssl):
     lease_id = 123
 
     base_client_with_ssl._leases[lock_key] = lease_id
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
 
     # Simulate LeaseKeepAlive raising an exception
     base_client_with_ssl.lease_stub.LeaseKeepAlive.side_effect = Exception("Test exception")
@@ -228,7 +230,7 @@ def test_release_lock_success(base_client_with_ssl):
     lock_key = "test_lock"
     lease_id = 12345
     base_client_with_ssl._leases[lock_key] = lease_id
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
 
     result = base_client_with_ssl.release_lock(lock_key)
 
@@ -239,7 +241,7 @@ def test_release_lock_success(base_client_with_ssl):
 def test_release_lock_not_exist(base_client_with_ssl):
     """Test releasing a non-existent lock."""
     lock_key = "non_existent_lock"
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
 
     result = base_client_with_ssl.release_lock(lock_key)
 
@@ -252,7 +254,7 @@ def test_release_lock_exception(base_client_with_ssl):
     lock_key = "test_lock"
     lease_id = 12345
     base_client_with_ssl._leases[lock_key] = lease_id
-    base_client_with_ssl.get_key_with_namespace.return_value = lock_key
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=lock_key)
     base_client_with_ssl.lease_stub.LeaseRevoke.side_effect = Exception("Test exception")
 
     result = base_client_with_ssl.release_lock(lock_key)
@@ -272,6 +274,7 @@ def test_put_json_with_pydantic_model(base_client_with_ssl, mock_logger):
         field: str
 
     model = TestModel(field="value")
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value="key")
     base_client_with_ssl.put_json("key", model)
 
     base_client_with_ssl.kv_stub.Put.assert_called_once()
@@ -280,6 +283,7 @@ def test_put_json_with_pydantic_model(base_client_with_ssl, mock_logger):
 
 def test_put_json_with_dict(base_client_with_ssl, mock_logger):
     data = {"field": "value"}
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value="key")
     base_client_with_ssl.put_json("key", data)
 
     base_client_with_ssl.kv_stub.Put.assert_called_once_with(
@@ -296,6 +300,7 @@ def test_put_json_with_dict(base_client_with_ssl, mock_logger):
 def test_put_json_with_lease(base_client_with_ssl, mock_logger):
     data = {"field": "value"}
     lease = 123
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value="key")
     base_client_with_ssl.put_json("key", data, lease=lease)
 
     base_client_with_ssl.kv_stub.Put.assert_called_once_with(
@@ -317,7 +322,7 @@ def test_delete_prefix_success(base_client_with_ssl):
     base_client_with_ssl.kv_stub.DeleteRange.return_value = mock_response
 
     # Mock helper methods
-    base_client_with_ssl.get_key_with_namespace = MagicMock(return_value="test_prefix")
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value="test_prefix")
     base_client_with_ssl._prefix_range_end = MagicMock(return_value="test_range_end".encode('utf-8'))
 
     # Call method
@@ -326,7 +331,7 @@ def test_delete_prefix_success(base_client_with_ssl):
     # Verify result
     assert result is True
     base_client_with_ssl.kv_stub.DeleteRange.assert_called_once()
-    base_client_with_ssl.get_key_with_namespace.assert_called_once_with("test_prefix")
+    base_client_with_ssl.get_key_with_namespace_and_job_name.assert_called_once_with("test_prefix")
     base_client_with_ssl._prefix_range_end.assert_called_once_with("test_prefix")
 
 
@@ -335,7 +340,7 @@ def test_delete_prefix_failure(base_client_with_ssl):
     base_client_with_ssl.kv_stub.DeleteRange.side_effect = Exception("Delete failed")
 
     # Mock helper methods
-    base_client_with_ssl.get_key_with_namespace = MagicMock(return_value="test_prefix")
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value="test_prefix")
     base_client_with_ssl._prefix_range_end = MagicMock(return_value="test_range_end".encode('utf-8'))
 
     # Call method
@@ -344,7 +349,7 @@ def test_delete_prefix_failure(base_client_with_ssl):
     # Verify result
     assert result is False
     base_client_with_ssl.kv_stub.DeleteRange.assert_called_once()
-    base_client_with_ssl.get_key_with_namespace.assert_called_once_with("test_prefix")
+    base_client_with_ssl.get_key_with_namespace_and_job_name.assert_called_once_with("test_prefix")
     base_client_with_ssl._prefix_range_end.assert_called_once_with("test_prefix")
 
 
@@ -354,7 +359,7 @@ def test_delete_key_success(base_client_with_ssl):
     expected_key_with_namespace = "namespace_test_key"
     response = rpc_pb2.DeleteRangeResponse(deleted=1)
     base_client_with_ssl.kv_stub.DeleteRange.return_value = response
-    base_client_with_ssl.get_key_with_namespace = MagicMock(return_value=expected_key_with_namespace)
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=expected_key_with_namespace)
 
     # Act
     result = base_client_with_ssl.delete_key(key)
@@ -373,7 +378,7 @@ def test_delete_key_not_found(base_client_with_ssl):
     expected_key_with_namespace = "namespace_test_key"
     response = rpc_pb2.DeleteRangeResponse(deleted=0)
     base_client_with_ssl.kv_stub.DeleteRange.return_value = response
-    base_client_with_ssl.get_key_with_namespace = MagicMock(return_value=expected_key_with_namespace)
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=expected_key_with_namespace)
 
     # Act
     result = base_client_with_ssl.delete_key(key)
@@ -391,7 +396,7 @@ def test_delete_key_exception(base_client_with_ssl):
     key = "test_key"
     expected_key_with_namespace = "namespace_test_key"
     base_client_with_ssl.kv_stub.DeleteRange.side_effect = Exception("Test exception")
-    base_client_with_ssl.get_key_with_namespace = MagicMock(return_value=expected_key_with_namespace)
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=expected_key_with_namespace)
 
     # Act
     result = base_client_with_ssl.delete_key(key)
@@ -569,7 +574,7 @@ def test_get_prefix_data_success(base_client_with_ssl):
         MagicMock(key=b"test_prefix/key2", value=json.dumps({"key2": "value2"}).encode("utf-8")),
     ]
     base_client_with_ssl.kv_stub.Range.return_value = mock_response
-    base_client_with_ssl.get_key_with_namespace.return_value = key_prefix
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=key_prefix)
     base_client_with_ssl._prefix_range_end.return_value = b"test_prefix0"
 
     result = base_client_with_ssl.get_prefix_data(key_prefix)
@@ -592,7 +597,7 @@ def test_get_prefix_data_with_model_class(base_client_with_ssl):
         MagicMock(key=b"test_prefix/key1", value=json.dumps({"key": "value1"}).encode("utf-8")),
     ]
     base_client_with_ssl.kv_stub.Range.return_value = mock_response
-    base_client_with_ssl.get_key_with_namespace.return_value = key_prefix
+    base_client_with_ssl.get_key_with_namespace_and_job_name = MagicMock(return_value=key_prefix)
     base_client_with_ssl._prefix_range_end.return_value = b"test_prefix0"
 
     result = base_client_with_ssl.get_prefix_data(key_prefix, model_class=TestModel)
