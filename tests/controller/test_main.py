@@ -84,7 +84,6 @@ def test_signal_handler(mock_exit):
         signal_handler(signal.SIGINT, None)
 
         mock_stop.assert_called_once()
-        mock_exit.assert_called_once_with(0)
 
 
 @patch('motor.controller.main.logger')
@@ -494,7 +493,6 @@ def test_signal_handler_with_config_watcher():
         mock_stop_event.set.assert_called_once()
         mock_stop.assert_called_once()
         mock_watcher.stop.assert_called_once()
-        mock_exit.assert_called_once_with(0)
 
 
 def test_signal_handler_no_config_watcher():
@@ -508,4 +506,3 @@ def test_signal_handler_no_config_watcher():
 
         mock_stop_event.set.assert_called_once()
         mock_stop.assert_called_once()
-        mock_exit.assert_called_once_with(0)

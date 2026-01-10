@@ -2,6 +2,8 @@
 # Copyright (c) 2025, HUAWEI CORPORATION.  All rights reserved.
 from dataclasses import dataclass
 
+LOCK_SLASH = "/"
+
 
 @dataclass
 class StandbyConfig:

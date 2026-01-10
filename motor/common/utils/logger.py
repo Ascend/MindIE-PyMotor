@@ -200,7 +200,9 @@ def get_logger(
     """
     # Try to load config for this module if not already loaded
     if name not in _module_logging_configs:
-        load_config_for_module(name)
+        res = load_config_for_module(name)
+        if not res:
+            logging.warning(f"Failed to load logging config for module {name}")
 
     # Get configuration for this specific module
     config = get_logging_config(name)

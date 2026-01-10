@@ -13,7 +13,7 @@ from pathlib import Path
 from motor.common.utils.logger import LoggingConfig, reconfigure_logging, get_logger
 from motor.common.utils.env import Env
 from motor.config.etcd import EtcdConfig
-from motor.config.standby import StandbyConfig
+from motor.config.standby import StandbyConfig, LOCK_SLASH
 
 logger = get_logger(__name__)
 
@@ -200,7 +200,7 @@ class CoordinatorConfig:
         """Validate configuration after initialization"""
         # Refresh master lock key with coordinator prefix
         if self.standby_config.master_lock_key == "/master_lock":
-            self.standby_config.master_lock_key = "/coordinator" + self.standby_config.master_lock_key
+            self.standby_config.master_lock_key = LOCK_SLASH + "coordinator" + self.standby_config.master_lock_key
         self.validate_config()
 
     @classmethod

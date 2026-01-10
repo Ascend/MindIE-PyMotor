@@ -9,7 +9,7 @@ from pathlib import Path
 from motor.common.utils.logger import get_logger, LoggingConfig, reconfigure_logging
 from motor.common.utils.env import Env
 from motor.config.etcd import EtcdConfig
-from motor.config.standby import StandbyConfig
+from motor.config.standby import StandbyConfig, LOCK_SLASH
 
 
 logger = get_logger(__name__)
@@ -107,7 +107,7 @@ class ControllerConfig:
         """Validate configuration after initialization"""
         # Refresh master lock key with controller prefix
         if self.standby_config.master_lock_key == "/master_lock":
-            self.standby_config.master_lock_key = "/controller" + self.standby_config.master_lock_key
+            self.standby_config.master_lock_key = LOCK_SLASH + "controller" + self.standby_config.master_lock_key
         self.validate_config()
 
     @classmethod

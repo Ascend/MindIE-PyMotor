@@ -255,7 +255,8 @@ class EtcdClient:
             yield lease_id
         finally:
             if lease_id:
-                self.release_lock(lock_key)
+                if not self.release_lock(lock_key):
+                    logger.error("Failed to release lock %s", lock_key)
 
     def close(self):
         """Close the proto client"""
