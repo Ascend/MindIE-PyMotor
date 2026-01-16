@@ -36,11 +36,11 @@ class Env:
 
     @property
     def coordinator_service(self):
-        return os.getenv("COORDINATOR_SERVICE", "mindie-ms-coordinator-service.mindie-pymotor.svc.cluster.local")
+        return os.getenv("COORDINATOR_SERVICE", "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local")
 
     @property
     def controller_service(self):
-        return os.getenv("CONTROLLER_SERVICE", "mindie-ms-controller-service.mindie-pymotor.svc.cluster.local")
+        return os.getenv("CONTROLLER_SERVICE", "mindie-motor-controller-service.mindie-motor.svc.cluster.local")
 
 
 Env = Env()

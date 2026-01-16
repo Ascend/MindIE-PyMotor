@@ -44,12 +44,19 @@ STANDBY_CONFIG = "standby_config"
 MOTOR_CONTROLLER_CONFIG = "motor_controller_config"
 MOTOR_COORDINATOR_CONFIG = "motor_coordinator_config"
 ENABLE_MASTER_STANDBY = "enable_master_standby"
+SERVER_BASE_NAME_MAP = {
+    "vllm": "vllm",
+    "mindie-llm": "mindie-server",
+    "sglang": "sglang"
+}
 
 # Global variables
-g_controller_service = "mindie-ms-controller-service"
-g_coordinator_service = "mindie-ms-coordinator-service"
+g_controller_service = "mindie-motor-controller-service"
+g_coordinator_service = "mindie-motor-coordinator-service"
 g_kv_pool_service = "kvp-master"
 g_kv_pool_enabled = False
+g_engine_base_name = "mindie-server"
+g_generate_yaml_list = []
 
 
 def read_json(file_path):
@@ -240,7 +247,15 @@ def modify_sp_block_num(data, pd_flag, config):
         data[METADATA][ANNOTATIONS][SP_BLOCK] = f"{sp_block_num}"
 
 
-def modify_server_yaml(deployment_data, deploy_config, index, node_type):
+def update_engine_base_name(user_config):
+    global g_engine_base_name
+    g_engine_base_name = "mindie-server"
+    engine_type = user_config.get("motor_engine_prefill_config", {}).get("engine_type", "mindie-llm")
+    if engine_type in SERVER_BASE_NAME_MAP:
+        g_engine_base_name = SERVER_BASE_NAME_MAP[engine_type]
+
+
+def modify_server_yaml(deployment_data, deploy_config, user_config, index, node_type):
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
 
     deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]["image"] = deploy_config["image_name"]
@@ -249,12 +264,12 @@ def modify_server_yaml(deployment_data, deploy_config, index, node_type):
     deployment_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
     
     # Modify deployment name to make it unique for each instance
-    base_name = "mindie-server"
-    unique_name = f"{base_name}-{node_type}{index}"
+    unique_name = f"{g_engine_base_name}-{node_type}{index}"
     deployment_data[METADATA][NAME] = unique_name
     deployment_data[METADATA][LABELS][APP] = unique_name
     deployment_data['spec']['selector']['matchLabels']['app'] = unique_name
     deployment_data[SPEC][TEMPLATE][METADATA][LABELS][APP] = unique_name
+    container[NAME] = g_engine_base_name
 
     uuid_spec = generate_unique_id()
     job_name = f"{deploy_config[CONFIG_JOB_ID]}-{node_type}{index}-{uuid_spec}"
@@ -315,46 +330,31 @@ def obtain_server_instance_total(deploy_config):
     return p_instances, d_instances
 
 
-def generator_yaml(input_yaml, output_file, json_config, single_doc=True):
-    logger.info(f"Generating YAML from {input_yaml} to {output_file}")
-    if CONTROLLER in input_yaml or COORDINATOR in input_yaml:
-        data = load_yaml(input_yaml, single_doc)
-        modify_controller_or_coordinator_yaml(data, json_config)
-        write_yaml(data, output_file, single_doc)
-    elif "server" in input_yaml:
-        p_total, d_total = obtain_server_instance_total(json_config["motor_deploy_config"])
-        for p_index in range(p_total):
-            data = load_yaml(input_yaml, single_doc)
-            modify_server_yaml(data, json_config, p_index, "p")
-            output_file_p = output_file + "_p" + str(p_index) + ".yaml"
-            write_yaml(data, output_file_p, single_doc)
-        for d_index in range(d_total):
-            data = load_yaml(input_yaml, single_doc)
-            modify_server_yaml(data, json_config, d_index, "d")
-            output_file_d = output_file + "_d" + str(d_index) + ".yaml"
-            write_yaml(data, output_file_d, single_doc)
-
-
 def generate_yaml_controller_or_coordinator(input_yaml, output_file, deploy_config):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
     data = load_yaml(input_yaml, False)
     modify_controller_or_coordinator_yaml(data, deploy_config)
     write_yaml(data, output_file, False)
+    global g_generate_yaml_list
+    g_generate_yaml_list.append(output_file)
 
 
-def generate_yaml_server(input_yaml, output_file, deploy_config):
+def generate_yaml_server(input_yaml, output_file, deploy_config, user_config):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
+    global g_generate_yaml_list
     p_total, d_total = obtain_server_instance_total(deploy_config)
     for p_index in range(p_total):
         data = load_yaml(input_yaml, True)
-        modify_server_yaml(data, deploy_config, p_index, "p")
+        modify_server_yaml(data, deploy_config, user_config, p_index, "p")
         output_file_p = output_file + "_p" + str(p_index) + ".yaml"
         write_yaml(data, output_file_p, True)
+        g_generate_yaml_list.append(output_file_p)
     for d_index in range(d_total):
         data = load_yaml(input_yaml, True)
-        modify_server_yaml(data, deploy_config, d_index, "d")
+        modify_server_yaml(data, deploy_config, user_config, d_index, "d")
         output_file_d = output_file + "_d" + str(d_index) + ".yaml"
         write_yaml(data, output_file_d, True)
+        g_generate_yaml_list.append(output_file_d)
 
 
 def generate_yaml_kv_pool(input_yaml, output_file, deploy_config):
@@ -379,6 +379,8 @@ def generate_yaml_kv_pool(input_yaml, output_file, deploy_config):
     service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
 
     write_yaml(data, output_file, False)
+    global g_generate_yaml_list
+    g_generate_yaml_list.append(output_file)
 
 
 def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_pool_input_yaml, deploy_config):
@@ -418,25 +420,8 @@ def exec_all_kubectl_multi(deploy_config, out_path, user_config_path):
                 + NAME_FLAG + job_id)
     
     # Apply YAML files
-    controller_yaml = os.path.join(out_deploy_yaml_path, 'mindie_ms_controller.yaml')
-    safe_exec_cmd(f"kubectl apply -f {controller_yaml} -n {job_id}")
-    
-    coordinator_yaml = os.path.join(out_deploy_yaml_path, 'mindie_ms_coordinator.yaml')
-    safe_exec_cmd(f"kubectl apply -f {coordinator_yaml} -n {job_id}")
-    
-    # Apply server YAML files
-    p_total, d_total = obtain_server_instance_total(deploy_config)
-    for p_index in range(p_total):
-        server_yaml = os.path.join(out_deploy_yaml_path, f'mindie_server_p{p_index}.yaml')
-        safe_exec_cmd(f"kubectl apply -f {server_yaml} -n {job_id}")
-    for d_index in range(d_total):
-        server_yaml = os.path.join(out_deploy_yaml_path, f'mindie_server_d{d_index}.yaml')
-        safe_exec_cmd(f"kubectl apply -f {server_yaml} -n {job_id}")
-
-    if g_kv_pool_enabled:
-        # Apply kv pool YAML file
-        kv_pool_yaml = os.path.join(out_deploy_yaml_path, 'mindie_ms_kv_pool.yaml')
-        safe_exec_cmd(f"kubectl apply -f {kv_pool_yaml} -n {job_id}")
+    for yaml_file in g_generate_yaml_list:
+        safe_exec_cmd(f"kubectl apply -f {yaml_file} -n {job_id}")
 
 
 def set_env_to_shell(deploy_config):
@@ -477,28 +462,29 @@ def main():
     
     logger.info(f"Starting service deployment using config file path: {user_config_path}.")
 
-    # Use new YAML template files
-    controller_input_yaml = os.path.join(deploy_yaml_root_path, 'controller_init.yaml')
-    controller_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_ms_controller.yaml')
-    coordinator_input_yaml = os.path.join(deploy_yaml_root_path, 'coordinator_init.yaml')
-    coordinator_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_ms_coordinator.yaml')
-    server_input_yaml = os.path.join(deploy_yaml_root_path, 'server_init.yaml')
-    server_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_server')
-    kv_pool_input_yaml = os.path.join(deploy_yaml_root_path, 'kv_pool_init.yaml')
-    kv_pool_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_ms_kv_pool.yaml')
-
     user_config = read_json(user_config_path)
     deploy_config = user_config["motor_deploy_config"]
 
     update_kv_pool_enabled_flag(user_config)
+    update_engine_base_name(user_config)
     
     set_env_to_shell(deploy_config)
+
+    # Use new YAML template files
+    controller_input_yaml = os.path.join(deploy_yaml_root_path, 'controller_init.yaml')
+    controller_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_motor_controller.yaml')
+    coordinator_input_yaml = os.path.join(deploy_yaml_root_path, 'coordinator_init.yaml')
+    coordinator_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_motor_coordinator.yaml')
+    server_input_yaml = os.path.join(deploy_yaml_root_path, 'engine_init.yaml')
+    server_output_yaml = os.path.join(output_root_path, DEPLOYMENT, g_engine_base_name)
+    kv_pool_input_yaml = os.path.join(deploy_yaml_root_path, 'kv_pool_init.yaml')
+    kv_pool_output_yaml = os.path.join(output_root_path, DEPLOYMENT, 'mindie_ms_kv_pool.yaml')
 
     # Generate YAML files - pass user_config instead of user_config_path
     init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_pool_input_yaml, deploy_config)
     generate_yaml_controller_or_coordinator(controller_input_yaml, controller_output_yaml, user_config)
     generate_yaml_controller_or_coordinator(coordinator_input_yaml, coordinator_output_yaml, user_config)
-    generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config)
+    generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config, user_config)
     if g_kv_pool_enabled:
         generate_yaml_kv_pool(kv_pool_input_yaml, kv_pool_output_yaml, deploy_config)
     exec_all_kubectl_multi(deploy_config, output_root_path, user_config_path)

@@ -36,7 +36,7 @@
     "dummy_request_interval": 5.0,
     "max_consecutive_failures": 3,
     "dummy_request_timeout": 10.0,
-    "controller_api_dns": "mindie-ms-controller-service.mindie.svc.cluster.local",
+    "controller_api_dns": "mindie-motor-controller-service.mindie.svc.cluster.local",
     "controller_api_port": 1026,
     "dummy_request_endpoint": "/v1/completions",
     "dummy_request_body": {

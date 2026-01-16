@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mindie-ms-coordinator
+  name: mindie-motor-coordinator
   labels:
-    app: mindie-ms-coordinator
+    app: mindie-motor-coordinator
   namespace: mindie
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mindie-ms-coordinator
+      app: mindie-motor-coordinator
   template:
     metadata:
       labels:
-        app: mindie-ms-coordinator
+        app: mindie-motor-coordinator
     spec:
       terminationGracePeriodSeconds: 0
       automountServiceAccountToken: false
@@ -22,7 +22,7 @@ spec:
       containers:
         - image: mindie:1.0.0-aarch64-800I-A2
           imagePullPolicy: IfNotPresent
-          name: mindie-ms-coordinator
+          name: mindie-motor-coordinator
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -128,8 +128,8 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: mindie-ms-coordinator
-  name: mindie-ms-coordinator-service
+    app: mindie-motor-coordinator
+  name: mindie-motor-coordinator-service
   namespace: mindie
 spec:
   ports:
@@ -137,7 +137,7 @@ spec:
       protocol: TCP
       targetPort: 1026
   selector:
-    app: mindie-ms-coordinator
+    app: mindie-motor-coordinator
   sessionAffinity: None
   type: ClusterIP
 status:
@@ -147,8 +147,8 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: mindie-ms-coordinator
-  name: mindie-ms-coordinator-infer
+    app: mindie-motor-coordinator
+  name: mindie-motor-coordinator-infer
   namespace: mindie
 spec:
   ports:
@@ -157,7 +157,7 @@ spec:
       protocol: TCP
       targetPort: 1025
   selector:
-    app: mindie-ms-coordinator
+    app: mindie-motor-coordinator
   sessionAffinity: None
   type: NodePort
 status:

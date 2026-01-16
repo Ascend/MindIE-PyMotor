@@ -7,12 +7,12 @@ log_dir="./log/log_${time}"
 # Creating a Log Directory
 mkdir -p "$log_dir"
 
-# Get all Pods of mindie-pymotor: namespace name node
-pods=$(kubectl get pods -A -o wide | grep "mindie-pymotor" | awk '{print $1 " " $2 " " $8}')
+# Get all Pods of mindie-motor: namespace name node
+pods=$(kubectl get pods -A -o wide | grep "mindie-motor" | awk '{print $1 " " $2 " " $8}')
 
 # Check if a matching Pod is found
 if [[ -z "$pods" ]]; then
-    echo "No Pods for mindie-pymotor found."
+    echo "No Pods for mindie-motor found."
     exit 1
 fi
 

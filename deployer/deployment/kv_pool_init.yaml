@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mindie-ms-kv-pool
+  name: mindie-motor-kv-pool
   labels:
-    app: mindie-ms-kv-pool
+    app: mindie-motor-kv-pool
   namespace: mindie
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mindie-ms-kv-pool
+      app: mindie-motor-kv-pool
   template:
     metadata:
       labels:
-        app: mindie-ms-kv-pool
-        deploy-name: mindie-ms-kv-pool
+        app: mindie-motor-kv-pool
+        deploy-name: mindie-motor-kv-pool
     spec:
       terminationGracePeriodSeconds: 0
       automountServiceAccountToken: false
@@ -23,7 +23,7 @@ spec:
       containers:
         - image: mindie:1.0.0-aarch64-800I-A2
           imagePullPolicy: IfNotPresent
-          name: mindie-ms-kv-pool
+          name: mindie-motor-kv-pool
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -74,7 +74,7 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: mindie-ms-kv-pool
+    app: mindie-motor-kv-pool
   name: kvp-master
   namespace: mindie
 spec:
@@ -83,7 +83,7 @@ spec:
     protocol: TCP
     targetPort: 50088
   selector:
-    app: mindie-ms-kv-pool
+    app: mindie-motor-kv-pool
   sessionAffinity: None
   type: ClusterIP
 status:

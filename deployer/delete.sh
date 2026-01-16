@@ -1,7 +1,7 @@
 #!/bin/bash
 echo -e "NOW EXECUTING [kubectl delete] COMMANDS. THE RESULT IS: \n\n"
 
-DEFAULT_NAME_SPACE="mindie-pymotor"
+DEFAULT_NAME_SPACE="mindie-motor"
 USER_CONFIG_FILE="./user_config.json"
 
 if [ -f "$USER_CONFIG_FILE" ] && [ -r "$USER_CONFIG_FILE" ]; then

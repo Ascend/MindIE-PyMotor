@@ -99,7 +99,7 @@
           "p_pod_npu_num": 4,
           "d_pod_npu_num": 4,
           "image_name": "mindie-motor-vllm:dev-2.2.RC1.B153-800I-A3-py311-Ubuntu24.04-lts-aarch64",
-          "job_id": "mindie-pymotor",
+          "job_id": "mindie-motor",
           "hardware_type": "800I_A2",
           "env_path": "./conf/env.json",
           "weight_mount_path": "/mnt/weight/"
@@ -272,7 +272,7 @@
    - 配置k8s的namespace，配置namespace值为`user_config.json`中的`job_id`。
 
      ```bash
-     kubectl create ns mindie-pymotor
+     kubectl create ns mindie-motor
      ```
 
 1. **配置环境变量配置**
