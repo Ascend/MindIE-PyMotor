@@ -55,7 +55,7 @@ def test_default_config_initialization():
         assert config.tls_config.enable_tls is False
         assert config.tls_config.cert_path == 'security/controller/cert/server.crt'
         assert config.tls_config.key_path == 'security/controller/keys/server.key'
-        assert config.fault_tolerance_config.enable_fault_tolerance is True
+        assert config.fault_tolerance_config.enable_fault_tolerance is False
     finally:
         # Restore original environment variable
         if original_pod_ip is not None:

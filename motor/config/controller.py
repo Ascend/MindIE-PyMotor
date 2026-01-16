@@ -75,14 +75,14 @@ class FaultToleranceConfig:
     """Fault tolerance configuration class"""
 
     # fault tolerance enable/disable
-    enable_fault_tolerance: bool = True
+    enable_fault_tolerance: bool = False
 
     # strategy center configuration
     strategy_center_check_internal: int = 1  # 1 second
 
     # scale and recovery configuration
-    enable_scale_p2d: bool = True  # Enable/disable scale p2d strategy
-    enable_lingqu_network_recover: bool = True  # Enable/disable lingqu network recovery strategy
+    enable_scale_p2d: bool = False  # Enable/disable scale p2d strategy
+    enable_lingqu_network_recover: bool = False  # Enable/disable lingqu network recovery strategy
 
 
 @dataclass
