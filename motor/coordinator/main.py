@@ -11,7 +11,6 @@ from typing import Any
 from motor.coordinator.api_server.coordinator_server import CoordinatorServer
 from motor.coordinator.core.instance_manager import InstanceManager
 from motor.coordinator.core.request_manager import RequestManager
-from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.config.coordinator import CoordinatorConfig
 from motor.coordinator.metrics.metrics_collector import MetricsCollector
 from motor.common.standby.standby_manager import StandbyManager
@@ -127,9 +126,6 @@ def initialize_components() -> None:
 
     logger.info("Initializing MetricsListener...")
     modules["MetricsListener"] = MetricsCollector(config)
-
-    logger.info("Initializing InstanceHealthChecker...")
-    modules["InstanceHealthChecker"] = InstanceHealthChecker(config)
 
     logger.info("Initializing CoordinatorServer...")
     modules["CoordinatorServer"] = CoordinatorServer(config)

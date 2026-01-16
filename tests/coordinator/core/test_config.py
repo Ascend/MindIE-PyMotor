@@ -75,22 +75,6 @@ COMPLETE_CONFIG = {
         "deploy_mode": "single_node",
         "scheduler_type": "load_balance"
     },
-    "health_check_config": {
-        "dummy_request_interval": 5.0,
-        "max_consecutive_failures": 3,
-        "dummy_request_timeout": 10.0,
-        "controller_api_dns": "test.mindie.com",
-        "controller_api_port": 8080,
-        "dummy_request_endpoint": "/liveness",
-        "dummy_request_body": {
-            "test": "data"
-        },
-        "alarm_endpoint": "/alarm",
-        "alarm_timeout": 5.0,
-        "terminate_instance_endpoint": "/terminate",
-        "thread_join_timeout": 5.0,
-        "error_retry_interval": 1.0
-    },
     "timeout_config": {
         "request_timeout": 30,
         "connection_timeout": 10,
@@ -149,7 +133,6 @@ def test_default_config_initialization():
     assert config.exception_config.first_token_timeout == 600
     assert config.scheduler_config.deploy_mode.value == "pd_separate"
     assert config.scheduler_config.scheduler_type.value == "load_balance"
-    assert config.health_check_config.dummy_request_interval == 5.0
     assert config.timeout_config.request_timeout == 30
     assert config.api_key_config.enable_api_key is False
     assert config.rate_limit_config.enable_rate_limit is False
@@ -223,14 +206,6 @@ def test_config_validation_success():
     ("retry_delay", -0.1, "retry_delay must be greater than 0"),
     ("first_token_timeout", -1, "first_token_timeout must be greater than 0"),
     ("infer_timeout", 0, "infer_timeout must be greater than 0"),
-    ("dummy_request_interval", 0, "dummy_request_interval must be greater than 0"),
-    ("max_consecutive_failures", 0, "max_consecutive_failures must be greater than 0"),
-    ("dummy_request_timeout", -1, "dummy_request_timeout must be greater than 0"),
-    ("controller_api_port", 0, "controller_api_port must be in range 1-65535"),
-    ("controller_api_port", 65536, "controller_api_port must be in range 1-65535"),
-    ("alarm_timeout", 0, "alarm_timeout must be greater than 0"),
-    ("thread_join_timeout", -1, "thread_join_timeout must be greater than 0"),
-    ("error_retry_interval", 0, "error_retry_interval must be greater than 0"),
     ("request_timeout", -1, "request_timeout must be greater than 0"),
     ("connection_timeout", 0, "connection_timeout must be greater than 0"),
     ("read_timeout", -1, "read_timeout must be greater than 0"),
@@ -255,9 +230,6 @@ def test_config_validation_errors(param, value, expected_error):
             setattr(config.logging_config, param, value)
         elif param in ["max_retry", "retry_delay", "first_token_timeout", "infer_timeout"]:
             setattr(config.exception_config, param, value)
-        elif param in ["dummy_request_interval", "max_consecutive_failures", "dummy_request_timeout",
-                      "controller_api_port", "alarm_timeout", "thread_join_timeout", "error_retry_interval"]:
-            setattr(config.health_check_config, param, value)
         elif param in ["request_timeout", "connection_timeout", "read_timeout", "write_timeout", "keep_alive_timeout"]:
             setattr(config.timeout_config, param, value)
         elif param in ["coordinator_api_infer_port", "coordinator_api_mgmt_port"]:
@@ -278,12 +250,10 @@ def test_config_validation_multiple_errors():
     with pytest.raises(ValueError) as exc_info:
         config = CoordinatorConfig()
         config.exception_config.max_retry = -1
-        config.health_check_config.controller_api_port = 0
         config.rate_limit_config.max_requests = -1
         config.validate_config()
     error_msg = str(exc_info.value)
     assert "max_retry cannot be negative" in error_msg
-    assert "controller_api_port must be in range 1-65535" in error_msg
     assert "max_requests must be greater than 0" in error_msg
 
 
@@ -295,7 +265,7 @@ def test_to_dict():
     # Check that all config sections are present
     expected_keys = [
         'logging_config', 'prometheus_metrics_config', 'exception_config',
-        'scheduler_config', 'tls_config', 'health_check_config', 'timeout_config',
+        'scheduler_config', 'tls_config', 'timeout_config',
         'api_key_config', 'rate_limit_config', 'standby_config', 'etcd_config',
         'http_config', 'aigw_model'
     ]

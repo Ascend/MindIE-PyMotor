@@ -33,18 +33,6 @@ def _default_rate_limit_skip_paths() -> list[str]:
     ]
 
 
-def _default_dummy_request_body() -> dict:
-    return {
-        'model': 'test-model',
-        'prompt': 'Health check. Please respond with OK only.',
-        'message': "[{'role': 'user', 'content': 'hi'}]",
-        'max_tokens': 3,
-        'temperature': 0.1,
-        'top_p': 0.9,
-        'stream': False,
-    }
-
-
 def _default_tls_items() -> dict[str, str]:
     return {
         "ca_cert": "",
@@ -118,22 +106,6 @@ class TLSConfig:
 
 
 @dataclass
-class HealthCheckConfig:
-    dummy_request_interval: float = 5.0
-    max_consecutive_failures: int = 3
-    dummy_request_timeout: float = 10.0
-    controller_api_dns: str = field(default_factory=lambda: Env.controller_service)
-    controller_api_port: int = 1026
-    dummy_request_endpoint: str = '/v1/completions'
-    dummy_request_body: dict = field(default_factory=_default_dummy_request_body)
-    alarm_endpoint: str = '/v1/alarm/coordinator'
-    alarm_timeout: float = 5.0
-    terminate_instance_endpoint: str = '/controller/terminate_instance'
-    thread_join_timeout: float = 5.0
-    error_retry_interval: float = 1.0
-
-
-@dataclass
 class TimeoutConfig:
     request_timeout: int = 30
     connection_timeout: int = 10
@@ -183,7 +155,6 @@ class CoordinatorConfig:
     exception_config: ExceptionConfig = field(default_factory=ExceptionConfig)
     scheduler_config: SchedulerConfig = field(default_factory=SchedulerConfig)
     tls_config: TLSConfig = field(default_factory=TLSConfig)
-    health_check_config: HealthCheckConfig = field(default_factory=HealthCheckConfig)
     timeout_config: TimeoutConfig = field(default_factory=TimeoutConfig)
     api_key_config: APIKeyConfig = field(default_factory=APIKeyConfig)
     rate_limit_config: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -255,7 +226,6 @@ class CoordinatorConfig:
                 ('prometheus_metrics_config', config.prometheus_metrics_config, None),
                 ('exception_config', config.exception_config, None),
                 ('scheduler_config', config.scheduler_config, scheduler_handlers),
-                ('health_check_config', config.health_check_config, None),
                 ('timeout_config', config.timeout_config, None),
                 ('api_key_config', config.api_key_config, None),
                 ('rate_limit_config', config.rate_limit_config, None),
@@ -343,29 +313,6 @@ class CoordinatorConfig:
         self._validate_positive_number(self.exception_config.retry_delay, "retry_delay")
         self._validate_positive_number(self.exception_config.first_token_timeout, "first_token_timeout")
         self._validate_positive_number(self.exception_config.infer_timeout, "infer_timeout")
-
-        # Validate health check configuration
-        self._validate_positive_number(self.health_check_config.dummy_request_interval,
-                                       "dummy_request_interval")
-        self._validate_positive_number(self.health_check_config.max_consecutive_failures,
-                                       "max_consecutive_failures")
-        self._validate_positive_number(self.health_check_config.dummy_request_timeout,
-                                       "dummy_request_timeout")
-        self._validate_port_range(self.health_check_config.controller_api_port, "controller_api_port")
-
-        # Validate DNS hostname
-        self._validate_ip_or_hostname(self.health_check_config.controller_api_dns, "controller_api_dns")
-
-        # Validate endpoint paths
-        self._validate_endpoint_path(self.health_check_config.dummy_request_endpoint,
-                                     "dummy_request_endpoint")
-        self._validate_endpoint_path(self.health_check_config.alarm_endpoint, "alarm_endpoint")
-        self._validate_endpoint_path(self.health_check_config.terminate_instance_endpoint,
-                                     "terminate_instance_endpoint")
-
-        self._validate_positive_number(self.health_check_config.alarm_timeout, "alarm_timeout")
-        self._validate_positive_number(self.health_check_config.thread_join_timeout, "thread_join_timeout")
-        self._validate_positive_number(self.health_check_config.error_retry_interval, "error_retry_interval")
 
         # Validate HTTP configuration
         self._validate_port_range(self.http_config.coordinator_api_infer_port, "coordinator_api_infer_port")

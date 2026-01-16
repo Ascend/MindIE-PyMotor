@@ -118,7 +118,6 @@ def test_on_become_master_instance(mock_initialize_components, mock_logger, mock
     mock_instance_manager = MagicMock()
     mock_request_manager = MagicMock()
     mock_metrics_collector = MagicMock()
-    mock_instance_health_checker = MagicMock()
     mock_coordinator_server = MagicMock()
 
     # Mock initialize_components to populate modules with our mocks
@@ -127,7 +126,6 @@ def test_on_become_master_instance(mock_initialize_components, mock_logger, mock
         modules["InstanceManager"] = mock_instance_manager
         modules["RequestManager"] = mock_request_manager
         modules["MetricsListener"] = mock_metrics_collector
-        modules["InstanceHealthChecker"] = mock_instance_health_checker
         modules["CoordinatorServer"] = mock_coordinator_server
 
     mock_initialize_components.side_effect = mock_init_components
@@ -141,7 +139,6 @@ def test_on_become_master_instance(mock_initialize_components, mock_logger, mock
     mock_instance_manager.start.assert_called_once()
     mock_request_manager.start.assert_called_once()
     mock_metrics_collector.start.assert_called_once()
-    mock_instance_health_checker.start.assert_called_once()
     mock_coordinator_server.start.assert_called_once()
 
 

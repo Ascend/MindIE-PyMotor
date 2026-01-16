@@ -32,28 +32,6 @@
     },
     "check_files": true
   },
-  "health_check_config": {
-    "dummy_request_interval": 5.0,
-    "max_consecutive_failures": 3,
-    "dummy_request_timeout": 10.0,
-    "controller_api_dns": "mindie-motor-controller-service.mindie.svc.cluster.local",
-    "controller_api_port": 1026,
-    "dummy_request_endpoint": "/v1/completions",
-    "dummy_request_body": {
-      "model": "test-model",
-      "prompt": "Health check. Please respond with OK only.",
-      "message": "[{'role': 'user', 'content': 'hi'}]",
-      "max_tokens": 3,
-      "temperature": 0.1,
-      "top_p": 0.9,
-      "stream": false
-    },
-    "alarm_endpoint": "/v1/alarm/coordinator",
-    "alarm_timeout": 5.0,
-    "terminate_instance_endpoint": "/controller/terminate_instance",
-    "thread_join_timeout": 5.0,
-    "error_retry_interval": 1.0
-  },
   "timeout_config": {
     "request_timeout": 30,
     "connection_timeout": 10,

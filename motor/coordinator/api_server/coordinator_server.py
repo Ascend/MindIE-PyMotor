@@ -26,7 +26,6 @@ from motor.common.utils.cert_util import (
 )
 from motor.coordinator.core.instance_manager import InstanceManager
 from motor.common.resources.instance import PDRole
-from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.coordinator.middleware.fastapi_middleware import (
     SimpleRateLimitMiddleware, 
     create_simple_rate_limit_middleware, 

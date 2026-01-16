@@ -882,13 +882,6 @@ class TestCoordinatorServerAdvanced:
         im_instance.refresh_instances.return_value = None
         im_mock_cls.return_value = im_instance
         
-        # Mock InstanceHealthChecker
-        self._hc_patcher = patch('motor.coordinator.api_server.coordinator_server.InstanceHealthChecker')
-        hc_mock_cls = self._hc_patcher.start()
-        hc_instance = MagicMock()
-        hc_instance.check_state_alarm.return_value = True
-        hc_mock_cls.return_value = hc_instance
-
         # Mock handle_request to return appropriate JSON response
         async def mock_handle_request(request, config):
             """Mock handle_request that returns JSON response matching test expectations"""
@@ -970,8 +963,6 @@ class TestCoordinatorServerAdvanced:
         try:
             if hasattr(self, '_im_patcher'):
                 self._im_patcher.stop()
-            if hasattr(self, '_hc_patcher'):
-                self._hc_patcher.stop()
             if hasattr(self, '_handle_request_patcher'):
                 self._handle_request_patcher.stop()
         except Exception:

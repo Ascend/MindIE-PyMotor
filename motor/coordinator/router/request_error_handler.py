@@ -11,7 +11,6 @@ import httpx
 
 from motor.coordinator.models.request import ReqState, ScheduledResource
 from motor.coordinator.models.contants import REQUEST_DATA_KEY, RESOURCE_KEY
-from motor.coordinator.core.instance_healthchecker import InstanceHealthChecker
 from motor.common.utils.security_utils import filter_sensitive_body, sanitize_error_message
 
 # Import only for type checking to avoid runtime circular dependencies
@@ -159,9 +158,6 @@ def __is_client_error(status_code: int) -> bool:
 def __handle_request_error(error: httpx.RequestError, self_instance: 'BaseRouter', resource: ScheduledResource):
     """Handle HTTP request errors"""
     self_instance.req_info.update_state(ReqState.EXCEPTION)
-    
-    if isinstance(error, httpx.TransportError):
-        InstanceHealthChecker().push_exception_instance(resource.instance, resource.endpoint)
     
     if isinstance(error, httpx.NetworkError):
         self_instance.logger.warning("Network error: %s", str(error))
