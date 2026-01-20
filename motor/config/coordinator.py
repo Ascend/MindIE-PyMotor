@@ -260,13 +260,6 @@ class CoordinatorConfig:
             else:
                 config.config_path = None
 
-            # Configure logging for this module with the loaded configuration
-            from motor.common.utils.logger import set_logging_config_for_module
-            set_logging_config_for_module(
-                'motor.config.coordinator',
-                log_config=config.logging_config
-            )
-
             reconfigure_logging(config.logging_config)
 
             # Now it's safe to log after logging configuration is set
@@ -389,14 +382,6 @@ class CoordinatorConfig:
 
             self.last_modified = current_mtime
 
-            # Reconfigure logging for this module with new settings
-            from motor.common.utils.logger import set_logging_config_for_module
-            set_logging_config_for_module(
-                'motor.config.coordinator',
-                log_config=self.logging_config
-            )
-
-            # Reconfigure logging with new settings
             reconfigure_logging(self.logging_config)
 
             logger.info("Configuration reload successful")

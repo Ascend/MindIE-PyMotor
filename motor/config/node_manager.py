@@ -193,13 +193,6 @@ class NodeManagerConfig:
             if config_path_obj.exists():
                 config.last_modified = config_path_obj.stat().st_mtime
 
-            # Configure logging for this module with the loaded configuration
-            from motor.common.utils.logger import set_logging_config_for_module
-            set_logging_config_for_module(
-                'motor.config.node_manager',
-                log_config=config.logging_config
-            )
-
             logger.info("Configuration loading completed")
             return config
 
@@ -349,14 +342,6 @@ class NodeManagerConfig:
 
             self.last_modified = current_mtime
 
-            # Reconfigure logging for this module with new settings
-            from motor.common.utils.logger import set_logging_config_for_module
-            set_logging_config_for_module(
-                'motor.config.node_manager',
-                log_config=self.logging_config
-            )
-
-            # Reconfigure logging with new settings
             reconfigure_logging(self.logging_config)
 
             logger.info("NodeManager configuration reload successful")

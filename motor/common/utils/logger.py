@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# Module-specific logging configurations
-_module_logging_configs = {}
+# Set to track modules that have requested loggers
+_logged_modules = set()
 
 
 @dataclass
@@ -37,7 +37,7 @@ class MaxLengthFormatter(logging.Formatter):
     ):
         # If max_length is not provided, get it from config
         if max_length is None:
-            config = get_logging_config()
+            config = LoggingConfig()
             max_length = config.log_max_line_length
         super().__init__(fmt=fmt, datefmt=datefmt, style=style)
         self.max_length = max_length
@@ -75,113 +75,6 @@ class ApiAccessFilter(logging.Filter):
         return True
 
 
-def set_logging_config_for_module(
-    module_name: str,
-    log_config: LoggingConfig
-) -> None:
-    """
-    Set logging configuration for a specific module.
-
-    Args:
-        module_name: Module name (e.g., 'motor.config.controller')
-        log_config: LoggingConfig object
-    """
-    _module_logging_configs[module_name] = log_config
-
-
-def get_logging_config(module_name: str | None = None):
-    """
-    Get logging configuration for a specific module.
-    Falls back to default values if no module-specific config is found.
-
-    Args:
-        module_name: Module name to get config for. If None, uses caller module.
-    """
-    if module_name is None:
-        import inspect
-        frame = inspect.currentframe()
-        if frame and frame.f_back:
-            module_name = frame.f_back.f_globals.get('__name__', '')
-
-    # Try module-specific config first
-    if module_name and module_name in _module_logging_configs:
-        return _module_logging_configs[module_name]
-
-    # Fall back to default values
-    return LoggingConfig()
-
-
-def _load_logging_config_from_file(config_path: str) -> LoggingConfig:
-    """
-    Load logging configuration directly from a JSON config file.
-
-    Args:
-        config_path: Path to the config file
-
-    Returns:
-        LoggingConfig object with loaded settings, or default config if loading fails
-    """
-    config_file = Path(config_path)
-    logging_config = LoggingConfig()  # Default config
-
-    if config_file.exists():
-        try:
-            with open(config_file, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            if 'logging_config' in cfg:
-                # Update logging config from JSON
-                for key, value in cfg['logging_config'].items():
-                    if hasattr(logging_config, key):
-                        setattr(logging_config, key, value)
-        except Exception:
-            # If reading fails, use default config
-            pass
-
-    return logging_config
-
-
-def load_config_for_module(module_name: str) -> bool:
-    """
-    Load logging configuration for a specific module from its config file.
-
-    Args:
-        module_name: Module name (e.g., 'motor.controller')
-
-    Returns:
-        True if config was loaded successfully, False otherwise
-    """
-    logging_config = None
-
-    try:
-        if module_name.startswith('motor.controller') or module_name == 'motor.config.controller':
-            from motor.config.controller import get_config_path
-
-            config_path = get_config_path()
-            logging_config = _load_logging_config_from_file(config_path)
-        elif module_name.startswith('motor.coordinator') or module_name == 'motor.config.coordinator':
-            # Coordinator modules: load config from CoordinatorConfig
-            try:
-                from motor.config.coordinator import CoordinatorConfig
-                logging_config = CoordinatorConfig().logging_config
-            except Exception:
-                return False
-        elif module_name.startswith('motor.node_manager') or module_name == 'motor.config.node_manager':
-            from motor.common.utils.env import Env
-
-            config_path = os.path.join(Env.config_path or "", "config", "node_manager_config.json")
-            logging_config = _load_logging_config_from_file(config_path)
-
-        # Apply configuration if we have a valid config
-        if logging_config is not None:
-            set_logging_config_for_module(module_name, logging_config)
-            return True
-
-        return False
-
-    except Exception:
-        return False
-
-
 def get_logger(
     name: str = __name__,
     log_file: str | None = None,
@@ -198,14 +91,11 @@ def get_logger(
     Returns:
         Configured logger instance
     """
-    # Try to load config for this module if not already loaded
-    if name not in _module_logging_configs:
-        res = load_config_for_module(name)
-        if not res:
-            logging.warning(f"Failed to load logging config for module {name}")
+    # Record this module as having requested a logger
+    _logged_modules.add(name)
 
-    # Get configuration for this specific module
-    config = get_logging_config(name)
+    # Get configuration for this specific module (use default config initially)
+    config = LoggingConfig()
 
     # Use provided parameters or fall back to config
     if level is None:
