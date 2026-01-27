@@ -44,6 +44,8 @@ spec:
               - -c
               - "$CONFIGMAP_PATH/probe.sh readiness"
             periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 12
           livenessProbe:
             exec:
               command:
@@ -52,6 +54,7 @@ spec:
               - "$CONFIGMAP_PATH/probe.sh liveness"
             periodSeconds: 5
             timeoutSeconds: 4
+            failureThreshold: 12
           env:
           - name: POD_IP
             valueFrom:
