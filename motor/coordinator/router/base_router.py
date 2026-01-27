@@ -128,7 +128,13 @@ class BaseRouter(ABC):
                     detail=f"Scheduling failed, role:{role}"
                 )
             time.sleep(0.1)
-        self.logger.debug("Scheduled instance: %s, role: %s", ins.job_name, role)
+        self.logger.info(
+            "Dispatch request api=%s len=%d -> endpoint_id=%s endpoint=%s:%s status=%s | "
+            "instance_id=%s job=%s model=%s role=%s",
+            self.req_info.api, self.req_info.req_len,
+            endpoint.id, endpoint.ip, endpoint.business_port, endpoint.status,
+            ins.id, ins.job_name, ins.model_name, role
+        )
 
         # If scheduler returns normally, it means allocation was successful
         self.req_info.update_state(ReqState.P_ALLOCATED if role == PDRole.ROLE_P else ReqState.D_ALLOCATED)
