@@ -51,10 +51,10 @@
       "coordinator_heartbeat_interval": 5.0
     },
     "fault_tolerance_config": {
-      "enable_fault_tolerance": true,
+      "enable_fault_tolerance": false,
       "strategy_center_check_internal": 1,
-      "enable_scale_p2d": true,
-      "enable_lingqu_network_recover": true
+      "enable_scale_p2d": false,
+      "enable_lingqu_network_recover": false
     },
     "standby_config": {
       "enable_master_standby": false,

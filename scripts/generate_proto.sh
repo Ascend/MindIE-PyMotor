@@ -12,9 +12,9 @@
 # Script to generate Python code from .proto files
 # This script generates _pb2.py and _pb2_grpc.py files from .proto files
 #
-# Example .proto file structure (motor/common/utils/proto/kv.proto):
+# Example .proto file structure (motor/common/etcd/proto/kv.proto):
 #   syntax = "proto3";
-#   package motor.common.utils.proto;
+#   package motor.common.etcd.proto;
 #
 #   message KVPair {
 #     string key = 1;
@@ -73,7 +73,7 @@ for proto_file in $PROTO_FILES; do
         # Fix import paths in _pb2_grpc.py if it exists
         pb2_grpc_file="${proto_dir}/${proto_base}_pb2_grpc.py"
         if [ -f "$pb2_grpc_file" ]; then
-            # Get the Python package path (e.g., motor/common/utils/proto/kv.proto -> motor.common.utils.proto)
+            # Get the Python package path (e.g., motor/common/etcd/proto/kv.proto -> motor.common.etcd.proto)
             # Remove leading ./ and .proto extension, get directory path, then convert / to .
             proto_rel_path=$(echo "$proto_file" | sed 's|^\./||' | sed 's|\.proto$||')
             package_path=$(dirname "$proto_rel_path" | sed 's|/|.|g')
@@ -82,7 +82,7 @@ for proto_file in $PROTO_FILES; do
             fi
 
             # Replace relative import with absolute import
-            # Pattern: import kv_pb2 -> from motor.common.utils.proto import kv_pb2
+            # Pattern: import kv_pb2 -> from motor.common.etcd.proto import kv_pb2
             # Use sed with word boundary to avoid double replacement
             if [ -n "$package_path" ]; then
                 # First check if already replaced to avoid double replacement

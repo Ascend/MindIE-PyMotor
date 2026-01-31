@@ -16,7 +16,7 @@ from typing import Callable, Protocol
 from enum import Enum
 
 from motor.common.utils.logger import get_logger
-from motor.common.utils.etcd_client import EtcdClient
+from motor.common.etcd.etcd_client import EtcdClient
 from motor.config.standby import StandbyConfig
 from motor.common.utils.singleton import ThreadSafeSingleton
 
@@ -47,10 +47,8 @@ class StandbyManager(ThreadSafeSingleton):
             raise ValueError("config must be provided for first initialization of StandbyManager singleton")
         self.config = config
         self.etcd_client = EtcdClient(
-            host=config.etcd_config.etcd_host,
-            port=config.etcd_config.etcd_port,
-            tls_config=config.etcd_tls_config,
-            timeout=config.etcd_config.etcd_timeout
+            etcd_config=config.etcd_config,
+            tls_config=config.etcd_tls_config
         )
         standby_config = config.standby_config
         self.current_role = StandbyRole.STANDBY

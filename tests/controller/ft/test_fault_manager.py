@@ -526,13 +526,13 @@ def test_update_instances_status(fault_manager, test_case, server_configs, expec
     assert instance_metadata.fault_code == expected_fault_code
 
 def test_update_instance_added(fault_manager):
-    """Test update method with INSTANCE_ADDED event"""
+    """Test update method with INSTANCE_INITIAL event"""
     # Create mock instance using helper
     mock_instance = FaultManagerTestHelper.create_mock_instance(
         instance_id=100, role="prefill", pod_ip=TEST_IPS[0], host_ip=TEST_IPS[0]
     )
 
-    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
     # Check instance registration
     assert 100 in fault_manager.instances
@@ -547,14 +547,14 @@ def test_update_instance_added(fault_manager):
     assert server.status == Status.HEALTHY
 
 def test_update_instance_added_duplicate(fault_manager):
-    """Test update method with INSTANCE_ADDED event for duplicate instance"""
+    """Test update method with INSTANCE_INITIAL event for duplicate instance"""
     # Create first mock instance
     mock_instance1 = FaultManagerTestHelper.create_mock_instance(
         instance_id=100, role="prefill", pod_ip=TEST_IPS[0], host_ip=TEST_IPS[0]
     )
 
     # Add the instance first time
-    fault_manager.update(mock_instance1, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance1, ObserverEvent.INSTANCE_INITIAL)
 
     # Check instance registration
     assert 100 in fault_manager.instances
@@ -569,7 +569,7 @@ def test_update_instance_added_duplicate(fault_manager):
     )
 
     # Try to add the same instance again
-    fault_manager.update(mock_instance2, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance2, ObserverEvent.INSTANCE_INITIAL)
 
     # Check that the original instance data is preserved (not overwritten)
     assert len(fault_manager.instances) == 1  # Still only one instance
@@ -582,7 +582,7 @@ def test_update_instance_added_duplicate(fault_manager):
 def test_update_instance_separated(fault_manager, mock_instance):
     """Test update method with INSTANCE_SEPERATED event"""
     # First add the instance
-    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
     # Then separate it
     fault_manager.update(mock_instance, ObserverEvent.INSTANCE_SEPERATED)
@@ -595,7 +595,7 @@ def test_update_instance_separated(fault_manager, mock_instance):
 def test_update_instance_removed(fault_manager, mock_instance):
     """Test update method with INSTANCE_REMOVED event"""
     # First add the instance
-    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
     # Then remove it
     fault_manager.update(mock_instance, ObserverEvent.INSTANCE_REMOVED)
@@ -818,7 +818,7 @@ def test_concurrent_updates(fault_manager):
 
     # Add all instances
     for instance in instances:
-        fault_manager.update(instance, ObserverEvent.INSTANCE_ADDED)
+        fault_manager.update(instance, ObserverEvent.INSTANCE_INITIAL)
 
     # Verify all instances are registered
     assert len(fault_manager.instances) == 5
@@ -836,7 +836,7 @@ def test_triggered_update_workflow(fault_manager):
     mock_instance = FaultManagerTestHelper.create_mock_instance()
 
     # Add instance
-    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_ADDED)
+    fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
     # Verify initial state
     assert 100 in fault_manager.instances
@@ -1368,77 +1368,79 @@ def test_update_config():
 
         # Verify ETCD client constructor was called with new config
         # Note: update_config updates etcd_tls_config, so it uses the new one
-        mock_etcd_class.assert_called_once_with(
-            host="new-etcd-host",
-            port=2380,
-            tls_config=new_config.etcd_tls_config,
-            timeout=30.0
-        )
+        assert mock_etcd_class.call_count == 1
+        call_args = mock_etcd_class.call_args
+        # Verify the call was made with correct etcd_config and tls_config
+        # The call_args might be a call object with kwargs attribute
+        if hasattr(call_args, 'kwargs') and call_args.kwargs:
+            kwargs = call_args.kwargs
+        else:
+            # Fallback: check if it's a tuple (args, kwargs)
+            kwargs = call_args[1] if len(call_args) > 1 else {}
+        assert 'etcd_config' in kwargs
+        assert 'tls_config' in kwargs
+        assert kwargs['etcd_config'].etcd_host == "new-etcd-host"
+        assert kwargs['etcd_config'].etcd_port == 2380
+        assert kwargs['etcd_config'].etcd_timeout == 30.0
+        assert kwargs['tls_config'] == new_config.etcd_tls_config
 
 
 def test_update_instances():
     """Test update_instances method adds new instances and updates existing ones"""
-    # Create FaultManager with mocked dependencies
-    with patch('motor.controller.ft.fault_manager.EtcdClient') as mock_etcd_class:
-        mock_client = MagicMock()
-        mock_client.persist_data.return_value = True
-        mock_client.restore_data.return_value = None
-        mock_etcd_class.return_value = mock_client
+    # Create FaultManager with mocked dependencies using the helper
+    # The helper properly sets up all necessary mocks and returns a fully initialized manager
+    manager, _, _ = FaultManagerTestHelper.create_mock_fault_manager()
 
-        from motor.config.controller import ControllerConfig
-        config = ControllerConfig()
-        manager = FaultManager(config)
+    # Create mock instances
+    mock_instance1 = Mock(spec=Instance)
+    mock_instance1.id = 1
+    mock_instance1.job_name = "job1"
+    mock_instance1.get_node_managers.return_value = [
+        NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.2", host_ip="10.0.0.2", port="8080")
+    ]
 
-        # Create mock instances
-        mock_instance1 = Mock(spec=Instance)
-        mock_instance1.id = 1
-        mock_instance1.job_name = "job1"
-        mock_instance1.get_node_managers.return_value = [
-            NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
-            NodeManagerInfo(pod_ip="192.168.1.2", host_ip="10.0.0.2", port="8080")
-        ]
+    mock_instance2 = Mock(spec=Instance)
+    mock_instance2.id = 2
+    mock_instance2.job_name = "job2"
+    mock_instance2.get_node_managers.return_value = [
+        NodeManagerInfo(pod_ip="192.168.1.3", host_ip="10.0.0.3", port="8080")
+    ]
 
-        mock_instance2 = Mock(spec=Instance)
-        mock_instance2.id = 2
-        mock_instance2.job_name = "job2"
-        mock_instance2.get_node_managers.return_value = [
-            NodeManagerInfo(pod_ip="192.168.1.3", host_ip="10.0.0.3", port="8080")
-        ]
+    # Test 1: Add new instances
+    manager.update_instances([mock_instance1, mock_instance2])
 
-        # Test 1: Add new instances
-        manager.update_instances([mock_instance1, mock_instance2])
+    # Verify instances were added
+    assert 1 in manager.instances
+    assert 2 in manager.instances
+    assert len(manager.instances) == 2
 
-        # Verify instances were added
-        assert 1 in manager.instances
-        assert 2 in manager.instances
-        assert len(manager.instances) == 2
+    # Verify servers were added
+    assert "192.168.1.1" in manager.servers
+    assert "192.168.1.2" in manager.servers
+    assert "192.168.1.3" in manager.servers
+    assert len(manager.servers) == 3
 
-        # Verify servers were added
-        assert "192.168.1.1" in manager.servers
-        assert "192.168.1.2" in manager.servers
-        assert "192.168.1.3" in manager.servers
-        assert len(manager.servers) == 3
+    # Test 2: Update existing instance with changed node managers
+    mock_instance1.get_node_managers.return_value = [
+        NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.4", host_ip="10.0.0.4", port="8080")  # Changed node2 to node4
+    ]
 
-        # Test 2: Update existing instance with changed node managers
-        mock_instance1.get_node_managers.return_value = [
-            NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
-            NodeManagerInfo(pod_ip="192.168.1.4", host_ip="10.0.0.4", port="8080")  # Changed node2 to node4
-        ]
+    manager.update_instances([mock_instance1])
 
-        manager.update_instances([mock_instance1])
+    # Verify instance 1 still exists
+    assert 1 in manager.instances
+    assert 2 in manager.instances
 
-        # Verify instance 1 still exists
-        assert 1 in manager.instances
-        assert 2 in manager.instances
+    # Verify old server was removed and new server was added
+    assert "192.168.1.2" not in manager.servers  # Old server removed
+    assert "192.168.1.4" in manager.servers     # New server added
+    assert "192.168.1.1" in manager.servers     # Existing server kept
+    assert "192.168.1.3" in manager.servers     # Unchanged server kept
+    assert len(manager.servers) == 3  # Total servers should still be 3
 
-        # Verify old server was removed and new server was added
-        assert "192.168.1.2" not in manager.servers  # Old server removed
-        assert "192.168.1.4" in manager.servers     # New server added
-        assert "192.168.1.1" in manager.servers     # Existing server kept
-        assert "192.168.1.3" in manager.servers     # Unchanged server kept
-        assert len(manager.servers) == 3  # Total servers should still be 3
-
-        # Test 3: Empty instance list should not cause issues
-        manager.update_instances([])
-        assert len(manager.instances) == 2  # No change
-        assert len(manager.servers) == 3    # No change
+    # Test 3: Empty instance list should not cause issues
+    manager.update_instances([])
+    assert len(manager.instances) == 2  # No change
+    assert len(manager.servers) == 3    # No change

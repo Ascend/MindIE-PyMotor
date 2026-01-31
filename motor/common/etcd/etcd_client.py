@@ -19,10 +19,12 @@ from typing import Any, Type, TypeVar
 import grpc
 from pydantic import BaseModel
 
+from motor.config.etcd import EtcdConfig
 from motor.config.tls_config import TLSConfig
-from motor.common.utils.proto import rpc_pb2, rpc_pb2_grpc
-from motor.common.utils import locks
+from motor.common.etcd.proto import rpc_pb2, rpc_pb2_grpc
+from motor.common.etcd import locks
 from motor.common.utils.logger import get_logger
+
 
 T = TypeVar('T', bound=BaseModel)
 
@@ -36,12 +38,13 @@ RB = 'rb'
 class EtcdClient:
     """Etcd client with lease lock management and JSON data storage"""
 
-    def __init__(self, host: str = "localhost", port: int = 2379, tls_config: TLSConfig | None = None,
-                 timeout: int = 5) -> None:
-        self.host = host
-        self.port = port
+    def __init__(self, etcd_config: EtcdConfig, tls_config: TLSConfig | None = None) -> None:
         self.tls_config = tls_config
-        self.timeout = timeout
+
+        # Use etcd_config attributes as base configuration
+        self.host = etcd_config.etcd_host
+        self.port = etcd_config.etcd_port
+        self.timeout = etcd_config.etcd_timeout
         self.channel = None
         self.kv_stub = None
         self.lease_stub = None
@@ -49,21 +52,21 @@ class EtcdClient:
         self._lock = threading.Lock()
 
         try:
-            if tls_config and tls_config.tls_enable:
-                with open(tls_config.ca_file, RB) as f:
+            if self.tls_config and self.tls_config.tls_enable:
+                with open(self.tls_config.ca_file, RB) as f:
                     root_cert = f.read()
-                with open(tls_config.key_file, RB) as f:
+                with open(self.tls_config.key_file, RB) as f:
                     private_key = f.read()
-                with open(tls_config.cert_file, RB) as f:
+                with open(self.tls_config.cert_file, RB) as f:
                     cert_chain = f.read()
                 creds = grpc.ssl_channel_credentials(
                     root_certificates=root_cert,
                     private_key=private_key,
                     certificate_chain=cert_chain
                 )
-                self.channel = grpc.secure_channel(f'{host}:{port}', creds)
+                self.channel = grpc.secure_channel(f'{self.host}:{self.port}', creds)
             else:
-                self.channel = grpc.insecure_channel(f'{host}:{port}')
+                self.channel = grpc.insecure_channel(f'{self.host}:{self.port}')
 
             self.kv_stub = rpc_pb2_grpc.KVStub(self.channel)
             self.lease_stub = rpc_pb2_grpc.LeaseStub(self.channel)
@@ -299,6 +302,9 @@ class EtcdClient:
             data = self.get_prefix_data(key_prefix, model_class)
             if data:
                 logger.debug("Restored %d items with prefix %s", len(data), key_prefix)
+            else:
+                # Return None when no data found (empty dict means no data)
+                return None
             return data
 
         except Exception as e:

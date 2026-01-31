@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,7 +8,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import os
 import json
 from dataclasses import dataclass, field, asdict
@@ -52,11 +50,11 @@ class InstanceConfig:
 
     # instance assembler configuration
     instance_assemble_timeout: int = 600  # 600 seconds
-    instance_assembler_check_internal: int = 1  # 1 second
-    instance_assembler_cmd_send_internal: int = 1  # 1 second
+    instance_assembler_check_interval: int = 1  # 1 second
+    instance_assembler_cmd_send_interval: int = 1  # 1 second
 
     # instance manager configuration
-    instance_manager_check_internal: int = 1  # 1 second
+    instance_manager_check_interval: int = 1  # 1 second
     instance_heartbeat_timeout: int = 5  # 5 seconds
     instance_expired_timeout: int = 300  # 300 seconds
 
@@ -83,7 +81,7 @@ class FaultToleranceConfig:
     enable_fault_tolerance: bool = False
 
     # strategy center configuration
-    strategy_center_check_internal: int = 1  # 1 second
+    strategy_center_check_interval: int = 1  # 1 second
 
     # scale and recovery configuration
     enable_scale_p2d: bool = False  # Enable/disable scale p2d strategy
@@ -241,11 +239,11 @@ class ControllerConfig:
         if self.instance_config.instance_expired_timeout <= 0:
             errors.append("instance_expired_timeout must be greater than 0")
 
-        if self.instance_config.instance_assembler_check_internal <= 0:
-            errors.append("instance_assembler_check_internal must be greater than 0")
+        if self.instance_config.instance_assembler_check_interval <= 0:
+            errors.append("instance_assembler_check_interval must be greater than 0")
 
-        if self.instance_config.instance_manager_check_internal <= 0:
-            errors.append("instance_manager_check_internal must be greater than 0")
+        if self.instance_config.instance_manager_check_interval <= 0:
+            errors.append("instance_manager_check_interval must be greater than 0")
 
         if self.instance_config.send_cmd_retry_times < 0:
             errors.append("send_cmd_retry_times cannot be negative")
@@ -258,8 +256,8 @@ class ControllerConfig:
             errors.append("coordinator_heartbeat_interval must be greater than 0")
 
         # Validate fault tolerance configuration
-        if self.fault_tolerance_config.strategy_center_check_internal <= 0:
-            errors.append("strategy_center_check_internal must be greater than 0")
+        if self.fault_tolerance_config.strategy_center_check_interval <= 0:
+            errors.append("strategy_center_check_interval must be greater than 0")
 
         # Validate standby configuration
         if self.standby_config.master_standby_check_interval <= 0:

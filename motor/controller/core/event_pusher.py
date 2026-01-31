@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,7 +8,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import queue
 import threading
 import time
@@ -104,8 +102,8 @@ class EventPusher(Observer):
     def is_alive(self) -> bool:
         """Check if the event_pusher threads are alive"""
         return (
-            (self.event_consumer_thread is not None and self.event_consumer_thread.is_alive())
-            and (self.heartbeat_detector_thread is not None and self.heartbeat_detector_thread.is_alive())
+            self.event_consumer_thread is not None and self.event_consumer_thread.is_alive()
+            and self.heartbeat_detector_thread is not None and self.heartbeat_detector_thread.is_alive()
         )
 
     def update_config(self, config: ControllerConfig) -> None:
@@ -117,12 +115,12 @@ class EventPusher(Observer):
     def update(self, instance: ReadOnlyInstance, event: ObserverEvent) -> None:
         # Event pusher will interact with coordinator and send instances.
         # So it should just use Instance instead of ReadOnlyInstance.
-        if event == ObserverEvent.INSTANCE_ADDED:
+        if event == ObserverEvent.INSTANCE_READY:
             with self.lock:
                 self.instances[instance.job_name] = instance
             # Deep copy the instance to ensure data consistency during async HTTP sending
             event = Event(EventType.ADD, instance.to_instance())
-            logger.info("Instance added: %s", instance.job_name)
+            logger.info("Instance ready: %s", instance.job_name)
         elif event == ObserverEvent.INSTANCE_SEPERATED:
             with self.lock:
                 if instance.job_name in self.instances:
@@ -133,12 +131,9 @@ class EventPusher(Observer):
             # Deep copy the instance to ensure data consistency during async HTTP sending
             event = Event(EventType.DEL, instance.to_instance())
             logger.info("Instance removed: %s", instance.job_name)
-        elif event == ObserverEvent.INSTANCE_REMOVED:
-            # Separated event is already notified coordinator
-            # to remove instance. so we don't need to notify again.
-            return
         else:
-            raise ValueError(f"Unknown event type: {event}")
+            # Other event we don't handle, just return
+            return
 
         self.event_queue.put(event)
 
@@ -183,10 +178,14 @@ class EventPusher(Observer):
             time.sleep(sleep_interval)
 
     def _coordinator_heartbeat_detector(self) -> None:
-        """detect coordinator heartbeat"""
+        """
+        Detect Coordinator heartbeat, when Coordinator need Controller sent all 
+        instances resource, this function will produce a SET event.
+        """
         hb_loss_cnt = 0
         log_counter = 0  # Counter to control log frequency
-        log_interval = 10  # Only log every 10 iterations
+        log_interval = 12  # Only log every 12 iterations
+        not_ready_log_counter = 0  # Counter to control not ready log frequency
 
         while not self.stop_event.is_set():
             try:
@@ -197,10 +196,15 @@ class EventPusher(Observer):
                     self.is_first_heartbeat_success = True
                     logger.info("Coordinator heartbeat established successfully.")
                     log_counter = 0  # Reset counter on successful connection
+                    not_ready_log_counter = 0  # Reset not ready counter on successful connection
 
                 if response is None or response.get("ready") is None or not response.get("ready"):
                     # When get info 'coordinator is not ready', controller will reset coordinator
-                    logger.info("Coordinator is alive but is not ready.")
+                    # Only log not ready message periodically to avoid spam
+                    not_ready_log_counter += 1
+                    if not_ready_log_counter >= log_interval:
+                        logger.info("Coordinator is alive but is not ready.")
+                        not_ready_log_counter = 0
                     self.is_coordinator_reset = True
 
                 if self.is_coordinator_reset:

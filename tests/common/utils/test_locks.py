@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from motor.common.utils.locks import Lock
+from motor.common.etcd.locks import Lock
 
 
 class TestLock:

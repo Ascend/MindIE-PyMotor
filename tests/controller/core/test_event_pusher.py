@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,7 +8,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import pytest
 import queue
 from unittest.mock import Mock, patch, MagicMock
@@ -367,7 +365,7 @@ def test_update_add_instance(event_pusher):
     """test update add instance"""
     test_instance = Instance(job_name="test_job", model_name="test_model", id=1, role="prefill")
     readonly_instance = ReadOnlyInstance(test_instance)
-    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_ADDED)
+    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_READY)
 
     # Verify that the instance was added to the dictionary
     assert readonly_instance.job_name in event_pusher.instances
@@ -418,7 +416,7 @@ def test_update_seperated_instance_recovery(event_pusher):
         event_pusher.event_queue.get()
 
     # Then recover the instance
-    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_ADDED)
+    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_READY)
 
     # Verify that the recovery event has been placed in the queue
     assert not event_pusher.event_queue.empty()
@@ -451,7 +449,7 @@ def test_update_deep_copy_instance(event_pusher):
     readonly_instance = ReadOnlyInstance(test_instance)
 
     # Call update method (this should perform deep copy)
-    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_ADDED)
+    event_pusher.update(readonly_instance, ObserverEvent.INSTANCE_READY)
 
     # Get the event from queue
     assert not event_pusher.event_queue.empty()

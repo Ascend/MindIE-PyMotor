@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,8 +8,7 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
-from typing import Any, Dict
+from typing import Any
 
 from motor.common.resources import NodeManagerInfo, StartCmdMsg
 from motor.common.utils.http_client import SafeHTTPSClient
@@ -64,12 +62,11 @@ class NodeManagerApiClient:
         return is_succeed
 
     @classmethod
-    def query_status(cls, node_mgr: NodeManagerInfo) -> Dict[str, Any]:
+    def query_status(cls, node_mgr: NodeManagerInfo) -> dict[str, Any]:
         client_args = NodeManagerApiClient._generate_client_args(node_mgr)
         client = SafeHTTPSClient(**client_args)
         response = client.get("/node-manager/status")
         return response
-
 
     @classmethod
     def _generate_client_args(cls, node_mgr: NodeManagerInfo) -> dict[str, str]:

@@ -12,7 +12,7 @@
 
 import uuid
 
-import motor.common.utils.proto.rpc_pb2 as rpc__pb2
+import motor.common.etcd.proto.rpc_pb2 as rpc__pb2
 from motor.common.utils.logger import get_logger
 
 logger = get_logger(__name__)

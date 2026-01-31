@@ -23,7 +23,7 @@ from motor.common.resources import Instance, ReadOnlyInstance, NodeManagerInfo
 from motor.controller.core import Observer, ObserverEvent, InstanceManager
 from motor.controller.ft.cluster_grpc import cluster_fault_pb2, ClusterNodeClient
 from motor.controller.ft.strategy import StrategyBase, generate_strategy_map
-from motor.common.utils.etcd_client import EtcdClient
+from motor.common.etcd.etcd_client import EtcdClient
 
 
 logger = get_logger(__name__)
@@ -158,16 +158,14 @@ class FaultManager(ThreadSafeSingleton, Observer):
         with self.config_lock:
             self.etcd_config = config.etcd_config
             self.etcd_tls_config = config.etcd_tls_config
-            self.strategy_center_check_internal = config.fault_tolerance_config.strategy_center_check_internal
+            self.strategy_center_check_internal = config.fault_tolerance_config.strategy_center_check_interval
 
         self.client = ClusterNodeClient('localhost', 5005)
 
         with self.config_lock:
             self.etcd_client = EtcdClient(
-                host=self.etcd_config.etcd_host,
-                port=self.etcd_config.etcd_port,
-                tls_config=self.etcd_tls_config,
-                timeout=self.etcd_config.etcd_timeout
+                etcd_config=self.etcd_config,
+                tls_config=self.etcd_tls_config
             )
 
         self.stop_event = threading.Event()
@@ -238,14 +236,12 @@ class FaultManager(ThreadSafeSingleton, Observer):
             # Update config fields
             self.etcd_config = config.etcd_config
             self.etcd_tls_config = config.etcd_tls_config
-            self.strategy_center_check_internal = config.fault_tolerance_config.strategy_center_check_internal
+            self.strategy_center_check_internal = config.fault_tolerance_config.strategy_center_check_interval
 
             # Update ETCD client with new configuration
             self.etcd_client = EtcdClient(
-                host=self.etcd_config.etcd_host,
-                port=self.etcd_config.etcd_port,
-                tls_config=self.etcd_tls_config,
-                timeout=self.etcd_config.etcd_timeout
+                etcd_config=self.etcd_config,
+                tls_config=self.etcd_tls_config
             )
             logger.info("FaultManager configuration updated")
 
@@ -344,8 +340,8 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     instance.job_name, event)
 
         # Duck typing for instance
-        if event == ObserverEvent.INSTANCE_ADDED:
-            self._handle_instance_added(instance)
+        if event == ObserverEvent.INSTANCE_INITIAL:
+            self._handle_instance_initial(instance)
         elif event == ObserverEvent.INSTANCE_SEPERATED:
             self._handle_instance_separated(instance)
         elif event == ObserverEvent.INSTANCE_REMOVED:
@@ -417,7 +413,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     self.servers.update(server_metadatas)
                     logger.debug("Added instance %d with %d servers", instance.id, len(server_metadatas))
 
-    def _handle_instance_added(self, instance: Instance) -> None:
+    def _handle_instance_initial(self, instance: Instance) -> None:
         with self.lock:
             # Check if instance already exists, if so, skip adding
             if instance.id in self.instances:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,10 +8,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
-from functools import wraps
-from typing import Dict, Type
-
 from motor.common.resources import InsEventMsg
 from motor.common.utils.http_client import SafeHTTPSClient
 from motor.common.utils.logger import get_logger
@@ -56,7 +51,7 @@ class CoordinatorApiClient:
         return is_succeed
 
     @staticmethod
-    def query_status(params: Dict[str, str] | None = None) -> Dict[str, str]:
+    def query_status(params: dict[str, str] | None = None) -> dict[str, str]:
         try:
             client_ars = CoordinatorApiClient._generate_client_args()
             client = SafeHTTPSClient(**client_ars, timeout=0.5)

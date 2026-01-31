@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,7 +8,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import os
 import time
 import json
@@ -54,10 +52,10 @@ def test_default_config_initialization():
 
         # Verify default values
         assert config.instance_config.instance_assemble_timeout == 600
-        assert config.instance_config.instance_assembler_check_internal == 1
-        assert config.instance_config.instance_assembler_cmd_send_internal == 1
+        assert config.instance_config.instance_assembler_check_interval == 1
+        assert config.instance_config.instance_assembler_cmd_send_interval == 1
         assert config.instance_config.send_cmd_retry_times == 3
-        assert config.instance_config.instance_manager_check_internal == 1
+        assert config.instance_config.instance_manager_check_interval == 1
         assert config.instance_config.instance_heartbeat_timeout == 5
         assert config.instance_config.instance_expired_timeout == 300
         assert config.api_config.controller_api_host == '127.0.0.1'
@@ -74,7 +72,7 @@ def test_default_config_initialization():
             os.environ['POD_IP'] = original_pod_ip
         elif 'POD_IP' in os.environ:
             del os.environ['POD_IP']
-    assert config.fault_tolerance_config.strategy_center_check_internal == 1
+    assert config.fault_tolerance_config.strategy_center_check_interval == 1
 
 
 def test_config_validation_success():
@@ -92,7 +90,7 @@ def test_config_validation_success():
 @pytest.mark.parametrize("param,value,expected_error", [
     ("instance_assemble_timeout", -1, "instance_assemble_timeout must be greater than 0"),
     ("instance_heartbeat_timeout", 0, "instance_heartbeat_timeout must be greater than 0"),
-    ("instance_assembler_check_internal", -1, "instance_assembler_check_internal must be greater than 0"),
+    ("instance_assembler_check_interval", -1, "instance_assembler_check_interval must be greater than 0"),
     ("event_consumer_sleep_interval", 0, "event_consumer_sleep_interval must be greater than 0"),
     ("coordinator_heartbeat_interval", -1, "coordinator_heartbeat_interval must be greater than 0"),
     ("controller_api_port", 0, "controller_api_port must be in range 1-65535"),
@@ -103,7 +101,8 @@ def test_config_validation_errors(param, value, expected_error):
     """Test various configuration validation errors"""
     with pytest.raises(ValueError, match=expected_error):
         config = ControllerConfig()
-        if param in ["instance_assemble_timeout", "instance_heartbeat_timeout", "instance_assembler_check_internal", "send_cmd_retry_times"]:
+        if param in ["instance_assemble_timeout", "instance_heartbeat_timeout",
+                     "instance_assembler_check_interval", "send_cmd_retry_times"]:
             setattr(config.instance_config, param, value)
         elif param in ["event_consumer_sleep_interval", "coordinator_heartbeat_interval"]:
             setattr(config.event_config, param, value)
@@ -600,7 +599,7 @@ def create_test_config(config_path: str, log_level: str = "INFO"):
         },
         "instance_config": {
             "instance_assemble_timeout": 600,
-            "instance_assembler_check_internal": 1,
+            "instance_assembler_check_interval": 1,
             "instance_assembler_cmd_send_internal": 1,
             "send_cmd_retry_times": 3,
             "instance_manager_check_internal": 1,
@@ -609,7 +608,7 @@ def create_test_config(config_path: str, log_level: str = "INFO"):
         },
         "fault_tolerance_config": {
             "enable_fault_tolerance": True,
-            "strategy_center_check_internal": 1,
+            "strategy_center_check_interval": 1,
             "enable_scale_p2d": True,
             "enable_lingqu_network_recover": True
         }

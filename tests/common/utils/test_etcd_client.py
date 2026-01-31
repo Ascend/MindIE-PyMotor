@@ -16,9 +16,10 @@ from unittest.mock import mock_open, patch, MagicMock
 import pytest
 from pydantic import BaseModel
 
-from motor.common.utils import locks
-from motor.common.utils.etcd_client import EtcdClient
-from motor.common.utils.proto import rpc_pb2, rpc_pb2_grpc
+from motor.common.etcd import locks
+from motor.common.etcd.etcd_client import EtcdClient
+from motor.common.etcd.proto import rpc_pb2, rpc_pb2_grpc
+from motor.config.etcd import EtcdConfig
 from motor.config.tls_config import TLSConfig
 
 
@@ -36,23 +37,29 @@ def base_client_with_ssl():
         cert_file="cert_cert_path"
     )
 
+    # Create etcd_config object
+    etcd_config = EtcdConfig(
+        etcd_host="test_host",
+        etcd_port=1234,
+        etcd_timeout=10
+    )
+
     with patch("grpc.secure_channel", return_value=mock_channel), \
             patch.object(rpc_pb2_grpc, "KVStub", return_value=mock_kv_stub), \
             patch.object(rpc_pb2_grpc, "LeaseStub", return_value=mock_lease_stub), \
             patch('builtins.open', mock_open(read_data=b"mock_content")):
         client = EtcdClient(
-            host="test_host",
-            port=1234,
-            tls_config=tls_config,
-            timeout=10
+            etcd_config=etcd_config,
+            tls_config=tls_config
         )
         return client
 
 
 def test_init_default_parameters():
     """Test initialization with default parameters."""
-    client = EtcdClient()
-    assert client.host == "localhost"
+    etcd_config = EtcdConfig()
+    client = EtcdClient(etcd_config=etcd_config)
+    assert client.host == "etcd.default.svc.cluster.local"
     assert client.port == 2379
     assert client.tls_config is None
     assert client.timeout == 5
@@ -75,15 +82,20 @@ def test_init_with_certificates():
         cert_file="cert_cert_path"
     )
 
+    # Create etcd_config object
+    etcd_config = EtcdConfig(
+        etcd_host="test_host",
+        etcd_port=1234,
+        etcd_timeout=10
+    )
+
     with patch("grpc.secure_channel", return_value=mock_channel), \
             patch.object(rpc_pb2_grpc, "KVStub", return_value=mock_kv_stub), \
             patch.object(rpc_pb2_grpc, "LeaseStub", return_value=mock_lease_stub), \
             patch('builtins.open', mock_open(read_data=b"mock_content")):
         client = EtcdClient(
-            host="test_host",
-            port=1234,
-            tls_config=tls_config,
-            timeout=10
+            etcd_config=etcd_config,
+            tls_config=tls_config
         )
 
         assert client.host == "test_host"
@@ -106,21 +118,27 @@ def test_init_with_missing_certificates():
         key_file="cert_key_path",
         cert_file="cert_cert_path"
     )
+
+    # Create etcd_config object
+    etcd_config = EtcdConfig(
+        etcd_host="test_host",
+        etcd_port=1234,
+        etcd_timeout=10
+    )
+
     with patch("builtins.open", side_effect=FileNotFoundError("File not found")):
         client = EtcdClient(
-            host="test_host",
-            port=1234,
-            tls_config=tls_config,
-            timeout=10
+            etcd_config=etcd_config,
+            tls_config=tls_config
         )
         assert client.host == "test_host"
 
 
 def test_get_key_with_namespace_and_job_name_already_has_namespace(monkeypatch):
     test_namespace = "test_namespace"
-    monkeypatch.setattr("motor.common.utils.etcd_client.namespace", test_namespace)
+    monkeypatch.setattr("motor.common.etcd.etcd_client.namespace", test_namespace)
     job_name = "test_job_name"
-    monkeypatch.setattr("motor.common.utils.etcd_client.job_name", job_name)
+    monkeypatch.setattr("motor.common.etcd.etcd_client.job_name", job_name)
     key = "test_namespace/test_job_name/key"
     result = EtcdClient.get_key_with_namespace_and_job_name(key)
     assert result == key
@@ -128,7 +146,7 @@ def test_get_key_with_namespace_and_job_name_already_has_namespace(monkeypatch):
 
 def test_get_key_with_namespace_and_job_name_no_prefix_has_namespace(monkeypatch):
     test_namespace = "test_namespace"
-    monkeypatch.setattr("motor.common.utils.etcd_client.namespace", test_namespace)
+    monkeypatch.setattr("motor.common.etcd.etcd_client.namespace", test_namespace)
     key = "key"
     result = EtcdClient.get_key_with_namespace_and_job_name(key)
     assert result != key
@@ -300,7 +318,7 @@ def test_release_lock_exception(base_client_with_ssl):
 
 @pytest.fixture
 def mock_logger():
-    with patch('motor.common.utils.etcd_client.logger') as mock_logger:
+    with patch('motor.common.etcd.etcd_client.logger') as mock_logger:
         yield mock_logger
 
 

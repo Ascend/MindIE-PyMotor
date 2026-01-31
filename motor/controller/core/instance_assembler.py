@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,44 +8,50 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import threading
 import time
-from dataclasses import dataclass, asdict
 from enum import Enum
+from typing import Any
+from pydantic import BaseModel, Field, model_validator
 
-from motor.common.resources import RegisterMsg, StartCmdMsg, ReregisterMsg, Instance, Endpoint
+from motor.common.resources import RegisterMsg, StartCmdMsg, ReregisterMsg, Instance
 from motor.common.utils.data_builder import build_ins_ranktable, build_endpoints
-from motor.common.utils.etcd_client import EtcdClient
-from motor.common.utils.http_client import SafeHTTPSClient
-from motor.common.utils.logger import get_logger
-from motor.common.utils.persistent_state import PersistentState
+from motor.common.etcd.etcd_client import EtcdClient
+from motor.common.etcd.persistent_state import PersistentState
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.controller import ControllerConfig
 from motor.controller.api_client.node_manager_api_client import NodeManagerApiClient
 from motor.controller.core import InstanceManager
+from motor.common.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class RegisterStatus(Enum):
-    NOT_REGISTERED = 0
-    ASSEMBLING = 1
-    ASSEMBLED = 2
+class RegisterStatus(str, Enum):
+    NOT_REGISTERED = "NOT_REGISTERED"
+    ASSEMBLING = "ASSEMBLING"
+    ASSEMBLED = "ASSEMBLED"
 
 
-@dataclass
-class AssembleInstanceMetadata:
-    instance: Instance
-    register_status: RegisterStatus = RegisterStatus.NOT_REGISTERED
-    start_command_send_times: int = 0
-    register_timestamp: float = 0.0
-    is_reregister: bool = False
-    lock: threading.Lock = None
-
-    def __post_init__(self):
+class AssembleInstanceMetadata(BaseModel):
+    """
+    Metadata for instance assembly process.
+    """
+    instance: Instance = Field(..., description="Instance object")
+    register_status: RegisterStatus = Field(default=RegisterStatus.NOT_REGISTERED, description="Registration status")
+    start_command_send_times: int = Field(default=0, description="Number of times start command was sent")
+    register_timestamp: float = Field(default=0.0, description="Registration timestamp")
+    is_reregister: bool = Field(default=False, description="Whether this is a re-registration")
+    
+    # Non-serializable field (excluded from serialization)
+    lock: Any = Field(default=None, exclude=True)
+    
+    @model_validator(mode='after')
+    def init_lock(self):
+        """Initialize lock if not provided"""
         if self.lock is None:
             self.lock = threading.Lock()
+        return self
 
 
 class InstanceAssembler(ThreadSafeSingleton):
@@ -72,8 +77,8 @@ class InstanceAssembler(ThreadSafeSingleton):
             self.etcd_config = config.etcd_config
             self.etcd_tls_config = config.etcd_tls_config
             self.instance_assemble_timeout = config.instance_config.instance_assemble_timeout
-            self.instance_assembler_check_internal = config.instance_config.instance_assembler_check_internal
-            self.instance_assembler_cmd_send_internal = config.instance_config.instance_assembler_cmd_send_internal
+            self.instance_assembler_check_interval = config.instance_config.instance_assembler_check_interval
+            self.instance_assembler_cmd_send_internal = config.instance_config.instance_assembler_cmd_send_interval
             self.send_cmd_retry_times = config.instance_config.send_cmd_retry_times
 
         # Version control for data persistence
@@ -81,12 +86,7 @@ class InstanceAssembler(ThreadSafeSingleton):
         self._version_lock = threading.Lock()
 
         with self.config_lock:
-            self.etcd_client = EtcdClient(
-                host=self.etcd_config.etcd_host,
-                port=self.etcd_config.etcd_port,
-                tls_config=self.etcd_tls_config,
-                timeout=self.etcd_config.etcd_timeout
-            )
+            self.etcd_client = EtcdClient(etcd_config=self.etcd_config, tls_config=self.etcd_tls_config)
 
         self.assemble_instance_thread = None
         self.start_command_thread = None
@@ -153,18 +153,14 @@ class InstanceAssembler(ThreadSafeSingleton):
         with self.config_lock:
             # Update config fields
             self.etcd_config = config.etcd_config
+            self.etcd_tls_config = config.etcd_tls_config
             self.instance_assemble_timeout = config.instance_config.instance_assemble_timeout
-            self.instance_assembler_check_internal = config.instance_config.instance_assembler_check_internal
-            self.instance_assembler_cmd_send_internal = config.instance_config.instance_assembler_cmd_send_internal
+            self.instance_assembler_check_interval = config.instance_config.instance_assembler_check_interval
+            self.instance_assembler_cmd_send_internal = config.instance_config.instance_assembler_cmd_send_interval
             self.send_cmd_retry_times = config.instance_config.send_cmd_retry_times
 
             # Update ETCD client with new configuration
-            self.etcd_client = EtcdClient(
-                host=self.etcd_config.etcd_host,
-                port=self.etcd_config.etcd_port,
-                tls_config=self.etcd_tls_config,
-                timeout=self.etcd_config.etcd_timeout
-            )
+            self.etcd_client = EtcdClient(etcd_config=self.etcd_config, tls_config=self.etcd_tls_config)
             logger.info("InstanceAssembler configuration updated")
 
     def register(self, msg: RegisterMsg) -> int:
@@ -281,62 +277,31 @@ class InstanceAssembler(ThreadSafeSingleton):
                 current_time = time.time()
                 next_version = self._get_next_version()
 
-                persistent_states = {}
-                # Persist ins_id_cnt
-                ins_id_cnt_data = {"ins_id_cnt": self.ins_id_cnt}
-                ins_id_cnt_state = PersistentState(
-                    data=ins_id_cnt_data,
+                # Prepare instance assembler data - all data in one dict
+                assembler_data = {
+                    "ins_id_cnt": self.ins_id_cnt,
+                    "instances": {}
+                }
+                for job_name, metadata in self.instances.items():
+                    assembler_data["instances"][job_name] = metadata.model_dump(mode='json')
+                logger.debug("Persisting instance assembler data - full data: %s", assembler_data)
+
+                # Create persistent state with version control and checksum
+                persistent_state = PersistentState(
+                    data=assembler_data,
                     version=next_version,
                     timestamp=current_time,
                     checksum=""  # Will be calculated
                 )
-                ins_id_cnt_state.checksum = ins_id_cnt_state.calculate_checksum()
-                persistent_states["ins_id_cnt"] = ins_id_cnt_state
+                persistent_state.checksum = persistent_state.calculate_checksum()
+                logger.debug("Persisting instance assembler data - calculated checksum: %s, version: %s, timestamp: %s",
+                             persistent_state.checksum, next_version, current_time)
 
-                # Persist instances metadata
-                for job_name, metadata in self.instances.items():
-                    # Create persistent state for metadata
-                    role_value = (metadata.instance.role.value
-                                  if hasattr(metadata.instance.role, 'value')
-                                  else str(metadata.instance.role))
-                    parallel_config_data = (metadata.instance.parallel_config.model_dump()
-                                            if hasattr(metadata.instance.parallel_config, 'model_dump')
-                                            else metadata.instance.parallel_config)
-                    endpoints_data = {
-                        pod_ip: {eid: endpoint.model_dump() for eid, endpoint in endpoints.items()}
-                        for pod_ip, endpoints in metadata.instance.endpoints.items()
-                    }
-
-                    metadata_data = {
-                        "job_name": metadata.instance.job_name,
-                        "model_name": metadata.instance.model_name,
-                        "instance_id": metadata.instance.id,
-                        "role": role_value,
-                        "parallel_config": parallel_config_data,
-                        "endpoints": endpoints_data,
-                        "node_managers": [
-                            (nm.pod_ip, nm.host_ip, nm.port) for nm in metadata.instance.node_managers
-                        ],
-                        "register_status": metadata.register_status.value,
-                        "start_command_send_times": metadata.start_command_send_times,
-                        "register_timestamp": metadata.register_timestamp,
-                        "is_reregister": metadata.is_reregister
-                    }
-                    persistent_state = PersistentState(
-                        data=metadata_data,
-                        version=next_version,
-                        timestamp=current_time,
-                        checksum=""  # Will be calculated
-                    )
-                    persistent_state.checksum = persistent_state.calculate_checksum()
-                    persistent_states[job_name] = persistent_state
-
-                # Convert dataclass objects to dict for etcd storage
-                dict_states = {key: asdict(state) for key, state in persistent_states.items()}
-                success = self.etcd_client.persist_data("/controller/instance_assembler", dict_states)
+                # Convert PersistentState to dict for etcd storage
+                dict_data = {"state": persistent_state.model_dump()}
+                success = self.etcd_client.persist_data("/controller/instance_assembler", dict_data)
                 if success:
-                    logger.info("Successfully persisted %d instance assembler states with version %d",
-                                len(persistent_states), next_version)
+                    logger.info("Successfully persisted instance assembler data with version %d", next_version)
                 return success
 
         except Exception as e:
@@ -354,96 +319,52 @@ class InstanceAssembler(ThreadSafeSingleton):
                 logger.info("No instance assembler data found in ETCD, starting with empty state")
                 return True
 
-            # Process enhanced persistent format
+            logger.info("Restoring instance assembler data from ETCD")
+            
+            persistent_state = persistent_states.get("state")
+            if persistent_state is None:
+                logger.warning("Expected 'state' key not found in persistent states, found keys: %s",
+                             list(persistent_states.keys()))
+                return False
+            if not isinstance(persistent_state, PersistentState):
+                logger.error("Invalid persistent state format, expected PersistentState instance")
+                return False
+
+            # Validate data integrity
+            if not persistent_state.is_valid():
+                logger.error("Data integrity check failed for instance_assembler, cannot restore")
+                return False
+
+            # Update data version
+            with self._version_lock:
+                self._data_version = max(self._data_version, persistent_state.version)
+
             with self.lock:
                 self.instances.clear()
-                current_time = time.time()
-                valid_states = 0
-                invalid_states = 0
-
-                for key, persistent_state in persistent_states.items():
-                    if isinstance(persistent_state, PersistentState):
-                        # Validate data integrity
-                        if not persistent_state.is_valid():
-                            logger.warning("Data integrity check failed for instance assembler state %s, skipping",
-                                           key)
-                            invalid_states += 1
-                            continue
-
-                        # Reconstruct data from persistent state
-                        try:
-                            if key == "ins_id_cnt":
-                                # Restore ins_id_cnt
-                                self.ins_id_cnt = persistent_state.data.get("ins_id_cnt", 0)
-                                logger.info("Restored ins_id_cnt: %d (v%d)",
-                                            self.ins_id_cnt, persistent_state.version)
-                            else:
-                                # Restore instance metadata
-                                metadata_data = persistent_state.data
-                                instance = Instance(
-                                    job_name=metadata_data["job_name"],
-                                    model_name=metadata_data["model_name"],
-                                    id=metadata_data["instance_id"],
-                                    role=metadata_data["role"],
-                                    parallel_config=metadata_data["parallel_config"]
-                                )
-
-                                # Restore endpoints
-                                for pod_ip, endpoints_data in metadata_data["endpoints"].items():
-                                    endpoints = {}
-                                    for eid, endpoint_data in endpoints_data.items():
-                                        # Reconstruct Endpoint from dict data
-                                        endpoint = Endpoint(**endpoint_data)
-                                        endpoints[int(eid)] = endpoint
-                                    instance.endpoints[pod_ip] = endpoints
-
-                                # Restore node managers
-                                for nm_data in metadata_data["node_managers"]:
-                                    pod_ip, host_ip, port = nm_data
-                                    instance.add_node_mgr(pod_ip, host_ip, port)
-
-                                # Create metadata
-                                # Handle type conversion for data from ETCD (may be strings)
-                                register_status_value = metadata_data["register_status"]
-                                if isinstance(register_status_value, str):
-                                    register_status_value = int(register_status_value)
-                                start_command_send_times_value = metadata_data["start_command_send_times"]
-                                if isinstance(start_command_send_times_value, str):
-                                    start_command_send_times_value = int(start_command_send_times_value)
-                                register_timestamp_value = metadata_data["register_timestamp"]
-                                if isinstance(register_timestamp_value, str):
-                                    register_timestamp_value = float(register_timestamp_value)
-                                is_reregister_value = metadata_data["is_reregister"]
-                                if isinstance(is_reregister_value, str):
-                                    is_reregister_value = is_reregister_value.lower() == 'true'
-
-                                metadata = AssembleInstanceMetadata(
-                                    instance=instance,
-                                    register_status=RegisterStatus(register_status_value),
-                                    start_command_send_times=start_command_send_times_value,
-                                    register_timestamp=register_timestamp_value,
-                                    is_reregister=is_reregister_value
-                                )
-
-                                self.instances[key] = metadata
-                                logger.info("Restored instance assembler state for %s (v%d)",
-                                            key, persistent_state.version)
-
-                            # Update data version
-                            with self._version_lock:
-                                self._data_version = max(self._data_version, persistent_state.version)
-
-                            valid_states += 1
-
-                        except Exception as e:
-                            logger.error("Error reconstructing instance assembler state %s: %s", key, e)
-                            invalid_states += 1
-                            continue
-
-                logger.info("Successfully restored %d valid instance assembler states, %d invalid states skipped",
-                            valid_states, invalid_states)
+                
+                # Restore ins_id_cnt
+                self.ins_id_cnt = persistent_state.data.get("ins_id_cnt", 0)
+                logger.info("Restored ins_id_cnt: %d (v%d)", self.ins_id_cnt, persistent_state.version)
+                
+                # Restore instances metadata
+                instances_data = persistent_state.data.get("instances", {})
+                valid_instances, invalid_instances = 0, 0
+                
+                for job_name, metadata_data in instances_data.items():
+                    try:
+                        metadata = AssembleInstanceMetadata.model_validate(metadata_data)
+                        self.instances[job_name] = metadata
+                        logger.info("Restored instance assembler state for %s (v%d)",
+                                    job_name, persistent_state.version)
+                        valid_instances += 1
+                    except Exception as e:
+                        logger.error("Error reconstructing instance assembler state %s: %s", job_name, e)
+                        invalid_instances += 1
+                        continue
+                
+                logger.info("Successfully restored instance assembler data: %d valid instances,"
+                            " %d invalid instances skipped", valid_instances, invalid_instances)
                 return True
-
         except Exception as e:
             logger.error("Error restoring instance assembler data: %s", e)
             return False
@@ -553,7 +474,7 @@ class InstanceAssembler(ThreadSafeSingleton):
                 self._assemble_instance(metadata)
 
             with self.config_lock:
-                check_interval = self.instance_assembler_check_internal
+                check_interval = self.instance_assembler_check_interval
             time.sleep(check_interval)
 
     def _assemble_instance(self, metadata: AssembleInstanceMetadata) -> None:

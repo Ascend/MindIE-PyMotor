@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,9 +8,7 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import time
-import hashlib
 from unittest.mock import patch, MagicMock
 import pytest
 from fastapi import HTTPException
@@ -90,7 +87,7 @@ def create_instance_manager_with_config(enable_etcd=False) -> InstanceManager:
     """Create instance manager with specific config"""
     config = ControllerConfig()
     config.etcd_config.enable_etcd_persistence = enable_etcd
-    config.instance_manager_check_internal = 0.1  # Faster for tests
+    config.instance_manager_check_interval = 0.1  # Faster for tests
     return InstanceManager(config)
 
 
@@ -234,23 +231,25 @@ def test_initialization_with_config():
 
     manager = InstanceManager(config)
     assert manager.etcd_config is config.etcd_config
-    assert manager.instance_manager_check_internal == config.instance_config.instance_manager_check_internal
+    assert manager.instance_manager_check_interval == config.instance_config.instance_manager_check_interval
 
 
-def test_start_stop_manager():
+@patch('motor.controller.core.instance_manager.time.sleep')
+def test_start_stop_manager(mock_sleep):
     """Test starting and stopping the instance manager"""
     manager = create_instance_manager_with_config()
 
-    # Test start
+    mock_sleep.return_value = None
+
     manager.start()
     assert manager.instances_management_thread is not None
     assert manager.instances_management_thread.is_alive()
     assert not manager.stop_event.is_set()
 
-    # Test stop
     manager.stop()
     assert manager.stop_event.is_set()
-    # Thread should be joined and stopped
+    if manager.instances_management_thread and manager.instances_management_thread.is_alive():
+        manager.instances_management_thread.join(timeout=0.05)
 
 
 def test_persist_data_success():
@@ -280,15 +279,22 @@ def test_persist_data_failure():
 
 def test_restore_data_success():
     """Test successful data restoration"""
-    # Mock persistent states
+    # Mock persistent state (new format: single PersistentState)
+    # Use Workload object or dict with proper structure for gathered_workload
+    instance_data = {"id": 1, "job_name": "test_job", "model_name": "test_model",
+                     "role": "prefill", "endpoints": {}, "status": "initial",
+                     "parallel_config": None, "node_managers": [], 
+                     "gathered_workload": {"active_kv_cache": 0, "active_tokens": 0}}
+    persistent_state = PersistentState(
+        data={"1": instance_data},
+        version=1,
+        timestamp=time.time(),
+        checksum=""  # Will be calculated
+    )
+    persistent_state.checksum = persistent_state.calculate_checksum()
+    
     mock_persistent_states = {
-        "1": PersistentState(
-            data={"id": 1, "job_name": "test_job", "model_name": "test_model",
-                          "role": "prefill", "endpoints": {}},
-            version=1,
-            timestamp=time.time(),
-            checksum="mock_checksum"
-        )
+        "state": persistent_state
     }
 
     with patch('motor.controller.core.instance_manager.EtcdClient') as mock_etcd_class:
@@ -299,6 +305,7 @@ def test_restore_data_success():
         manager = create_instance_manager_with_config(enable_etcd=True)
         result = manager.restore_data()
         assert result is True
+        assert 1 in manager.instances  # Verify instance was restored
 
 
 def test_restore_data_no_data():
@@ -315,11 +322,12 @@ def test_restore_data_no_data():
 
 def test_restore_data_invalid_checksum():
     """Test restoration with invalid checksum"""
-    # Mock persistent states with invalid checksum
     mock_persistent_states = {
-        "1": PersistentState(
-            data={"id": 1, "job_name": "test_job", "model_name": "test_model",
-                          "role": "prefill", "endpoints": {}},
+        "state": PersistentState(
+            data={"1": {"id": 1, "job_name": "test_job", "model_name": "test_model",
+                        "role": "prefill", "endpoints": {}, "status": "initial",
+                        "parallel_config": None, "node_managers": [], 
+                        "gathered_workload": {"active_kv_cache": 0, "active_tokens": 0}}},
             version=1,
             timestamp=time.time(),
             checksum="invalid_checksum"
@@ -333,7 +341,9 @@ def test_restore_data_invalid_checksum():
 
         manager = create_instance_manager_with_config(enable_etcd=True)
         result = manager.restore_data()
-        assert result is True  # Should succeed but skip invalid instances
+        # Should fail because checksum validation fails
+        assert result is False
+        assert 1 not in manager.instances  # Should not restore invalid data
 
 
 def test_add_instance(instance_manager, test_config):
@@ -579,12 +589,16 @@ def test_observer_pattern(instance_manager):
     instance = create_test_instance(102, "test_observer", ["192.168.1.3"])
     instance_manager.add_instance(instance)
 
-    # Test notification on instance addition (ACTIVE)
-    instance.update_instance_status(InsStatus.ACTIVE)
-    instance_manager.notify(instance, ObserverEvent.INSTANCE_ADDED)
+    # Check notification on instance addition (INITIAL)
+    assert len(observer.notifications) == 1
+    assert observer.notifications[0] == (102, ObserverEvent.INSTANCE_INITIAL)
+
+    # Test notification mechanism with READY event
+    observer.notifications.clear()  # Clear previous notifications
+    instance_manager.notify(instance, ObserverEvent.INSTANCE_READY)
 
     assert len(observer.notifications) == 1
-    assert observer.notifications[0] == (102, ObserverEvent.INSTANCE_ADDED)
+    assert observer.notifications[0] == (102, ObserverEvent.INSTANCE_READY)
 
 
 def test_handle_initial_state():
@@ -712,7 +726,12 @@ def test_persistent_instance_state():
     timestamp = time.time()
 
     # Create state and calculate correct checksum using the new method
-    state = PersistentState(instance_data, version, timestamp, "")
+    state = PersistentState(
+        data=instance_data,
+        version=version,
+        timestamp=timestamp,
+        checksum=""  # Will be calculated
+    )
     state.checksum = state.calculate_checksum()
 
     # Test valid checksum
@@ -829,13 +848,8 @@ def test_update_config():
         assert manager.etcd_config.etcd_timeout == 30.0
 
         # Verify ETCD client constructor was called with new config
-        # Note: update_config updates etcd_tls_config, so it uses the new one
-        mock_etcd_class.assert_called_once_with(
-            host="new-etcd-host",
-            port=2380,
-            tls_config=new_config.etcd_tls_config,
-            timeout=30.0
-        )
+        mock_etcd_class.assert_called_once_with(etcd_config=new_config.etcd_config,
+                                                tls_config=new_config.etcd_tls_config)
 
 
 # ===== Persistence and Recovery Tests =====
@@ -858,21 +872,18 @@ def test_persist_and_restore_instance_data_success():
             # Verify persist was called
             mock_persist.assert_called_once()
             args, kwargs = mock_persist.call_args
-            assert "/controller/instances" in args[0]
+            assert "/controller/instance_manager" in args[0]
 
-            # Create mock persistent states for restore
-            mock_persistent_states = {}
-
-            # Add instance state
+            # Create mock persistent state for restore (new format: single PersistentState)
             instance_data = instance.model_dump()
             instance_state = PersistentState(
-                data=instance_data,
+                data={"201": instance_data},
                 version=1,
                 timestamp=time.time(),
                 checksum=""
             )
             instance_state.checksum = instance_state.calculate_checksum()
-            mock_persistent_states["201"] = instance_state
+            mock_persistent_states = {"state": instance_state}
 
             mock_restore.return_value = mock_persistent_states
 
@@ -908,33 +919,37 @@ def test_persist_data_with_checksum_validation():
         args, kwargs = mock_persist.call_args
         persisted_data = args[1]
 
-        # Should contain the instance
-        assert "202" in persisted_data
+        assert "state" in persisted_data
+        
+        # Get the PersistentState data
+        state_data = persisted_data["state"]
+        assert "checksum" in state_data
+        assert len(state_data["checksum"]) > 0
+        
+        # Verify the instance data is in the state's data field
+        assert "202" in state_data["data"]
 
-        # Verify checksums are present and non-empty
-        for key, data_dict in persisted_data.items():
-            assert "checksum" in data_dict
-            assert len(data_dict["checksum"]) > 0
-
-            # Verify checksum is valid by reconstructing the state
-            state = PersistentState(**data_dict)
-            assert state.is_valid()
+        # Verify checksum is valid by reconstructing the state
+        state = PersistentState(**state_data)
+        assert state.is_valid()
 
 
 def test_restore_data_with_invalid_checksum():
     """Test restore skips data with invalid checksums"""
     manager = create_instance_manager_with_config(enable_etcd=True)
 
-    # Create mock persistent states with invalid checksum
+    # Create mock persistent state with invalid checksum (new format: single PersistentState)
     mock_persistent_states = {
-        "203": PersistentState(
+        "state": PersistentState(
             data={
-                "id": 203,
-                "job_name": "test_invalid",
-                "model_name": "test_model",
-                "role": "prefill",
-                "endpoints": {},
-                "status": "INITIAL"
+                "203": {
+                    "id": 203,
+                    "job_name": "test_invalid",
+                    "model_name": "test_model",
+                    "role": "prefill",
+                    "endpoints": {},
+                    "status": "initial"
+                }
             },
             version=1,
             timestamp=time.time(),
@@ -945,8 +960,8 @@ def test_restore_data_with_invalid_checksum():
     with patch.object(manager.etcd_client, 'restore_data', return_value=mock_persistent_states):
         result = manager.restore_data()
 
-        # Should succeed but skip invalid data
-        assert result == True
+        # Should fail because checksum validation fails
+        assert result == False
         assert 203 not in manager.instances  # Should not restore invalid data
 
 
@@ -976,8 +991,10 @@ def test_persist_empty_instances():
         args, kwargs = mock_persist.call_args
         persisted_data = args[1]
 
-        # Should be empty dict when no instances
-        assert len(persisted_data) == 0
+        assert "state" in persisted_data
+        state_data = persisted_data["state"]
+        assert "data" in state_data
+        assert len(state_data["data"]) == 0  # Empty instances dict
 
 
 def test_restore_no_instance_data_available():
@@ -1001,7 +1018,7 @@ def test_persistent_state_is_valid_method():
         "model_name": "test_model",
         "role": "prefill",
         "endpoints": {},
-        "status": "ACTIVE"
+        "status": "active"
     }
 
     valid_state = PersistentState(
@@ -1040,18 +1057,18 @@ def test_restore_data_with_type_conversion():
         "gathered_workload": {"memory_mb": "1024", "cpu_cores": "2"}  # nested dict with string values
     }
 
-    # Mock persistent state with string-formatted data
+    # Mock persistent state with string-formatted data (new format: single PersistentState)
+    persistent_state = PersistentState(
+        data={"206": etcd_string_data},
+        version=1,
+        timestamp=time.time(),
+        checksum=""  # Will be calculated
+    )
+    persistent_state.checksum = persistent_state.calculate_checksum()
+    
     mock_persistent_states = {
-        "206": PersistentState(
-            data=etcd_string_data,
-            version=1,
-            timestamp=time.time(),
-            checksum=""  # Will be calculated
-        )
+        "state": persistent_state
     }
-
-    # Calculate correct checksum for the string data
-    mock_persistent_states["206"].checksum = mock_persistent_states["206"].calculate_checksum()
 
     with patch('motor.controller.core.instance_manager.EtcdClient') as mock_etcd_class:
         mock_client = MagicMock()
@@ -1086,17 +1103,18 @@ def test_restore_data_with_invalid_enum_value():
         "gathered_workload": {"memory_mb": "1024", "cpu_cores": "2"}
     }
 
+    # Mock persistent state (new format: single PersistentState)
+    persistent_state = PersistentState(
+        data={"207": corrupted_data},
+        version=1,
+        timestamp=time.time(),
+        checksum=""  # Will be calculated
+    )
+    persistent_state.checksum = persistent_state.calculate_checksum()
+    
     mock_persistent_states = {
-        "207": PersistentState(
-            data=corrupted_data,
-            version=1,
-            timestamp=time.time(),
-            checksum=""  # Will be calculated
-        )
+        "state": persistent_state
     }
-
-    # Calculate checksum for corrupted data (even though it's invalid)
-    mock_persistent_states["207"].checksum = mock_persistent_states["207"].calculate_checksum()
 
     with patch('motor.controller.core.instance_manager.EtcdClient') as mock_etcd_class:
         mock_client = MagicMock()
@@ -1128,17 +1146,18 @@ def test_restore_data_with_malformed_numeric_data():
         "gathered_workload": {"memory_mb": "1024", "cpu_cores": "2"}
     }
 
+    # Mock persistent state (new format: single PersistentState)
+    persistent_state = PersistentState(
+        data={"invalid": corrupted_data},
+        version=1,
+        timestamp=time.time(),
+        checksum=""  # Will be calculated
+    )
+    persistent_state.checksum = persistent_state.calculate_checksum()
+    
     mock_persistent_states = {
-        "invalid": PersistentState(
-            data=corrupted_data,
-            version=1,
-            timestamp=time.time(),
-            checksum=""  # Will be calculated
-        )
+        "state": persistent_state
     }
-
-    # Calculate checksum for corrupted data
-    mock_persistent_states["invalid"].checksum = mock_persistent_states["invalid"].calculate_checksum()
 
     with patch('motor.controller.core.instance_manager.EtcdClient') as mock_etcd_class:
         mock_client = MagicMock()
