@@ -130,6 +130,7 @@ class SeparateCDPRouter(BaseRouter):
                                 yield chunk
                         
                             self.req_info.update_state(ReqState.DECODE_END)
+                            self.logger.info(trace_obj.set_end_and_ttft_ttot())
                             return
                         if self.req_info.is_cancelled:
                             raise Exception("exception occurred in Prefill request")

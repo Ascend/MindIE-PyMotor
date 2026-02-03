@@ -29,6 +29,7 @@ from motor.config.config_utils import (
     ConfigKey,
     save_config_to_json,
     _update_tls_config,
+    _update_instances_num,
     MGMT_TLS_CONFIG,
     INFER_TLS_CONFIG,
     ETCD_TLS_CONFIG,
@@ -201,6 +202,14 @@ class ApiConfig:
 
 
 @dataclass
+class DeployConfig:
+    """Deploy configuration class"""
+
+    p_instances_num: int = 1
+    d_instances_num: int = 1
+
+
+@dataclass
 class TracerConfig:
     """Tracer configuration class"""
     endpoint: str = ""
@@ -230,6 +239,7 @@ class CoordinatorConfig:
     http_config: HttpConfig = field(default_factory=HttpConfig)
     aigw_model: dict[str, Any] | None = None
     api_config: ApiConfig = field(default_factory=ApiConfig)
+    deploy_config: DeployConfig = field(default_factory=DeployConfig)
     tracer_config: TracerConfig = field(default_factory=TracerConfig)
 
     # internal fields
@@ -267,6 +277,7 @@ class CoordinatorConfig:
                             cfg = raw
                         tls_configs = [MGMT_TLS_CONFIG, INFER_TLS_CONFIG, ETCD_TLS_CONFIG]
                         _update_tls_config(tls_configs, cfg, raw)   
+                        _update_instances_num(cfg, raw)
         except json.JSONDecodeError as e:
             # If JSON parsing fails, use default configuration
             logger.warning(f"Configuration file {json_path} format error: {e}, using default configuration")
@@ -328,6 +339,7 @@ class CoordinatorConfig:
                 ('mgmt_tls_config', config.mgmt_tls_config, None),
                 ('etcd_tls_config', config.etcd_tls_config, None),
                 ('api_config', config.api_config, None),
+                ('deploy_config', config.deploy_config, None),
                 ('tracer_config', config.tracer_config, None),
             ]
 
@@ -552,6 +564,9 @@ class CoordinatorConfig:
             f"{separator}\n"
             f"{title}\n"
             f"{separator}\n"
+            "  Deploy Configuration:\n"
+            f"    ├─ p_instances_num:     {self.deploy_config.p_instances_num}\n"
+            f"    └─ d_instances_num:     {self.deploy_config.d_instances_num}\n"
             "  Logging Configuration:\n"
             f"    ├─ Log Level:           {self.logging_config.log_level}\n"
             f"    └─ Log Max Line Length: {self.logging_config.log_max_line_length}\n"

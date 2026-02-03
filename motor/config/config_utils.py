@@ -25,6 +25,9 @@ SSL_KEYFILE = "ssl_keyfile"
 ADDITIONAL_CONFIG = "additional_config"
 KV_TRANSFER_CONFIG = "kv_transfer_config"
 KV_CONNECTOR_EXTRA_CONFIG = "kv_connector_extra_config"
+DEPLOY_CONFIG = "deploy_config"
+P_INSTANCES_NUM = "p_instances_num"
+D_INSTANCES_NUM = "d_instances_num"
 
 
 class ConfigKey(Enum):
@@ -133,3 +136,19 @@ def _update_engine_server_tls_config(
         tls_config[SSL_KEYFILE] = infer_tls_config[KEY_FILE]
         tls_config[SSL_CERTFILE] = infer_tls_config[CERT_FILE]
         tls_config[SSL_CA_CERTS] = infer_tls_config[CA_FILE]
+
+
+def _update_instances_num(
+    updated_config: dict[str, Any],
+    user_config_data: dict[str, Any],
+) -> None:
+    if not isinstance(user_config_data, dict):
+        return
+    deploy_config = user_config_data.get(MOTOR_DEPLOY_CONFIG)
+    if not isinstance(deploy_config, dict):
+        return
+
+    updated_config[DEPLOY_CONFIG] = {
+        P_INSTANCES_NUM: deploy_config.get(P_INSTANCES_NUM, 1),
+        D_INSTANCES_NUM: deploy_config.get(D_INSTANCES_NUM, 1)
+    }

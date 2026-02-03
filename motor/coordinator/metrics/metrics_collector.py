@@ -11,11 +11,13 @@
 # See the Mulan PSL v2 for more details.
 
 import re
-import threading
 import time
+import threading
 from enum import Enum
+from collections import Counter
 
 from motor.common.resources.instance import Instance
+from motor.common.resources import PDRole
 from motor.common.utils.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.coordinator import CoordinatorConfig
@@ -30,6 +32,7 @@ class MetricType(Enum):
     COUNTER = "counter"
     HISTOGRAM = "histogram"
     SUMMARY = "summary"
+    NONE = ""
 
     def __str__(self):
         return self.value
@@ -50,7 +53,7 @@ class SingleMetric():
         else:
             self.name: str = ""
             self.help: str = ""
-            self.type: str = ""
+            self.type: MetricType = MetricType.NONE
             self.label: list[str] = []
             self.value: list[float] = []
 
@@ -637,6 +640,37 @@ class MetricsCollector(ThreadSafeSingleton):
         for ins_id in clear_ins_list:
             del self._instance_metrics_cached[ins_id]
 
+    def _get_instances_metrics(self, 
+                               name: str,
+                               num: int
+    ) -> SingleMetric:
+        single_metric = SingleMetric()
+        single_metric.name = name
+        single_metric.help = "Number of instances"
+        single_metric.type = MetricType.GAUGE
+        single_metric.label = [name]
+        single_metric.value = [num]
+        return single_metric
+
+    def _add_coordinator_metrics(self, 
+                                 aggregate: list[SingleMetric],
+                                 available_instances: dict[int, Instance]
+    ) -> None:
+        available_role_counts = Counter(instance.role for instance in available_instances.values())
+        available_p = available_role_counts.get(PDRole.ROLE_P, 0)
+        available_d = available_role_counts.get(PDRole.ROLE_D, 0)
+
+        p_num, d_num = InstanceManager().get_instances_num()
+
+        unavailable_p = p_num - available_p
+        unavailable_d = d_num - available_d
+
+        aggregate.append(self._get_instances_metrics("motor_active_prefill_workers", available_p))
+        aggregate.append(self._get_instances_metrics("motor_active_decode_workers", available_d))
+        aggregate.append(self._get_instances_metrics("motor_inactive_prefill_workers", unavailable_p))
+        aggregate.append(self._get_instances_metrics("motor_inactive_decode_workers", unavailable_d))
+        return
+
     def _get_and_aggregate_metrics(self) -> tuple[str, dict[str, list[SingleMetric]]]:
         """ Get and Aggregate metrics.  """
 
@@ -658,5 +692,8 @@ class MetricsCollector(ThreadSafeSingleton):
         # Step 4: aggreagte metrics of all instances.
         aggregate = self._aggregate_metrics_all_instance(collects)
 
-        # Step 5: serialize and return to handler.
+        # Step 5: add coordinator metrics
+        self._add_coordinator_metrics(aggregate, available_instances)
+
+        # Step 6: serialize and return to handler.
         return self._get_serialize_metrics(aggregate), self._get_serialize_instance_metrics(collects)

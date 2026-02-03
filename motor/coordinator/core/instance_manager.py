@@ -42,6 +42,7 @@ class InstanceManager(ThreadSafeSingleton):
             config = CoordinatorConfig()
         self._scheduler_config = config.scheduler_config
         self._infer_tls_config = config.infer_tls_config
+        self._deploy_config = config.deploy_config
         self._config_lock = threading.RLock()
 
         self._lock = threading.Lock()
@@ -107,7 +108,12 @@ class InstanceManager(ThreadSafeSingleton):
         with self._config_lock:
             self._scheduler_config = config.scheduler_config
             self._infer_tls_config = config.infer_tls_config
+            self._deploy_config = config.deploy_config
         logger.info("InstanceManager configuration updated")
+
+    def get_instances_num(self) -> tuple[int, int]:
+        with self._lock:
+            return self._deploy_config.p_instances_num, self._deploy_config.d_instances_num
 
     def get_available_instances(self, role: PDRole) -> dict[int, Instance]:
         # no need to lock here, asynchrony is acceptable
