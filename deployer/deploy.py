@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
@@ -9,14 +8,12 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-
 import argparse
 import os
 import json
 import logging
 import uuid
 import time
-import shlex
 import yaml as ym
 
 # Set up logging
@@ -42,10 +39,16 @@ SPEC = "spec"
 TEMPLATE = "template"
 REPLICAS = "replicas"
 LABELS = "labels"
+KIND = "kind"
 APP = "app"
 VALUE = "value"
 RESOURCES = "resources"
+SUBJECTS = "subjects"
 DEPLOYMENT = "deployment"
+DEPLOYMENT_KIND = "Deployment"
+SERVICE_ACCOUNT = "ServiceAccount"
+SERVICE = "Service"
+CLUSTER_ROLE_BINDING = "ClusterRoleBinding"
 HARDWARE_TYPE = 'hardware_type'
 ANNOTATIONS = "annotations"
 SP_BLOCK = "sp-block"
@@ -185,13 +188,48 @@ def update_kv_pool_enabled_flag(user_config):
         g_kv_pool_enabled = True
 
 
-def modify_controller_or_coordinator_yaml(data, user_config):
-    """Modify controller or coordinator YAML configuration"""
-    deploy_config = user_config["motor_deploy_config"]
+def _extract_resources(data):
+    """Extract deployment, services, and RBAC resources from YAML data"""
+    deployment_data = None
+    service_list = []
+    rbac_resources = []
 
-    # Modify deployment data
-    deployment_data = data[0] if isinstance(data, list) else data
-    deployment_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
+    if isinstance(data, list):
+        for item in data:
+            if item.get(KIND) == DEPLOYMENT_KIND:
+                deployment_data = item
+            elif item.get(KIND) == SERVICE:
+                service_list.append(item)
+            else:
+                # RBAC resources: ServiceAccount, ClusterRole, ClusterRoleBinding
+                rbac_resources.append(item)
+    else:
+        deployment_data = data
+
+    return deployment_data, service_list, rbac_resources
+
+
+def _set_rbac_namespace(rbac_resources, namespace):
+    """Set namespace for RBAC resources"""
+    for rbac_resource in rbac_resources:
+        if rbac_resource.get(KIND) == SERVICE_ACCOUNT:
+            rbac_resource[METADATA][NAMESPACE] = namespace
+        elif rbac_resource.get(KIND) == CLUSTER_ROLE_BINDING:
+            rbac_resource[METADATA][NAMESPACE] = namespace
+            # Also update namespace in subjects for ServiceAccount references
+            if SUBJECTS in rbac_resource:
+                for subject in rbac_resource[SUBJECTS]:
+                    if subject.get(KIND) == SERVICE_ACCOUNT:
+                        subject[NAMESPACE] = namespace
+
+
+def _modify_deployment(deployment_data, deploy_config, user_config):
+    """Modify deployment namespace and environment variables"""
+    if not deployment_data:
+        return
+    
+    namespace = deploy_config[CONFIG_JOB_ID]
+    deployment_data[METADATA][NAMESPACE] = namespace
 
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
     container["image"] = deploy_config["image_name"]
@@ -214,19 +252,36 @@ def modify_controller_or_coordinator_yaml(data, user_config):
         VALUE: job_name
     })
 
-    # Modify service data
-    service_data = data[1]
-    service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
-    if role == COORDINATOR:
-        external_service_data = data[2]
-        external_service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
-
     container[ENV].extend([
         {NAME: "CONTROLLER_SERVICE", VALUE: g_controller_service},
         {NAME: "COORDINATOR_SERVICE", VALUE: g_coordinator_service}
     ])
 
-    modify_coordinator_or_controller_replicas(data[0], user_config, role)
+    modify_coordinator_or_controller_replicas(deployment_data, user_config, role)
+
+
+def _set_services_namespace(service_list, namespace):
+    """Set namespace for all services"""
+    for service_data in service_list:
+        service_data[METADATA][NAMESPACE] = namespace
+
+
+def modify_controller_or_coordinator_yaml(data, user_config):
+    """Modify controller or coordinator YAML configuration"""
+    deploy_config = user_config["motor_deploy_config"]
+    namespace = deploy_config[CONFIG_JOB_ID]
+
+    # Extract resources
+    deployment_data, service_list, rbac_resources = _extract_resources(data)
+
+    # Set namespace for RBAC resources
+    _set_rbac_namespace(rbac_resources, namespace)
+
+    # Modify deployment data
+    _modify_deployment(deployment_data, deploy_config, user_config)
+
+    # Set namespace for all services
+    _set_services_namespace(service_list, namespace)
 
 
 def modify_coordinator_or_controller_replicas(data, user_config, role):
@@ -268,7 +323,7 @@ def update_engine_base_name(user_config):
         g_engine_base_name = SERVER_BASE_NAME_MAP[engine_type]
 
 
-def modify_server_yaml(deployment_data, deploy_config, user_config, index, node_type):
+def modify_server_yaml(deployment_data, deploy_config, index, node_type):
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
 
     deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]["image"] = deploy_config["image_name"]
@@ -305,8 +360,6 @@ def modify_server_yaml(deployment_data, deploy_config, user_config, index, node_
             {NAME: "KVP_MASTER_SERVICE", VALUE: g_kv_pool_service}
         )
 
-    
-    # Modify replicas
     instance_pod_num_key = SINGER_P_INSTANCES_NUM if node_type == "p" else SINGER_D_INSTANCES_NUM
     if instance_pod_num_key in deploy_config:
         deployment_data[SPEC]["replicas"] = int(deploy_config[instance_pod_num_key])
@@ -352,19 +405,19 @@ def generate_yaml_controller_or_coordinator(input_yaml, output_file, deploy_conf
     g_generate_yaml_list.append(output_file)
 
 
-def generate_yaml_server(input_yaml, output_file, deploy_config, user_config):
+def generate_yaml_server(input_yaml, output_file, deploy_config):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
     global g_generate_yaml_list
     p_total, d_total = obtain_server_instance_total(deploy_config)
     for p_index in range(p_total):
         data = load_yaml(input_yaml, True)
-        modify_server_yaml(data, deploy_config, user_config, p_index, "p")
+        modify_server_yaml(data, deploy_config, p_index, "p")
         output_file_p = output_file + "_p" + str(p_index) + ".yaml"
         write_yaml(data, output_file_p, True)
         g_generate_yaml_list.append(output_file_p)
     for d_index in range(d_total):
         data = load_yaml(input_yaml, True)
-        modify_server_yaml(data, deploy_config, user_config, d_index, "d")
+        modify_server_yaml(data, deploy_config, d_index, "d")
         output_file_d = output_file + "_d" + str(d_index) + ".yaml"
         write_yaml(data, output_file_d, True)
         g_generate_yaml_list.append(output_file_d)
@@ -401,9 +454,27 @@ def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_p
     controller_data = load_yaml(controller_input_yaml, False)
     coordinator_data = load_yaml(coordinator_input_yaml, False)
     kv_pull_data = load_yaml(kv_pool_input_yaml, False)
-    controller_service_data = controller_data[1]
-    coordinator_service_data = coordinator_data[1]
-    kv_pull_service_data = kv_pull_data[1]
+
+    # Find Service resource from controller data
+    controller_service_data = None
+    for doc in controller_data:
+        if doc.get(KIND) == SERVICE:
+            controller_service_data = doc
+            break
+
+    # Find first Service resource from coordinator data
+    coordinator_service_data = None
+    for doc in coordinator_data:
+        if doc.get(KIND) == SERVICE:
+            coordinator_service_data = doc
+            break
+
+    # Find Service resource from kv_pool data
+    kv_pull_service_data = None
+    for doc in kv_pull_data:
+        if doc.get(KIND) == SERVICE:
+            kv_pull_service_data = doc
+            break
 
     global g_controller_service
     controller_name = controller_service_data[METADATA][NAME]
@@ -416,9 +487,8 @@ def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_p
     g_kv_pool_service = f"{kv_pool_name}.{deploy_config[CONFIG_JOB_ID]}.svc.cluster.local"
 
 
-def exec_all_kubectl_multi(deploy_config, out_path, user_config_path):
+def exec_all_kubectl_multi(deploy_config, user_config_path):
     job_id = deploy_config[CONFIG_JOB_ID]
-    out_deploy_yaml_path = os.path.join(out_path, 'deployment')
     
     create_base_configmap(job_id, user_config_path)
     
@@ -510,10 +580,10 @@ def main():
     init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_pool_input_yaml, deploy_config)
     generate_yaml_controller_or_coordinator(controller_input_yaml, controller_output_yaml, user_config)
     generate_yaml_controller_or_coordinator(coordinator_input_yaml, coordinator_output_yaml, user_config)
-    generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config, user_config)
+    generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config)
     if g_kv_pool_enabled:
         generate_yaml_kv_pool(kv_pool_input_yaml, kv_pool_output_yaml, deploy_config)
-    exec_all_kubectl_multi(deploy_config, output_root_path, user_config_path)
+    exec_all_kubectl_multi(deploy_config, user_config_path)
 
     logger.info("all deploy end.")
 
