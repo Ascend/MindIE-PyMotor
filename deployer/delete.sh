@@ -29,9 +29,6 @@ fi
 kubectl delete cm motor-config -n "$NAME_SPACE";
 
 YAML_DIR=./output/deployment
-if [ -n "$2" ]; then
-    YAML_DIR="$2/deployment"
-fi
 
 for yaml_file in "$YAML_DIR"/*.yaml; do
 	if [ -f "$yaml_file" ]; then

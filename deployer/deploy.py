@@ -530,8 +530,6 @@ def parse_arguments():
         default="./user_config.json",
         help="Path of user config"
     )
-    parser.add_argument("--deploy_yaml_path", type=str, default='./deployment', help="Path of yaml")
-    parser.add_argument("--output_path", type=str, default="./output", help="Path of output")
     parser.add_argument(
         "--update_config",
         action="store_true",
@@ -543,8 +541,8 @@ def parse_arguments():
 def main():
     args = parse_arguments()
 
-    deploy_yaml_root_path = args.deploy_yaml_path
-    output_root_path = args.output_path
+    deploy_yaml_root_path = "./deployment"
+    output_root_path = "./output"
     user_config_path = args.user_config_path
     
     # Ensure necessary directories exist
