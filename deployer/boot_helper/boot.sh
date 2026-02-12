@@ -81,6 +81,15 @@ if [ "$ROLE" = "prefill" ] || [ "$ROLE" = "decode" ]; then
     export MOTOR_NODE_MANAGER_CONFIG_PATH="$USER_CONFIG_PATH"
     export MOTOR_ENGINE_PATH="$USER_CONFIG_PATH"
 
+    # KV cache pool scenario only: KVP_MASTER_SERVICE (kv cache pool master-service) is set
+    # only when KV pool is enabled; then generate kv_cache_pool_config.json.
+    if [ -n "$KVP_MASTER_SERVICE" ]; then
+        echo "Updating kv cache pool configuration file..."
+        export MOONCAKE_CONFIG_PATH=$CONFIG_PATH/kv_cache_pool_config.json
+        export LD_LIBRARY_PATH=/usr/local/Ascend/ascend-toolkit/latest/python/site-packages/mooncake:$LD_LIBRARY_PATH
+        python3 "$CONFIGMAP_PATH/update_kv_cache_pool_config.py" "$MOONCAKE_CONFIG_PATH" "$USER_CONFIG_PATH"
+    fi
+
     # Use hccl_tools.py to generate ranktable.json
     if [ -f "$CONFIGMAP_PATH/hccl_tools.py" ]; then
         echo "Using hccl_tools.py to generate ranktable.json..."
@@ -180,5 +189,7 @@ if [ "$ROLE" == "kv_pool" ]; then
     set_kv_pool_env
 
     # KV Pool start
-    mooncake_master --port 50088 --eviction_high_watermark_ratio 0.95 --eviction_ratio 0.05
+    mooncake_master --port "$KV_POOL_PORT" \
+        --eviction_high_watermark_ratio "$KV_POOL_EVICTION_HIGH_WATERMARK_RATIO" \
+        --eviction_ratio "$KV_POOL_EVICTION_RATIO"
 fi

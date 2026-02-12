@@ -98,8 +98,10 @@ pyMotor开启KV池化能力只需修改user_config.json配置文件后，通过d
             {
               "kv_connector": "AscendStoreConnector",
               "kv_role": "kv_producer",
-              "lookup_rpc_port": "0",
-              "backend": "mooncake"
+              "kv_connector_extra_config": {
+                "lookup_rpc_port": "0",
+                "backend": "mooncake"
+              }
             }
           ]
         }
@@ -147,8 +149,10 @@ pyMotor开启KV池化能力只需修改user_config.json配置文件后，通过d
             {
               "kv_connector": "AscendStoreConnector",
               "kv_role": "kv_consumer",
-              "lookup_rpc_port": "1",
-              "backend": "mooncake"
+              "kv_connector_extra_config": {
+                "lookup_rpc_port": "1",
+                "backend": "mooncake"
+              }
             }
           ]
         }
@@ -159,10 +163,14 @@ pyMotor开启KV池化能力只需修改user_config.json配置文件后，通过d
     "metadata_server": "P2PHANDSHAKE",
     "protocol": "ascend",
     "device_name": "",
-    "global_segment_size": "1GB"
+    "global_segment_size": "1GB",
+    "eviction_high_watermark_ratio": 0.9,
+    "eviction_ratio": 0.1
   }
 }
 ```
+
+说明：`kv_cache_pool_config` 中可选增加 `port` 字段（例如 `50088`）用于配置 KV Pool 的服务端口；若未配置，`deploy.py` 会按默认值 `50088` 进行补充和适配。`eviction_high_watermark_ratio` 与 `eviction_ratio` 用于 `mooncake_master` 进程启动参数。
 
 ### 2.3 部署服务
 

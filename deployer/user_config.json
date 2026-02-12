@@ -144,7 +144,8 @@
     "metadata_server": "P2PHANDSHAKE",
     "protocol": "ascend",
     "device_name": "",
-    "alloc_in_same_node": true,
-    "global_segment_size": "1GB"
+    "global_segment_size": "1GB",
+    "eviction_high_watermark_ratio": 0.9,
+    "eviction_ratio": 0.1
   }
 }

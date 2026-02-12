@@ -54,6 +54,11 @@ ANNOTATIONS = "annotations"
 SP_BLOCK = "sp-block"
 NAME_FLAG = " -n "
 BOOT_SHELL_PATH = "./boot_helper/boot.sh"
+KV_CACHE_POOL_CONFIG = "kv_cache_pool_config"
+KV_POOL_PORT = "port"
+KV_POOL_EVICTION_HIGH_WATERMARK_RATIO = "eviction_high_watermark_ratio"
+KV_POOL_EVICTION_RATIO = "eviction_ratio"
+DEFAULT_KV_POOL_PORT = 50088
 STANDBY_CONFIG = "standby_config"
 MOTOR_CONTROLLER_CONFIG = "motor_controller_config"
 MOTOR_COORDINATOR_CONFIG = "motor_coordinator_config"
@@ -323,6 +328,17 @@ def update_engine_base_name(user_config):
         g_engine_base_name = SERVER_BASE_NAME_MAP[engine_type]
 
 
+def normalize_kv_cache_pool_config(user_config):
+    kv_config = user_config.get(KV_CACHE_POOL_CONFIG)
+    if not isinstance(kv_config, dict):
+        raise ValueError(f"Missing or invalid '{KV_CACHE_POOL_CONFIG}' in user config")
+
+    if KV_POOL_PORT not in kv_config:
+        kv_config[KV_POOL_PORT] = DEFAULT_KV_POOL_PORT
+
+    return kv_config
+
+
 def modify_server_yaml(deployment_data, deploy_config, index, node_type):
     container = deployment_data[SPEC][TEMPLATE][SPEC]["containers"][0]
 
@@ -423,7 +439,7 @@ def generate_yaml_server(input_yaml, output_file, deploy_config):
         g_generate_yaml_list.append(output_file_d)
 
 
-def generate_yaml_kv_pool(input_yaml, output_file, deploy_config):
+def generate_yaml_kv_pool(input_yaml, output_file, deploy_config, kv_pool_config):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
     data = load_yaml(input_yaml, False)
     # Modify deployment data
@@ -436,13 +452,39 @@ def generate_yaml_kv_pool(input_yaml, output_file, deploy_config):
     if ENV not in container:
         container[ENV] = []
 
-    container[ENV].extend([
-        {NAME: "KVP_MASTER_SERVICE", VALUE: g_kv_pool_service}
-    ])
+    service_port = kv_pool_config.get(KV_POOL_PORT)
+    missing_keys = []
+    if KV_POOL_EVICTION_HIGH_WATERMARK_RATIO not in kv_pool_config:
+        missing_keys.append(KV_POOL_EVICTION_HIGH_WATERMARK_RATIO)
+    if KV_POOL_EVICTION_RATIO not in kv_pool_config:
+        missing_keys.append(KV_POOL_EVICTION_RATIO)
+    if missing_keys:
+        raise ValueError(
+            f"Missing required kv cache pool config: {missing_keys}. "
+            f"Please configure them in '{KV_CACHE_POOL_CONFIG}'."
+        )
+
+    kv_pool_env = [
+        {NAME: "KVP_MASTER_SERVICE", VALUE: g_kv_pool_service},
+        {NAME: "KV_POOL_PORT", VALUE: str(service_port)},
+        {NAME: "KV_POOL_EVICTION_HIGH_WATERMARK_RATIO",
+            VALUE: str(kv_pool_config[KV_POOL_EVICTION_HIGH_WATERMARK_RATIO])},
+        {NAME: "KV_POOL_EVICTION_RATIO", VALUE: str(kv_pool_config[KV_POOL_EVICTION_RATIO])},
+    ]
+
+    container[ENV].extend(kv_pool_env)
     
     # Modify service data
     service_data = data[1]
     service_data[METADATA][NAMESPACE] = deploy_config[CONFIG_JOB_ID]
+    ports = service_data.get(SPEC, {}).get("ports", [])
+    if not ports:
+        raise ValueError(
+            "Missing required service ports in 'kv_pool_init.yaml'. "
+            "Please configure spec.ports for KV pool service."
+        )
+    ports[0]["port"] = service_port
+    ports[0]["targetPort"] = service_port
 
     write_yaml(data, output_file, False)
     global g_generate_yaml_list
@@ -515,6 +557,7 @@ def create_base_configmap(job_id, user_config_path):
         "kubectl create configmap motor-config "
         "--from-file=./boot_helper/boot.sh "
         "--from-file=./boot_helper/hccl_tools.py "
+        "--from-file=./boot_helper/update_kv_cache_pool_config.py "
         "--from-file=./probe/probe.sh "
         "--from-file=./probe/probe.py "
         f"--from-file=user_config.json={user_config_path}"
@@ -580,7 +623,8 @@ def main():
     generate_yaml_controller_or_coordinator(coordinator_input_yaml, coordinator_output_yaml, user_config)
     generate_yaml_server(server_input_yaml, server_output_yaml, deploy_config)
     if g_kv_pool_enabled:
-        generate_yaml_kv_pool(kv_pool_input_yaml, kv_pool_output_yaml, deploy_config)
+        kv_pool_config = normalize_kv_cache_pool_config(user_config)
+        generate_yaml_kv_pool(kv_pool_input_yaml, kv_pool_output_yaml, deploy_config, kv_pool_config)
     exec_all_kubectl_multi(deploy_config, user_config_path)
 
     logger.info("all deploy end.")
