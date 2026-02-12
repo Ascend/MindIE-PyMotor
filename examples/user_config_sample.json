@@ -1,4 +1,52 @@
 {
+  "version": "v2.0",
+  "motor_deploy_config": {
+    "p_instances_num": 1,
+    "d_instances_num": 1,
+    "single_p_instance_pod_num": 1,
+    "single_d_instance_pod_num": 1,
+    "p_pod_npu_num": 16,
+    "d_pod_npu_num": 16,
+    "image_name": "mindie-motor-vllm:dev-2.2.RC1.B153-800I-A3-py311-Ubuntu24.04-lts-aarch64",
+    "job_id": "mindie-motor",
+    "hardware_type": "800I_A3",
+    "env_path": "./conf/env.json",
+    "weight_mount_path": "/mnt/weight/",
+    "tls_config": {
+      "infer_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "mgmt_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "etcd_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "grpc_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      }
+    }
+  },
   "motor_controller_config": {
     "logging_config": {
       "log_level": "INFO",
@@ -9,39 +57,14 @@
     },
     "api_config": {
       "controller_api_host": "127.0.0.1",
-      "controller_api_port": 1026,
-      "coordinator_api_dns": "127.0.0.1",
-      "coordinator_api_port": 1026
-    },
-    "mgmt_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
-    },
-    "etcd_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
-    },
-    "grpc_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
+      "controller_api_dns": "mindie-motor-controller-service.mindie-motor.svc.cluster.local",
+      "controller_api_port": 1026
     },
     "instance_config": {
       "instance_assemble_timeout": 600,
-      "instance_assembler_check_internal": 1,
-      "instance_assembler_cmd_send_internal": 1,
-      "instance_manager_check_internal": 1,
+      "instance_assembler_check_interval": 1,
+      "instance_assembler_cmd_send_interval": 1,
+      "instance_manager_check_interval": 1,
       "instance_heartbeat_timeout": 5,
       "instance_expired_timeout": 300,
       "send_cmd_retry_times": 3
@@ -52,7 +75,7 @@
     },
     "fault_tolerance_config": {
       "enable_fault_tolerance": false,
-      "strategy_center_check_internal": 1,
+      "strategy_center_check_interval": 1,
       "enable_scale_p2d": false,
       "enable_lingqu_network_recover": false
     },
@@ -68,9 +91,6 @@
       "etcd_host": "etcd.default.svc.cluster.local",
       "etcd_port": 2379,
       "etcd_timeout": 5,
-      "etcd_ca_cert": null,
-      "etcd_cert_key": null,
-      "etcd_cert_cert": null,
       "enable_etcd_persistence": false
     }
   },
@@ -95,30 +115,6 @@
       "deploy_mode": "pd_separate",
       "scheduler_type": "load_balance"
     },
-    "infer_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
-    },
-    "mgmt_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
-    },
-    "etcd_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
-    },
     "timeout_config": {
       "request_timeout": 30,
       "connection_timeout": 10,
@@ -129,21 +125,21 @@
     "api_key_config": {
       "enable_api_key": false,
       "valid_keys": [],
-      "encryption_algorithm": "PBKDF2_SHA256",
       "header_name": "Authorization",
       "key_prefix": "Bearer ",
       "skip_paths": [
-        "/metrics",
-        "/liveness",
+        "/",
+        "/openapi.json",
+        "/docs",
+        "/instances/refresh",
         "/redoc",
+        "/liveness",
         "/favicon.ico",
         "/startup",
-        "/instances/refresh",
-        "/openapi.json",
-        "/",
-        "/readiness",
-        "/docs"
-      ]
+        "/metrics",
+        "/readiness"
+      ],
+      "encryption_algorithm": "PBKDF2_SHA256"
     },
     "rate_limit_config": {
       "enable_rate_limit": false,
@@ -175,14 +171,7 @@
       "etcd_host": "etcd.default.svc.cluster.local",
       "etcd_port": 2379,
       "etcd_timeout": 5,
-      "enable_etcd_persistence": false,
-      "tls_config": {
-        "enable_tls": false,
-        "ca_cert": null,
-        "tls_cert": null,
-        "tls_key": null,
-        "tls_passwd": null
-      }
+      "enable_etcd_persistence": false
     },
     "http_config": {
       "combined_mode": false,
@@ -190,23 +179,26 @@
       "coordinator_api_infer_port": 1025,
       "coordinator_api_mgmt_port": 1026
     },
-    "aigw_model": null
+    "aigw_model": null,
+    "api_config": {
+      "coordinator_api_host": "127.0.0.1",
+      "coordinator_api_dns": "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local",
+      "coordinator_api_port": 1026
+    },
+    "tracer_config": {
+      "endpoint": "",
+      "root_sampling_rate": 1.0,
+      "remote_parent_sampled": 1.0,
+      "remote_parent_not_sampled": 1.0,
+      "local_parent_sampled": 1.0,
+      "local_parent_not_sampled": 1.0
+    }
   },
   "motor_nodemanger_config": {
     "api_config": {
       "pod_ip": "127.0.0.1",
       "host_ip": "127.0.0.1",
-      "node_manager_port": 1026,
-      "controller_api_dns": "127.0.0.1",
-      "controller_api_port": 1026
-    },
-    "mgmt_tls_config": {
-      "tls_enable": true,
-      "ca_file": "security/mgmt/cert/ca.crt",
-      "cert_file": "security/mgmt/cert/server.crt",
-      "key_file": "security/mgmt/keys/server.key",
-      "passwd_file": "security/mgmt/keys/key_pwd.txt",
-      "crl_file": ""
+      "node_manager_port": 1026
     },
     "endpoint_config": {
       "endpoint_num": 0,

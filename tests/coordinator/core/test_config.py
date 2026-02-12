@@ -72,16 +72,6 @@ COMPLETE_CONFIG = {
         "infer_timeout": 3600,
     },
     "tls_config": {
-        "request_server_tls_enable": True,
-        "request_server_tls_items": {
-            "ca_cert": "ca.pem",
-            "tls_cert": "server.pem",
-            "tls_key": "server.key",
-            "tls_passwd": "password",
-            "tls_crl": "crl.pem",
-            "kmcKsfMaster": "master_key",
-            "kmcKsfStandby": "standby_key"
-        }
     },
     "scheduler_config": {
         "deploy_mode": "single_node",

@@ -218,7 +218,7 @@ class SeparateCDPRouter(BaseRouter):
         host = self.config.http_config.coordinator_api_host
         port = self.config.http_config.coordinator_api_mgmt_port
 
-        if self.config.infer_tls_config.tls_enable:
+        if self.config.infer_tls_config.enable_tls:
             url = f"https://{host}:{port}/v1/metaserver"
         else:
             url = f"http://{host}:{port}/v1/metaserver"

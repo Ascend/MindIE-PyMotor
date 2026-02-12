@@ -451,7 +451,7 @@ class CoordinatorServer:
             len(self._api_key_config.skip_paths)
         )
 
-        if self._infer_ssl_config.tls_enable:
+        if self._infer_ssl_config.enable_tls:
             logger.info(
                 "Infer SSL configuration enabled: cert_file=%s, key_file=%s, ca_file=%s",
                 self._infer_ssl_config.cert_file,
@@ -461,7 +461,7 @@ class CoordinatorServer:
         else:
             logger.info("Infer SSL configuration disabled")
 
-        if self._mgmt_ssl_config.tls_enable:
+        if self._mgmt_ssl_config.enable_tls:
             logger.info(
                 "Mgmt SSL configuration enabled: cert_file=%s, key_file=%s, ca_file=%s",
                 self._mgmt_ssl_config.cert_file,
@@ -520,7 +520,7 @@ class CoordinatorServer:
 
         config = uvicorn.Config(**unified_config_kwargs)
         config.load()
-        if self._infer_ssl_config and self._infer_ssl_config.tls_enable:
+        if self._infer_ssl_config and self._infer_ssl_config.enable_tls:
             ssl_context = CertUtil.create_ssl_context(tls_config=self._infer_ssl_config)
             if ssl_context:
                 config.ssl = ssl_context
@@ -557,7 +557,7 @@ class CoordinatorServer:
 
         mgmt_config = uvicorn.Config(**mgmt_config_kwargs)
         mgmt_config.load()
-        if self._mgmt_ssl_config and self._mgmt_ssl_config.tls_enable:
+        if self._mgmt_ssl_config and self._mgmt_ssl_config.enable_tls:
             mgmt_ssl_context = CertUtil.create_ssl_context(tls_config=self._mgmt_ssl_config)
             if mgmt_ssl_context:
                 mgmt_config.ssl = mgmt_ssl_context
@@ -574,7 +574,7 @@ class CoordinatorServer:
 
         inference_config = uvicorn.Config(**inference_config_kwargs)
         inference_config.load()
-        if self._infer_ssl_config and self._infer_ssl_config.tls_enable:
+        if self._infer_ssl_config and self._infer_ssl_config.enable_tls:
             inference_ssl_context = CertUtil.create_ssl_context(tls_config=self._infer_ssl_config)
             if inference_ssl_context:
                 inference_config.ssl = inference_ssl_context

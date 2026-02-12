@@ -18,7 +18,7 @@ class TLSConfig:
     """TLS configuration class"""
 
     # TLS enable/disable
-    tls_enable: bool = True
+    enable_tls: bool = False
 
     # certificate paths
     ca_file: str = 'security/mgmt/cert/ca.crt'

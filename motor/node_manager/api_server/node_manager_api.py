@@ -183,7 +183,7 @@ class NodeManagerAPI:
         asyncio.set_event_loop(loop)
         config = uvicorn.Config(app, host=self.host, port=self.port, loop="asyncio")
         config.load()
-        if self._config.mgmt_tls_config.tls_enable:
+        if self._config.mgmt_tls_config.enable_tls:
             context = CertUtil.create_ssl_context(self._config.mgmt_tls_config)
             if not context:
                 raise RuntimeError("Failed to create SSL context")

@@ -48,7 +48,7 @@ def test_init_with_valid_parameters(base_url, cert_files):
     cert_file, key_file, ca_file = cert_files
 
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         cert_file=cert_file,
         key_file=key_file,
         ca_file=ca_file
@@ -69,7 +69,7 @@ def test_init_with_valid_parameters(base_url, cert_files):
 def test_init_with_missing_cert_files(base_url):
     """test init with missing cert files"""
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         cert_file="nonexistent.crt",
         key_file="nonexistent.key"
     )

@@ -82,8 +82,8 @@ class DeployConfig:
     engine_type: str
     model_config: ModelConfig
     engine_config: EngineConfig
-    mgmt_tls_config: TLSConfig
-    infer_tls_config: TLSConfig
+    mgmt_tls_config: TLSConfig | None
+    infer_tls_config: TLSConfig | None
 
     @staticmethod
     def _sync_parallel_config(role: str | None, data: Dict[str, Any]) -> None:
@@ -122,12 +122,16 @@ class DeployConfig:
             data = raw_data.get(key, {})
             _update_engine_server_tls_config(data, raw_data)
         cls._sync_parallel_config(role, data)
+
+        mgmt_tls_config = data.get("mgmt_tls_config")
+        infer_tls_config = data.get("infer_tls_config")
+
         return cls(
             engine_type=data["engine_type"],
             model_config=ModelConfig.from_dict(data["model_config"]),
             engine_config=EngineConfig.from_dict(data["engine_config"]),
-            mgmt_tls_config=TLSConfig.from_dict(data["mgmt_tls_config"]),
-            infer_tls_config=TLSConfig.from_dict(data["infer_tls_config"])
+            mgmt_tls_config=TLSConfig.from_dict(mgmt_tls_config) if mgmt_tls_config else None,
+            infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None
         )
 
     def get_parallel_config(self, role: str = "union") -> ParallelConfig:

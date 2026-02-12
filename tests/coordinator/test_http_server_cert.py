@@ -280,7 +280,7 @@ def test_cert_util_validation(test_certificates):
     
     # Test SSL context creation
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file=test_certs["ca_cert"],
         cert_file=test_certs["server_cert"],
         key_file=test_certs["server_key"]
@@ -298,7 +298,7 @@ def test_coordinator_server_ssl_config(test_certificates):
     
     # Create SSL configuration
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file=test_certs["ca_cert"],
         cert_file=test_certs["server_cert"],
         key_file=test_certs["server_key"]
@@ -317,10 +317,10 @@ def test_ssl_disabled_mode():
     logger.info("=== Testing SSL disabled mode ===")
     
     # Create SSL configuration (disable SSL)
-    tls_config = TLSConfig(tls_enable=False)
+    tls_config = TLSConfig(enable_tls=False)
     
     logger.info("Coordinator server configuration in SSL disabled mode created successfully")
-    assert tls_config.tls_enable is False, "SSL should be disabled"
+    assert tls_config.enable_tls is False, "SSL should be disabled"
 
 
 # ============================================================================
@@ -335,7 +335,7 @@ def test_create_ssl_context_basic(test_certificates):
     
     # Test with valid certificates
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file=test_certs["ca_cert"],
         cert_file=test_certs["server_cert"],
         key_file=test_certs["server_key"]
@@ -346,7 +346,7 @@ def test_create_ssl_context_basic(test_certificates):
     
     # Test with password parameter (even though key is not encrypted)
     tls_config_with_passwd = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file=test_certs["ca_cert"],
         cert_file=test_certs["server_cert"],
         key_file=test_certs["server_key"],
@@ -403,7 +403,7 @@ def test_create_ssl_context_error_handling():
     
     # Test with empty/invalid TLSConfig
     empty_tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file="",
         cert_file="",
         key_file=""
@@ -413,7 +413,7 @@ def test_create_ssl_context_error_handling():
     
     # Test non-existent certificate files
     invalid_tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file="/nonexistent/ca.pem",
         cert_file="/nonexistent/cert.pem",
         key_file="/nonexistent/key.pem"

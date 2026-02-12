@@ -540,7 +540,6 @@ class CoordinatorConfig:
                 save_path,
                 ConfigKey.MOTOR_COORDINATOR,
                 config_dict,
-                logger,
                 file_encoding=FILE_ENCODING,
                 component_name="coordinator",
             )
@@ -582,9 +581,9 @@ class CoordinatorConfig:
             f"    └─ Scheduler Type:      {self.scheduler_config.scheduler_type.value}\n"
             "\n"
             "  Security:\n"
-            f"    ├─ Infer TLS:           {'Enabled' if self.infer_tls_config.tls_enable else 'Disabled'}\n"
-            f"    ├─ Management TLS:      {'Enabled' if self.mgmt_tls_config.tls_enable else 'Disabled'}\n"
-            f"    ├─ Etcd TLS:            {'Enabled' if self.etcd_tls_config.tls_enable else 'Disabled'}\n"
+            f"    ├─ Infer TLS:           {'Enabled' if self.infer_tls_config.enable_tls else 'Disabled'}\n"
+            f"    ├─ Management TLS:      {'Enabled' if self.mgmt_tls_config.enable_tls else 'Disabled'}\n"
+            f"    ├─ Etcd TLS:            {'Enabled' if self.etcd_tls_config.enable_tls else 'Disabled'}\n"
             f"    ├─ API Key Auth:        {'Enabled' if self.api_key_config.enable_api_key else 'Disabled'}\n"
             f"    └─ Rate Limiting:       {'Enabled' if self.rate_limit_config.enable_rate_limit else 'Disabled'}\n"
             "\n"

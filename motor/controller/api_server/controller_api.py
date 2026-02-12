@@ -173,7 +173,7 @@ class ControllerAPI:
     def _run_api_server(self) -> None:
         try:
             server_config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="info")
-            if self.mgmt_tls_config.tls_enable:
+            if self.mgmt_tls_config.enable_tls:
                 server_config.load()
                 context = CertUtil.create_ssl_context(self.mgmt_tls_config)
                 if not context:

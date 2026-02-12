@@ -56,7 +56,7 @@ def vllm_collector(mock_logger_module):
         mock_server_config = Mock()
         mock_server_config.engine_type = "vllm"
         mock_deploy_config = Mock()
-        mock_tls_config = TLSConfig(tls_enable=False)
+        mock_tls_config = TLSConfig(enable_tls=False)
         mock_deploy_config.infer_tls_config = mock_tls_config
         mock_server_config.deploy_config = mock_deploy_config
         mock_config.get_server_config.return_value = mock_server_config

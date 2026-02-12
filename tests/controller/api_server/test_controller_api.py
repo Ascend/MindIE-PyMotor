@@ -654,12 +654,12 @@ def test_update_config():
 
     # Store original values
     original_master_standby = api_instance.enable_master_standby
-    original_tls_enabled = api_instance.mgmt_tls_config.tls_enable
+    original_enable_tls = api_instance.mgmt_tls_config.enable_tls
 
     # Create new config with different settings
     new_config = ControllerConfig()
     new_config.standby_config.enable_master_standby = True
-    new_config.mgmt_tls_config.tls_enable = True
+    new_config.mgmt_tls_config.enable_tls = True
     new_config.mgmt_tls_config.cert_file = "/new/cert.pem"
     new_config.mgmt_tls_config.key_file = "/new/key.pem"
 
@@ -668,6 +668,6 @@ def test_update_config():
 
     # Verify config fields were updated
     assert api_instance.enable_master_standby is True
-    assert api_instance.mgmt_tls_config.tls_enable is True
+    assert api_instance.mgmt_tls_config.enable_tls is True
     assert api_instance.mgmt_tls_config.cert_file == "/new/cert.pem"
     assert api_instance.mgmt_tls_config.key_file == "/new/key.pem"

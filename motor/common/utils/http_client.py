@@ -39,7 +39,7 @@ class SafeHTTPSClient:
         self.timeout = timeout
         self.session = requests.Session()
 
-        if tls_config and tls_config.tls_enable:
+        if tls_config and tls_config.enable_tls:
             self.protocol = 'https://'
             ssl_context = CertUtil.create_ssl_context(tls_config=tls_config, purpose=Purpose.CLIENT_AUTH)
 
@@ -121,7 +121,7 @@ class AsyncSafeHTTPSClient():
 
         verify = True
 
-        if tls_config and tls_config.tls_enable:
+        if tls_config and tls_config.enable_tls:
             verify = CertUtil.create_ssl_context(tls_config=tls_config, purpose=Purpose.CLIENT_AUTH)
             base_url = f"https://{address}"
         else:

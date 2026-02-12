@@ -21,7 +21,7 @@ import httpx
 MOTOR_DEPLOY_CONFIG = "motor_deploy_config"
 TLS_CONFIG = "tls_config"
 MGMT_TLS_CONFIG = "mgmt_tls_config"
-TLS_ENABLE = "tls_enable"
+ENABLE_TLS = "enable_tls"
 CA_FILE = "ca_file"
 CERT_FILE = "cert_file"
 KEY_FILE = "key_file"
@@ -166,7 +166,7 @@ def send_http_request(ip, port, url_path, config):
         'Content-Type': 'application/json'
     }
 
-    enable_tls = get_val_by_key_path(config, f'{MGMT_TLS_CONFIG}.{TLS_ENABLE}')
+    enable_tls = get_val_by_key_path(config, f'{MGMT_TLS_CONFIG}.{ENABLE_TLS}')
     
     try:
         if enable_tls:

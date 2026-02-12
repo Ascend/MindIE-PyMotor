@@ -62,7 +62,7 @@ def test_default_config_initialization():
         assert config.api_config.controller_api_port == 1026
         assert config.event_config.event_consumer_sleep_interval == 1.0
         assert config.event_config.coordinator_heartbeat_interval == 5.0
-        assert config.mgmt_tls_config.tls_enable is True
+        assert config.mgmt_tls_config.enable_tls is False
         assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
         assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
         assert config.fault_tolerance_config.enable_fault_tolerance is False
@@ -401,7 +401,7 @@ def test_config_partial_json_loading():
             # Other fields should be default values
             assert config.api_config.controller_api_host == '127.0.0.1'
             assert config.event_config.coordinator_heartbeat_interval == 5.0
-            assert config.mgmt_tls_config.tls_enable is True
+            assert config.mgmt_tls_config.enable_tls is False
             assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
             assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
         finally:
@@ -439,7 +439,7 @@ def test_config_partial_fields_in_group():
         assert config.standby_config.master_lock_key == "/controller/master_lock"
         # Other config groups should have default values
         assert config.api_config.controller_api_port == 1026
-        assert config.mgmt_tls_config.tls_enable is True
+        assert config.mgmt_tls_config.enable_tls is False
     finally:
         os.unlink(temp_path)
 
@@ -448,7 +448,7 @@ def test_config_single_group_partial():
     """Test loading configuration with only one group and partial fields"""
     single_group_config = {
         "mgmt_tls_config": {
-            "tls_enable": True,
+            "enable_tls": True,
             "cert_file": "/custom/cert.pem"
             # key_file should keep default value
         }
@@ -461,7 +461,7 @@ def test_config_single_group_partial():
     try:
         config = ControllerConfig.from_json(temp_path)
         # Updated fields in tls_config
-        assert config.mgmt_tls_config.tls_enable is True
+        assert config.mgmt_tls_config.enable_tls is True
         assert config.mgmt_tls_config.cert_file == "/custom/cert.pem"
         # Non-updated field in tls_config should keep default
         assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
@@ -484,7 +484,7 @@ def test_config_empty_json():
         config = ControllerConfig.from_json(temp_path)
         # All values should be defaults
         assert config.api_config.controller_api_port == 1026
-        assert config.mgmt_tls_config.tls_enable is True
+        assert config.mgmt_tls_config.enable_tls is False
         assert config.instance_config.instance_assemble_timeout == 600
         assert config.standby_config.enable_master_standby is False
     finally:
@@ -685,7 +685,7 @@ def test_tls_config_default_values():
     """Test TLS configuration default values"""
     config = ControllerConfig()
 
-    assert config.mgmt_tls_config.tls_enable is True
+    assert config.mgmt_tls_config.enable_tls is False
     assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
     assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
 
@@ -694,7 +694,7 @@ def test_tls_config_from_json(temp_json_file):
     """Test loading TLS configuration from JSON file"""
     test_config = {
         "mgmt_tls_config": {
-            "tls_enable": True,
+            "enable_tls": True,
             "cert_file": "/custom/path/cert.pem",
             "key_file": "/custom/path/key.pem"
         },
@@ -707,7 +707,7 @@ def test_tls_config_from_json(temp_json_file):
         json.dump(test_config, f)
 
     config = ControllerConfig.from_json(temp_json_file)
-    assert config.mgmt_tls_config.tls_enable is True
+    assert config.mgmt_tls_config.enable_tls is True
     assert config.mgmt_tls_config.cert_file == "/custom/path/cert.pem"
     assert config.mgmt_tls_config.key_file == "/custom/path/key.pem"
     assert config.api_config.controller_api_port == 8443
@@ -717,7 +717,7 @@ def test_tls_config_partial_loading(temp_json_file):
     """Test partial TLS configuration loading (only enable_tls)"""
     test_config = {
         "mgmt_tls_config": {
-            "tls_enable": True
+            "enable_tls": True
             # cert_file and key_file should use default values
         }
     }
@@ -726,7 +726,7 @@ def test_tls_config_partial_loading(temp_json_file):
         json.dump(test_config, f)
 
     config = ControllerConfig.from_json(temp_json_file)
-    assert config.mgmt_tls_config.tls_enable is True
+    assert config.mgmt_tls_config.enable_tls is True
     assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
     assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
 
@@ -734,7 +734,7 @@ def test_tls_config_partial_loading(temp_json_file):
 def test_tls_config_to_dict():
     """Test TLS configuration in to_dict output"""
     config = ControllerConfig()
-    config.mgmt_tls_config.tls_enable = True
+    config.mgmt_tls_config.enable_tls = True
     config.mgmt_tls_config.cert_file = "/custom/cert.pem"
     config.mgmt_tls_config.key_file = "/custom/key.pem"
 
@@ -742,7 +742,7 @@ def test_tls_config_to_dict():
 
     # Test grouped structure
     assert "mgmt_tls_config" in config_dict
-    assert config_dict["mgmt_tls_config"]["tls_enable"] is True
+    assert config_dict["mgmt_tls_config"]["enable_tls"] is True
     assert config_dict["mgmt_tls_config"]["cert_file"] == "/custom/cert.pem"
     assert config_dict["mgmt_tls_config"]["key_file"] == "/custom/key.pem"
 
@@ -750,7 +750,7 @@ def test_tls_config_to_dict():
 def test_tls_config_save_to_json(temp_json_file):
     """Test saving TLS configuration to JSON file"""
     config = ControllerConfig()
-    config.mgmt_tls_config.tls_enable = True
+    config.mgmt_tls_config.enable_tls = True
     config.mgmt_tls_config.cert_file = "/custom/cert.pem"
     config.mgmt_tls_config.key_file = "/custom/key.pem"
 
@@ -763,7 +763,7 @@ def test_tls_config_save_to_json(temp_json_file):
 
     # Test grouped structure
     assert "mgmt_tls_config" in saved_config
-    assert saved_config["mgmt_tls_config"]["tls_enable"] is True
+    assert saved_config["mgmt_tls_config"]["enable_tls"] is True
     assert saved_config["mgmt_tls_config"]["cert_file"] == "/custom/cert.pem"
     assert saved_config["mgmt_tls_config"]["key_file"] == "/custom/key.pem"
 
@@ -772,14 +772,14 @@ def test_tls_config_reload(temp_json_file):
     """Test reloading TLS configuration"""
     initial_config = {
         "mgmt_tls_config": {
-            "tls_enable": False,
+            "enable_tls": False,
             "cert_file": "/initial/cert.pem",
             "key_file": "/initial/key.pem"
         }
     }
     modified_config = {
         "mgmt_tls_config": {
-            "tls_enable": True,
+            "enable_tls": True,
             "cert_file": "/modified/cert.pem",
             "key_file": "/modified/key.pem"
         }
@@ -789,7 +789,7 @@ def test_tls_config_reload(temp_json_file):
         json.dump(initial_config, f)
 
     config = ControllerConfig.from_json(temp_json_file)
-    assert config.mgmt_tls_config.tls_enable is False
+    assert config.mgmt_tls_config.enable_tls is False
     assert config.mgmt_tls_config.cert_file == "/initial/cert.pem"
     assert config.mgmt_tls_config.key_file == "/initial/key.pem"
 
@@ -802,26 +802,26 @@ def test_tls_config_reload(temp_json_file):
 
     # Reload configuration
     assert config.reload() is True
-    assert config.mgmt_tls_config.tls_enable is True
+    assert config.mgmt_tls_config.enable_tls is True
     assert config.mgmt_tls_config.cert_file == "/modified/cert.pem"
     assert config.mgmt_tls_config.key_file == "/modified/key.pem"
 
 
 def test_tls_config_boolean_values(temp_json_file):
-    """Test TLS tls_enable with different boolean representations"""
+    """Test TLS enable_tls with different boolean representations"""
     # Test with true (lowercase)
-    test_config = {"mgmt_tls_config": {"tls_enable": True}}
+    test_config = {"mgmt_tls_config": {"enable_tls": True}}
     with open(temp_json_file, 'w') as f:
         json.dump(test_config, f)
     config = ControllerConfig.from_json(temp_json_file)
-    assert config.mgmt_tls_config.tls_enable is True
+    assert config.mgmt_tls_config.enable_tls is True
 
     # Test with false (lowercase)
-    test_config = {"mgmt_tls_config": {"tls_enable": False}}
+    test_config = {"mgmt_tls_config": {"enable_tls": False}}
     with open(temp_json_file, 'w') as f:
         json.dump(test_config, f)
     config = ControllerConfig.from_json(temp_json_file)
-    assert config.mgmt_tls_config.tls_enable is False
+    assert config.mgmt_tls_config.enable_tls is False
 
 
 def test_tls_config_path_strings():

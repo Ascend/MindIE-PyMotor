@@ -198,7 +198,7 @@ class TestRouterCDPSeparation:
         mock_http_config.coordinator_api_host = "127.0.0.1"
         mock_http_config.coordinator_api_mgmt_port = 1025
         mock_tls_config = MagicMock()
-        mock_tls_config.tls_enable = False
+        mock_tls_config.enable_tls = False
 
         mock_config = MagicMock()
         mock_config.scheduler_config = mock_scheduler_config

@@ -52,7 +52,7 @@ class EtcdClient:
         self._lock = threading.Lock()
 
         try:
-            if self.tls_config and self.tls_config.tls_enable:
+            if self.tls_config and self.tls_config.enable_tls:
                 with open(self.tls_config.ca_file, RB) as f:
                     root_cert = f.read()
                 with open(self.tls_config.key_file, RB) as f:

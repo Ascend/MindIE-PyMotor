@@ -31,7 +31,7 @@ def base_client_with_ssl():
     mock_lease_stub = MagicMock()
 
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file="ca_cert_path",
         key_file="cert_key_path",
         cert_file="cert_cert_path"
@@ -76,7 +76,7 @@ def test_init_with_certificates():
     mock_lease_stub = MagicMock()
 
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file="ca_cert_path",
         key_file="cert_key_path",
         cert_file="cert_cert_path"
@@ -113,7 +113,7 @@ def test_init_with_certificates():
 def test_init_with_missing_certificates():
     """Test initialization with missing certificate files."""
     tls_config = TLSConfig(
-        tls_enable=True,
+        enable_tls=True,
         ca_file="ca_cert_path",
         key_file="cert_key_path",
         cert_file="cert_cert_path"

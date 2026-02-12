@@ -1814,8 +1814,8 @@ async def test_run_combined_mode(monkeypatch):
     cfg = CoordinatorConfig()
     cfg.http_config.combined_mode = True
     # Disable TLS for testing
-    cfg.infer_tls_config.tls_enable = False
-    cfg.mgmt_tls_config.tls_enable = False
+    cfg.infer_tls_config.enable_tls = False
+    cfg.mgmt_tls_config.enable_tls = False
 
     srv = CoordinatorServer(config=cfg)
     await srv.run()
@@ -1846,8 +1846,8 @@ async def test_run_split_mode(monkeypatch):
     cfg = CoordinatorConfig()
     cfg.http_config.combined_mode = False
     # Disable TLS for testing
-    cfg.infer_tls_config.tls_enable = False
-    cfg.mgmt_tls_config.tls_enable = False
+    cfg.infer_tls_config.enable_tls = False
+    cfg.mgmt_tls_config.enable_tls = False
 
     srv = CoordinatorServer(config=cfg)
     await srv.run()

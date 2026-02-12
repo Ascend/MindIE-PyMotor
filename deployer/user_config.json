@@ -11,41 +11,7 @@
     "job_id": "mindie-motor",
     "hardware_type": "800I_A3",
     "env_path": "./conf/env.json",
-    "weight_mount_path": "/mnt/weight/",
-    "tls_config": {
-      "infer_tls_config": {
-        "tls_enable": false,
-        "ca_file": "/usr/local/Ascend/pyMotor/conf/security/infer/ca.pem",
-        "cert_file": "/usr/local/Ascend/pyMotor/conf/security/infer/cert.pem",
-        "key_file": "/usr/local/Ascend/pyMotor/conf/security/infer/nopass.cert.key.pem",
-        "passwd_file": "/usr/local/Ascend/pyMotor/conf/security/infer/key_pwd.txt",
-        "tls_crl": ""
-      },
-      "mgmt_tls_config": {
-        "tls_enable": false,
-        "ca_file": "/usr/local/Ascend/pyMotor/conf/security/mgmt/ca.pem",
-        "cert_file": "/usr/local/Ascend/pyMotor/conf/security/mgmt/cert.pem",
-        "key_file": "/usr/local/Ascend/pyMotor/conf/security/mgmt/nopass.cert.key.pem",
-        "passwd_file": "/usr/local/Ascend/pyMotor/conf/security/mgmt/key_pwd.txt",
-        "tls_crl": ""
-      },
-      "etcd_tls_config": {
-        "tls_enable": false,
-        "ca_file": "/usr/local/Ascend/pyMotor/conf/security/etcd/ca.pem",
-        "cert_file": "/usr/local/Ascend/pyMotor/conf/security/etcd/cert.pem",
-        "key_file": "/usr/local/Ascend/pyMotor/conf/security/etcd/nopass.cert.key.pem",
-        "passwd_file": "/usr/local/Ascend/pyMotor/conf/security/etcd/key_pwd.txt",
-        "tls_crl": ""
-      },
-      "grpc_tls_config": {
-        "tls_enable": false,
-        "ca_file": "/usr/local/Ascend/pyMotor/conf/security/clusterd/ca.pem",
-        "cert_file": "/usr/local/Ascend/pyMotor/conf/security/clusterd/cert.pem",
-        "key_file": "/usr/local/Ascend/pyMotor/conf/security/clusterd/nopass.cert.key.pem",
-        "passwd_file": "/usr/local/Ascend/pyMotor/conf/security/clusterd/key_pwd.txt",
-        "tls_crl": ""
-      }
-    }
+    "weight_mount_path": "/mnt/weight/"
   },
   "motor_controller_config": {
     "standby_config": {

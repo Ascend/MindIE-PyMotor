@@ -140,7 +140,7 @@ class Endpoint:
         )
 
         config.load()
-        if self.mgmt_tls_config and self.mgmt_tls_config.tls_enable:
+        if self.mgmt_tls_config and self.mgmt_tls_config.enable_tls:
             ssl_context = CertUtil.create_ssl_context(self.mgmt_tls_config)
             if ssl_context:
                 config.ssl = ssl_context

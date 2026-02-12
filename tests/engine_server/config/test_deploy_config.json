@@ -26,7 +26,7 @@
     "max_context_len_to_capture": 8192
   },
   "mgmt_tls_config": {
-    "tls_enable": false,
+    "enable_tls": false,
     "ca_file": "",
     "cert_file": "",
     "key_file": "",
@@ -34,7 +34,7 @@
     "crl_file": ""
   },
   "infer_tls_config": {
-    "tls_enable": false,
+    "enable_tls": false,
     "ca_file": "",
     "cert_file": "",
     "key_file": "",

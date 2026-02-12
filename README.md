@@ -233,29 +233,11 @@
      | prefill_parallel_config.dp_rpc_port | int | 有效端口范围 | RPC通信的端口号 |
      | engine_config |dict | 推理引擎原生参数 | 参考对应推理引擎的说明，直接已json对象形式填写 |
 
-     #### 对于`Controller`、`Coordinator`和`node_manager`的专项配置
+     `user_config.json`的全量配置参考`examples/user_config_sample.json`文件，该文件通过执行`python motor/config/config_util.py`生成。
 
-      deployer套件会将`user_config.json`中`controller`和`coordinator`以及`node_manager`的子配置写入对于的json文件，然后在模块拉起时先使用python代码默认的配置值进行实例化配置。然后读取组件配置块中用户特定修改的配置项进行刷新。
-      以开启`controller`主备为例，我们只需把对应字段改为`true`即可。
-
-      ```json
-      "motor_controller_config": {
-        "standby_config": {
-          "enable_master_standby": true
-        },
-        ......
-      },
-      ```
-
-     在`deployer/`文件夹中会配备`controller`，`coordinator`以及`node_manager`的全量配置json，您可以根据自己的需要进行修改。同时我们也支持运行时动态修改配置，此时您需要修改运行组件监控的json文件，写入你需要修改的配置项即可。
-
-     #### 对于`engine_config`的专项配置
-
-     由于需要对接多个推理引擎，不同引擎的特定配置参数难以统一，若是全部强行统一也会对用户提出较高的学习成本，故我们仅将一部分通俗易懂的配置进行统一化（如并行配置，最大HBM内存使用量，模型名称等）。其余配置我们统一放在`engine_config`内，这样不同引擎的用户可以直接快速迁移。
-
-      特别说明：
-      以下配置中的prefill和decode的dp_size、tp_size不需要用户手动配置，deployer。用户仅需要配置`prefill_parallel_config`中的并行配置即可，Motor在拉起服务时会自动刷新对应的`extra_config`。（该处config主要用于PD分离场景下二者`Tensor Parallel`数不一致时的特殊处理）
-
+     特别说明：
+     以下配置中的prefill和decode的dp_size、tp_size不需要用户手动配置。用户仅需要配置`prefill_parallel_config`中的并行配置，该处config主要用于PD分离场景下二者`Tensor Parallel`数不一致时的特殊处理。
+   
       ```json
       "kv_connector_extra_config": {
         "prefill": {

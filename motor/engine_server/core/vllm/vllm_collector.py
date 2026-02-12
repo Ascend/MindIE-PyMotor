@@ -58,7 +58,7 @@ class VLLMCollector(BaseCollector):
         }
 
     def _do_collect_metrics(self) -> Dict[str, Any]:
-        if self.infer_tls_config.tls_enable:
+        if self.infer_tls_config and self.infer_tls_config.enable_tls:
             metrics_url = f"https://{self.host}:{self.port}/metrics"
         else:
             metrics_url = f"http://{self.host}:{self.port}/metrics"
@@ -92,7 +92,7 @@ class VLLMCollector(BaseCollector):
             return self._build_error_result(error_msg, metrics_url, None)
 
     def _do_collect_health(self) -> Dict[str, Any]:
-        if self.infer_tls_config.tls_enable:
+        if self.infer_tls_config and self.infer_tls_config.enable_tls:
             health_url = f"https://{self.host}:{self.port}/health"
         else:
             health_url = f"http://{self.host}:{self.port}/health"

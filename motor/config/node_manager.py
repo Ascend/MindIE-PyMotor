@@ -432,7 +432,6 @@ class NodeManagerConfig:
                 save_config_path,
                 ConfigKey.MOTOR_NODEMANAGER,
                 config_dict,
-                logger,
                 file_encoding=FILE_ENCODING,
                 component_name="node manager",
             )
@@ -462,7 +461,7 @@ class NodeManagerConfig:
             f"    ├─ Node Manager Port:   {self.api_config.node_manager_port}\n"
             f"    ├─ Pod IP:              {self.api_config.pod_ip}\n"
             f"    ├─ Host IP:             {self.api_config.host_ip}\n"
-            f"    └─ TLS:                 {'Enabled' if self.mgmt_tls_config.tls_enable else 'Disabled'}\n"
+            f"    └─ TLS:                 {'Enabled' if self.mgmt_tls_config.enable_tls else 'Disabled'}\n"
             "\n"
             "  Basic Configuration:\n"
             f"    ├─ Job Name:            {self.basic_config.job_name}\n"

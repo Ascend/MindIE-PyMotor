@@ -332,7 +332,6 @@ class ControllerConfig:
                 save_path,
                 ConfigKey.MOTOR_CONTROLLER,
                 config_dict,
-                logger,
                 file_encoding=FILE_ENCODING,
                 component_name="controller",
             )
@@ -369,9 +368,9 @@ class ControllerConfig:
             f"    ├─ Pod IP:              {Env.pod_ip}\n"
             f"    ├─ Controller API:      {controller_api}\n"
             f"    ├─ Controller API DNS:  {controller_api_dns}\n"
-            f"    ├─ Etcd TLS:            {'Enabled' if self.etcd_tls_config.tls_enable else 'Disabled'}\n"
-            f"    ├─ GRPC TLS:            {'Enabled' if self.grpc_tls_config.tls_enable else 'Disabled'}\n"
-            f"    └─ Management TLS:      {'Enabled' if self.mgmt_tls_config.tls_enable else 'Disabled'}\n"
+            f"    ├─ Etcd TLS:            {'Enabled' if self.etcd_tls_config.enable_tls else 'Disabled'}\n"
+            f"    ├─ GRPC TLS:            {'Enabled' if self.grpc_tls_config.enable_tls else 'Disabled'}\n"
+            f"    └─ Management TLS:      {'Enabled' if self.mgmt_tls_config.enable_tls else 'Disabled'}\n"
             "\n"
             "  Instance Management:\n"
             f"    ├─ Assemble Timeout:     {self.instance_config.instance_assemble_timeout} seconds\n"
