@@ -89,9 +89,6 @@ class APIConfig:
     """API configuration class"""
     # http config
     pod_ip: str | None = field(default_factory=lambda: Env.pod_ip or "127.0.0.1")
-    # default host ip will be set to pod ip first, when perform initialize config
-    # will read hccl.json to update host ip.
-    host_ip: str | None = field(default_factory=lambda: Env.pod_ip or "127.0.0.1")
     node_manager_port: int = 1026
 
 
@@ -392,7 +389,6 @@ class NodeManagerConfig:
         if server:
             # Update API config with server information
             config.api_config.pod_ip = server.get("container_ip")
-            config.api_config.host_ip = server.get("host_ip") or server.get("server_id")
 
             # Extract device count
             devices = server.get("device") or []
@@ -557,7 +553,6 @@ class NodeManagerConfig:
             "  Network Configuration:\n"
             f"    ├─ Node Manager Port:   {self.api_config.node_manager_port}\n"
             f"    ├─ Pod IP:              {self.api_config.pod_ip}\n"
-            f"    ├─ Host IP:             {self.api_config.host_ip}\n"
             f"    └─ TLS:                 {'Enabled' if self.mgmt_tls_config.enable_tls else 'Disabled'}\n"
             "\n"
             "  Basic Configuration:\n"

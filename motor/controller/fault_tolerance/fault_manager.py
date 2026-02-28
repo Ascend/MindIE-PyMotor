@@ -23,6 +23,7 @@ from motor.common.etcd.etcd_client import EtcdClient
 from motor.controller.core import Observer, ObserverEvent, InstanceManager
 from motor.controller.fault_tolerance.strategy import generate_strategy_map
 from motor.controller.fault_tolerance.k8s.resource_monitor import ResourceMonitor
+from motor.controller.fault_tolerance.k8s.k8s_client import K8sClient
 from motor.controller.fault_tolerance.k8s.cluster_fault_codes import (
     FaultInfo, FaultLevel, FaultType, SpecialFaultCode, NodeStatus
 )
@@ -42,7 +43,7 @@ class NodeMetadata(BaseModel):
     of the node, if there is no device fault, it will be an empty dict.
     """
     pod_ip: str = Field(..., description="Pod IP address")
-    host_ip: str = Field(..., description="Host IP address")
+    node_name: str = Field(..., description="Kubernetes node name")
     instance_id: int = Field(..., description="Instance ID that this node belongs to")
     node_status: NodeStatus = Field(default=NodeStatus.READY, description="Node status")
     fault_infos: dict[int, FaultInfo] = Field(default_factory=dict,
@@ -100,7 +101,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         self.config = config
         self.config_lock = threading.RLock()
 
-        # Manage all nodes's status with host_ip, when it comes a faulty node,
+        # Manage all nodes's status with Kubernetes node_name, when it comes a faulty node,
         # we firstly find out which instance this node belongs to,
         # and then use self.instances to find out all nodes in this instance.
         self.nodes: dict[str, NodeMetadata] = {}
@@ -111,13 +112,16 @@ class FaultManager(ThreadSafeSingleton, Observer):
         self._data_version = 0
         self._version_lock = threading.Lock()
 
-        # Dynamic Resource monitors for per-host monitoring, key is host_ip.
+        # Dynamic Resource monitors for per-node monitoring, key is node_name.
         self.resource_monitors: dict[str, ResourceMonitor] = {}
         self.resource_monitors_lock = threading.RLock()
 
         # Version control for data persistence
         self._data_version = 0
         self._version_lock = threading.Lock()
+
+        # Kubernetes client for resolving node_name from pod_ip
+        self.k8s_client = K8sClient()
 
         # Extract required config fields
         with self.config_lock:
@@ -161,10 +165,10 @@ class FaultManager(ThreadSafeSingleton, Observer):
         if enable_persistence and not self.restore_data():
             logger.warning("Failed to restore fault manager's data from ETCD, start with empty state")
 
-        # Start Resource monitors for all restored nodes
+        # Start Resource monitors for all restored nodes (keyed by node_name)
         with self.lock:
-            for host_ip in self.nodes.keys():
-                self._create_resource_monitor_for_host(host_ip)
+            for node_name in self.nodes.keys():
+                self._create_resource_monitor_for_node(node_name)
 
         self.ft_strategy_center_thread.start()
 
@@ -218,20 +222,20 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 logger.info("ConfigMap namespace configuration updated to: %s", new_configmap_namespace)
 
             if config_changed:
-                # Stop all existing host-specific Resource monitors due to configuration change
+                # Stop all existing node-specific Resource monitors due to configuration change
                 with self.resource_monitors_lock:
-                    for host_ip, monitor in self.resource_monitors.items():
+                    for node_name, monitor in self.resource_monitors.items():
                         monitor.stop_monitoring()
-                        logger.info("Stopped Resource monitor for host %s due to configuration change", host_ip)
+                        logger.info("Stopped Resource monitor for node %s due to configuration change", node_name)
                     self.resource_monitors.clear()
 
-                # Restart Resource monitors for all existing hosts with new configuration
-                # Get all unique host_ips from nodes dictionary
+                # Restart Resource monitors for all existing nodes with new configuration
+                # Get all unique node_names from nodes dictionary
                 with self.lock:
-                    host_ips = {node.host_ip for node in self.nodes.values()}
-                    for host_ip in host_ips:
-                        self._create_resource_monitor_for_host(host_ip)
-                        logger.info("Restarted Resource monitor for host %s with new configuration", host_ip)
+                    node_names = {node.node_name for node in self.nodes.values()}
+                    for node_name in node_names:
+                        self._create_resource_monitor_for_node(node_name)
+                        logger.info("Restarted Resource monitor for node %s with new configuration", node_name)
 
                 logger.info("Resource configuration updated - all monitors restarted with new config")
 
@@ -252,8 +256,8 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 # Prepare fault manager data
                 fault_data = {'nodes': {}, 'instances': {}}
 
-                for host_ip, node_metadata in self.nodes.items():
-                    fault_data['nodes'][host_ip] = node_metadata.model_dump(mode='json')
+                for node_name, node_metadata in self.nodes.items():
+                    fault_data['nodes'][node_name] = node_metadata.model_dump(mode='json')
                 for ins_id, ins_metadata in self.instances.items():
                     fault_data['instances'][str(ins_id)] = ins_metadata.model_dump(mode='json')
                 logger.debug("Persisting fault manager data - full data: %s", fault_data)
@@ -317,8 +321,8 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
                 # Restore nodes and instances from data (already normalized from ETCD)
                 nodes_data = persistent_state.data.get('nodes', {})
-                for host_ip, node_dict in nodes_data.items():
-                    self.nodes[host_ip] = NodeMetadata.model_validate(node_dict)
+                for node_name, node_dict in nodes_data.items():
+                    self.nodes[node_name] = NodeMetadata.model_validate(node_dict)
 
                 instances_data = persistent_state.data.get('instances', {})
                 for ins_id_str, ins_dict in instances_data.items():
@@ -333,7 +337,38 @@ class FaultManager(ThreadSafeSingleton, Observer):
             logger.error("Error restoring fault manager data: %s", e)
             return False
 
-    def update_instances(self, instances: list[Instance]) -> None:
+    def update(self, instance: ReadOnlyInstance, event: ObserverEvent) -> None:
+        logger.info("FaultManager update instance %s with event: %s.", instance.job_name, event)
+
+        if event == ObserverEvent.INSTANCE_INITIAL:
+            with self.lock:
+                if instance.id in self.instances:
+                    logger.debug("Instance %d already exists in fault manager, skipping add operation.",
+                                 instance.id)
+                    return
+
+            self._sync_instance_nodes(instance)
+        elif event == ObserverEvent.INSTANCE_REMOVED:
+            # Find all nodes belonging to this instance
+            instance_nodes = []
+            with self.lock:
+                if instance.id not in self.instances:
+                    return
+
+                for node_name, node_metadata in self.nodes.items():
+                    if node_metadata.instance_id == instance.id:
+                        instance_nodes.append((node_name, node_metadata))
+
+            for node_name, _ in instance_nodes:
+                self._stop_resource_monitor_for_node(node_name)
+
+            with self.lock:
+                # Remove all nodes belonging to this instance
+                for node_name, _ in instance_nodes:
+                    self.nodes.pop(node_name, None)
+                self.instances.pop(instance.id, None)
+
+    def update_instances(self, instances: list[ReadOnlyInstance]) -> None:
         """
         Update fault manager with existing instances, this func will be invoked 
         when fault manager is restarted and needs to catch up with existing instances.
@@ -342,161 +377,160 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
         for instance in instances:
             logger.debug("Processing instance %s (id: %d)", instance.job_name, instance.id)
+            self._sync_instance_nodes(instance)
 
-            # Get current node managers from instance
-            current_node_managers = instance.get_node_managers()
-
-            with self.lock:
-                if instance.id in self.instances:
-                    # Instance exists, check for node changes
-                    current_host_ips = {node_mgr.host_ip for node_mgr in current_node_managers}
-                    existing_nodes = {
-                        host_ip: node
-                        for host_ip, node in self.nodes.items()
-                        if node.instance_id == instance.id
-                    }
-                    existing_host_ips = set(existing_nodes.keys())
-
-                    # Remove nodes that are no longer in the instance
-                    removed_host_ips = existing_host_ips - current_host_ips
-                    for host_ip in removed_host_ips:
-                        self.nodes.pop(host_ip, None)
-                        self._stop_resource_monitor_for_host(host_ip)
-                        logger.debug("Removed node %s from instance %d", host_ip, instance.id)
-
-                    # Add new nodes
-                    added_host_ips = current_host_ips - existing_host_ips
-                    for node_mgr in current_node_managers:
-                        if node_mgr.host_ip in added_host_ips:
-                            self.nodes[node_mgr.host_ip] = NodeMetadata(
-                                pod_ip=node_mgr.pod_ip,
-                                host_ip=node_mgr.host_ip,
-                                instance_id=instance.id,
-                            )
-                            self._create_resource_monitor_for_host(node_mgr.host_ip)
-                            logger.debug("Added new node %s to instance %d", node_mgr.host_ip, instance.id)
-                else:
-                    # Instance doesn't exist, add it
-                    logger.debug("Adding new instance %d to fault manager", instance.id)
-                    ins_metadata = InstanceMetadata(instance_id=instance.id)
-
-                    node_metadatas = {}
-                    for node_mgr in current_node_managers:
-                        node_metadatas[node_mgr.host_ip] = NodeMetadata(
-                            pod_ip=node_mgr.pod_ip,
-                            host_ip=node_mgr.host_ip,
-                            instance_id=instance.id,
-                        )
-
-                    self.instances[instance.id] = ins_metadata
-                    self.nodes.update(node_metadatas)
-                    logger.debug("Added instance %d with %d nodes", instance.id, len(node_metadatas))
-
-                    # Create Resource monitors for all hosts in the new instance
-                    for node_mgr in current_node_managers:
-                        self._create_resource_monitor_for_host(node_mgr.host_ip)
-
-    def update(self, instance: ReadOnlyInstance, event: ObserverEvent) -> None:
-        logger.info("FaultManager update instance %s with event: %s.", instance.job_name, event)
-
-        if event == ObserverEvent.INSTANCE_INITIAL:
-            self._handle_instance_initial(instance)
-        elif event == ObserverEvent.INSTANCE_REMOVED:
-            self._handle_instance_removed(instance)
-
-    def _handle_instance_initial(self, instance: ReadOnlyInstance) -> None:
-        with self.lock:
-            # Check if instance already exists, if so, skip adding
-            if instance.id in self.instances:
-                logger.debug("Instance %d already exists in fault manager, skipping add operation.",
-                             instance.id)
-                return
-
+    def _sync_instance_nodes(self, instance: ReadOnlyInstance) -> None:
+        """ Sync internal node metadata for a given instance based on its current node managers.
+        - Resolves node_name from pod_ip via Kubernetes
+        - For existing instances:
+          - Removes nodes that are no longer present
+          - Updates pod_ip for existing nodes whose pod_ip changed
+          - Adds new nodes and starts monitors for them
+        - For new instances:
+          - Creates InstanceMetadata
+          - Adds all nodes and starts monitors for them
+        """
         current_node_managers = instance.get_node_managers()
+
+        pod_to_node_name, current_node_names = self._build_node_name_mapping(current_node_managers)
+
+        with self.lock:
+            if instance.id in self.instances:
+                self._sync_existing_instance_nodes(instance, pod_to_node_name, current_node_names)
+            else:
+                self._add_new_instance_with_nodes(instance, pod_to_node_name)
+
+    def _build_node_name_mapping(self, node_managers: list) -> tuple[dict[str, str], set[str]]:
+        """
+        Build helper mappings from the current node managers:
+        - pod_to_node_name: pod_ip -> node_name
+        - current_node_names: set of all node names currently present
+        """
+        pod_to_node_name: dict[str, str] = {}
+        current_node_names: set[str] = set()
+
+        for node_mgr in node_managers:
+            node_name = self.k8s_client.get_node_hostname_by_pod_ip(node_mgr.pod_ip)
+            if not node_name:
+                logger.warning("Failed to resolve node name for pod_ip %s", node_mgr.pod_ip)
+                continue
+            pod_to_node_name[node_mgr.pod_ip] = node_name
+            current_node_names.add(node_name)
+
+        return pod_to_node_name, current_node_names
+
+    def _ensure_node_metadata(
+        self,
+        node_name: str,
+        pod_ip: str,
+        instance_id: int,
+        update_instance_id: bool = False,
+    ) -> tuple[NodeMetadata, bool]:
+        """ Ensure node metadata exists, creating or updating as needed.
+        Returns:
+            tuple[NodeMetadata, bool]: (node_metadata, is_newly_created)
+        """
+        if node_name in self.nodes:
+            existing_node = self.nodes[node_name]
+            old_pod_ip = existing_node.pod_ip
+            existing_node.pod_ip = pod_ip
+            if update_instance_id:
+                existing_node.instance_id = instance_id
+            if old_pod_ip != pod_ip:
+                logger.info("Updated node %s pod_ip from %s to %s for instance %d",
+                            node_name, old_pod_ip, pod_ip, instance_id)
+            return existing_node, False
+        else:
+            new_node = NodeMetadata(
+                pod_ip=pod_ip,
+                node_name=node_name,
+                instance_id=instance_id,
+            )
+            logger.info("Added new node %s to instance %d", node_name, instance_id)
+            return new_node, True
+
+    def _sync_existing_instance_nodes(
+        self,
+        instance: ReadOnlyInstance,
+        pod_to_node_name: dict[str, str],
+        current_node_names: set[str],
+    ) -> None:
+        """Sync nodes for an existing instance: remove, update pod_ip, add, and manage monitors."""
+        existing_nodes = {
+            node_name: node
+            for node_name, node in self.nodes.items()
+            if node.instance_id == instance.id
+        }
+        existing_node_names = set(existing_nodes.keys())
+
+        # Remove nodes that are no longer in the instance
+        removed_node_names = existing_node_names - current_node_names
+        for node_name in removed_node_names:
+            self.nodes.pop(node_name, None)
+            self._stop_resource_monitor_for_node(node_name)
+            logger.info("Removed node %s from instance %d", node_name, instance.id)
+
+        # Update existing nodes and add new nodes
+        for pod_ip, node_name in pod_to_node_name.items():
+            node_metadata, is_new = self._ensure_node_metadata(
+                node_name, pod_ip, instance.id, update_instance_id=False
+            )
+            self.nodes[node_name] = node_metadata
+            if is_new:
+                self._create_resource_monitor_for_node(node_name)
+
+    def _add_new_instance_with_nodes(self, instance: ReadOnlyInstance, pod_to_node_name: dict[str, str]) -> None:
+        """Create InstanceMetadata, nodes, and monitors for a new instance."""
+        logger.debug("Adding new instance %d to fault manager", instance.id)
         ins_metadata = InstanceMetadata(instance_id=instance.id)
 
-        with self.lock:
-            self.instances[instance.id] = ins_metadata
+        node_metadatas: dict[str, NodeMetadata] = {}
+        for pod_ip, node_name in pod_to_node_name.items():
+            node_metadata, _ = self._ensure_node_metadata(
+                node_name, pod_ip, instance.id, update_instance_id=True
+            )
+            node_metadatas[node_name] = node_metadata
 
-            # Process nodes: update existing ones or add new ones
-            for node_mgr in current_node_managers:
-                if node_mgr.host_ip in self.nodes:
-                    # Node already exists, only update pod_ip and instance_id to preserve fault_infos
-                    existing_node = self.nodes[node_mgr.host_ip]
-                    existing_node.pod_ip = node_mgr.pod_ip
-                    existing_node.instance_id = instance.id
-                    logger.info("Updated existing node %s (pod_ip: %s -> %s, instance_id: %d -> %d)",
-                                 node_mgr.host_ip, existing_node.pod_ip, node_mgr.pod_ip,
-                                 existing_node.instance_id, instance.id)
-                else:
-                    # Node doesn't exist, create new one
-                    self.nodes[node_mgr.host_ip] = NodeMetadata(
-                        pod_ip=node_mgr.pod_ip,
-                        host_ip=node_mgr.host_ip,
-                        instance_id=instance.id,
-                    )
-                    logger.info("Added new node %s to instance %d", node_mgr.host_ip, instance.id)
+        self.instances[instance.id] = ins_metadata
+        self.nodes.update(node_metadatas)
+        logger.info("Added instance %d with %d nodes", instance.id, len(node_metadatas))
 
-        # Create Resource monitors for all hosts in the instance
-        for node_mgr in current_node_managers:
-            self._create_resource_monitor_for_host(node_mgr.host_ip)
+        # Create Resource monitors for all nodes in the new instance
+        for node_name in node_metadatas.keys():
+            self._create_resource_monitor_for_node(node_name)
 
-    def _handle_instance_removed(self, instance: ReadOnlyInstance) -> None:
-        # Find all nodes belonging to this instance
-        instance_nodes = []
-        with self.lock:
-            if instance.id not in self.instances:
-                return
-
-            # Collect all nodes that belong to this instance
-            for host_ip, node_metadata in self.nodes.items():
-                if node_metadata.instance_id == instance.id:
-                    instance_nodes.append((host_ip, node_metadata))
-
-        # Stop Resource monitors for all hosts in the instance
-        for host_ip, _ in instance_nodes:
-            self._stop_resource_monitor_for_host(host_ip)
-
-        with self.lock:
-            # Remove all nodes belonging to this instance
-            for host_ip, _ in instance_nodes:
-                self.nodes.pop(host_ip, None)
-
-            # Remove the instance
-            self.instances.pop(instance.id, None)
-
-    def _create_resource_monitor_for_host(self, host_ip: str) -> None:
-        """ Create a Resource monitor for a specific host IP """
+    def _create_resource_monitor_for_node(self, node_name: str) -> None:
+        """ Create a Resource monitor for a specific Kubernetes node """
         with self.config_lock:
             namespace = self.configmap_namespace
             configmap_prefix = self.configmap_prefix
 
         with self.resource_monitors_lock:
             # Check if monitor already exists and is running with same configuration
-            if host_ip in self.resource_monitors:
-                existing_monitor = self.resource_monitors[host_ip]
+            if node_name in self.resource_monitors:
+                existing_monitor = self.resource_monitors[node_name]
                 
                 # Early return if monitor is alive and configuration matches
                 if existing_monitor.is_alive():
                     config_matches = (existing_monitor.namespace == namespace
                                      and existing_monitor.configmap_name_prefix == configmap_prefix)
                     if config_matches:
-                        logger.debug("Resource monitor for host %s already exists and is running "
-                                   "with same configuration, skipping recreation", host_ip)
+                        logger.debug("Resource monitor for node %s already exists and is running "
+                                   "with same configuration, skipping recreation", node_name)
                         return
                     # Configuration changed, need to stop and recreate
-                    logger.info("Resource monitor configuration changed for host %s, "
-                              "stopping existing monitor", host_ip)
+                    logger.info("Resource monitor configuration changed for node %s, "
+                              "stopping existing monitor", node_name)
                     existing_monitor.stop_monitoring()
                 else:
                     # Monitor exists but not alive, will recreate
-                    logger.debug("Resource monitor for host %s exists but not alive, "
-                               "will recreate", host_ip)
+                    logger.debug("Resource monitor for node %s exists but not alive, "
+                               "will recreate", node_name)
 
-        logger.info("Creating Resource monitor for host %s", host_ip)
+        logger.info("Creating Resource monitor for node %s", node_name)
 
         resource_monitor = ResourceMonitor(
-            host_ip=host_ip,
+            node_name=node_name,
             namespace=namespace,
             configmap_name_prefix=configmap_prefix,
             node_change_handler=self._handle_node_status_update,
@@ -504,28 +538,28 @@ class FaultManager(ThreadSafeSingleton, Observer):
         )
 
         with self.resource_monitors_lock:
-            self.resource_monitors[host_ip] = resource_monitor
+            self.resource_monitors[node_name] = resource_monitor
 
         resource_monitor.start_monitoring()
 
-    def _stop_resource_monitor_for_host(self, host_ip: str) -> None:
-        """ Stop Resource monitor for a specific host """
+    def _stop_resource_monitor_for_node(self, node_name: str) -> None:
+        """ Stop Resource monitor for a specific node """
         with self.resource_monitors_lock:
-            if host_ip in self.resource_monitors:
-                monitor = self.resource_monitors[host_ip]
+            if node_name in self.resource_monitors:
+                monitor = self.resource_monitors[node_name]
                 monitor.stop_monitoring()
-                del self.resource_monitors[host_ip]
-                logger.info("Stopped Resource monitor for host %s", host_ip)
+                del self.resource_monitors[node_name]
+                logger.info("Stopped Resource monitor for node %s", node_name)
 
-    def _handle_fault_info_update(self, fault_infos: list[FaultInfo], host_ip: str) -> None:
-        """ Process the (host_ip)node's fault information update from ResourceMonitor """
+    def _handle_fault_info_update(self, fault_infos: list[FaultInfo], node_name: str) -> None:
+        """ Process the node's fault information update from ResourceMonitor """
         # Get node metadata
         node_metadata = None
         with self.lock:
-            node_metadata = self.nodes.get(host_ip)
+            node_metadata = self.nodes.get(node_name)
 
         if node_metadata is None:
-            logger.warning("Node with host_ip %s not found, cannot process fault info update", host_ip)
+            logger.warning("Node with node_name %s not found, cannot process fault info update", node_name)
             return
 
         for idx, info in enumerate(fault_infos, start=1):
@@ -548,25 +582,25 @@ class FaultManager(ThreadSafeSingleton, Observer):
             node_metadata.fault_infos[node_reboot_key] = node_reboot_fault
 
         logger.info("Updated node %s with %d fault infos (preserved node_reboot: %s)",
-                    host_ip, len(fault_infos), node_reboot_fault is not None)
+                    node_name, len(fault_infos), node_reboot_fault is not None)
 
         # Refresh instance fault levels for the node that may have been updated
         self._refresh_instance_fault_level(node_metadata.instance_id)
 
-    def _handle_node_status_update(self, status: NodeStatus, host_ip: str) -> None:
+    def _handle_node_status_update(self, status: NodeStatus, node_name: str) -> None:
         """ Process Node status update from ResourceMonitor.  """
-        logger.info("Processing Node status update: %s -> %s", host_ip, status)
+        logger.info("Processing Node status update: %s -> %s", node_name, status)
 
         # Update node status
         with self.lock:
-            if host_ip not in self.nodes:
-                logger.warning("Node with host_ip %s not found, cannot process node info update", host_ip)
+            if node_name not in self.nodes:
+                logger.warning("Node with node_name %s not found, cannot process node info update", node_name)
                 return
 
-            node_metadata = self.nodes[host_ip]
+            node_metadata = self.nodes[node_name]
             old_status = node_metadata.node_status
             node_metadata.node_status = status
-            logger.info("Updated node %s node status to %s", host_ip, status)
+            logger.info("Updated node %s node status to %s", node_name, status)
 
             # Handle node_reboot fault based on status change
             if old_status != status:
@@ -579,17 +613,17 @@ class FaultManager(ThreadSafeSingleton, Observer):
                         fault_code=SpecialFaultCode.NODE_REBOOT,
                         fault_level=FaultLevel.L6
                     )
-                    self.nodes[host_ip].fault_infos[node_reboot_key] = node_reboot_fault
+                    self.nodes[node_name].fault_infos[node_reboot_key] = node_reboot_fault
 
-                    logger.info("Added node reboot fault for node %s", host_ip)
+                    logger.info("Added node reboot fault for node %s", node_name)
                 elif status == NodeStatus.READY:
                     # Remove node reboot fault
                     node_reboot_key = int(SpecialFaultCode.NODE_REBOOT)
-                    if node_reboot_key in self.nodes[host_ip].fault_infos:
-                        del self.nodes[host_ip].fault_infos[node_reboot_key]
-                        logger.info("Removed node reboot fault for node %s", host_ip)
+                    if node_reboot_key in self.nodes[node_name].fault_infos:
+                        del self.nodes[node_name].fault_infos[node_reboot_key]
+                        logger.info("Removed node reboot fault for node %s", node_name)
                     else:
-                        logger.debug("Node reboot fault not found for node %s", host_ip)
+                        logger.debug("Node reboot fault not found for node %s", node_name)
 
         self._refresh_instance_fault_level(node_metadata.instance_id)
 
@@ -654,7 +688,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         highest_fault_info = None
 
         for node_metadata in instance_nodes:
-            node_fault_info = self._eval_node_status(node_metadata.host_ip)
+            node_fault_info = self._eval_node_status(node_metadata.node_name)
             if node_fault_info and node_fault_info.fault_level > highest_fault_level:
                 highest_fault_level = node_fault_info.fault_level
                 highest_fault_info = node_fault_info
@@ -667,20 +701,20 @@ class FaultManager(ThreadSafeSingleton, Observer):
                         instance_metadata.instance_id, highest_fault_level,
                         hex(instance_metadata.fault_code) if instance_metadata.fault_code else '0x0')
 
-    def _eval_node_status(self, host_ip: str) -> FaultInfo | None:
+    def _eval_node_status(self, node_name: str) -> FaultInfo | None:
         with self.lock:
-            node_metadata = self.nodes.get(host_ip)
+            node_metadata = self.nodes.get(node_name)
 
         if node_metadata is None:
-            logger.error("Node not found for host_ip: %s", host_ip)
+            logger.error("Node not found for node_name: %s", node_name)
             return None
 
-        logger.debug("Found node metadata for host_ip %s: node_status=%s, fault_count=%d",
-                     host_ip, node_metadata.node_status, len(node_metadata.fault_infos))
+        logger.debug("Found node metadata for node_name %s: node_status=%s, fault_count=%d",
+                     node_name, node_metadata.node_status, len(node_metadata.fault_infos))
 
         # Check faults for all issues (including node_reboot faults)
         if len(node_metadata.fault_infos) == 0:
-            logger.debug("Node %s has no fault infos", host_ip)
+            logger.debug("Node %s has no fault infos", node_name)
             return None
 
         # Evaluate all faults (device faults + node faults)
@@ -692,7 +726,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 target_fault_info = fault_info
 
         logger.debug("Node %s highest fault level: %s, fault_code: %s",
-                     host_ip, highest_fault_level,
+                     node_name, highest_fault_level,
                      f"0x{int(target_fault_info.fault_code):08x}" if target_fault_info else "None")
         return target_fault_info
 

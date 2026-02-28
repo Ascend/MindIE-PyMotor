@@ -104,7 +104,6 @@ def create_register_msg(job_name: str, pod_ip: str, config: dict, **kwargs) -> R
     defaults = {
         'model_name': "test_model",
         'role': config['role'],
-        'host_ip': pod_ip,
         'business_port': ["8080", "8084"],
         'mgmt_port': ["9090", "9094"],
         'nm_port': "8088",
@@ -134,7 +133,6 @@ def create_reregister_msg(job_name: str, pod_ip: str, instance_id: int, config: 
         instance_id=instance_id,
         role=config['role'],
         pod_ip=pod_ip,
-        host_ip=pod_ip,
         nm_port="8088",
         parallel_config=config['parallel_config'],
         endpoints=endpoints_list
@@ -544,8 +542,8 @@ def test_send_start_command_no_endpoints(instance_assembler, test_config):
     )
 
     # Add node managers
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")
-    instance.add_node_mgr("127.0.0.2", "127.0.0.2", "8089")
+    instance.add_node_mgr("127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.2", "8089")
 
     # Only add endpoints for first node manager
     reg_msg = create_register_msg("test", "127.0.0.1", test_config)
@@ -1337,8 +1335,8 @@ def test_filter_abnormal_endpoints_all_normal(instance_assembler, test_config):
     )
 
     # Add node managers
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")
-    instance.add_node_mgr("127.0.0.2", "127.0.0.2", "8088")
+    instance.add_node_mgr("127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.2", "8088")
 
     # Mock NodeManagerApiClient.query_status to return normal status
     with patch('motor.controller.core.instance_assembler.NodeManagerApiClient.query_status') as mock_query_status:
@@ -1362,8 +1360,8 @@ def test_filter_abnormal_endpoints_with_abnormal(instance_assembler, test_config
     )
 
     # Add node managers and endpoints
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")
-    instance.add_node_mgr("127.0.0.2", "127.0.0.2", "8088")
+    instance.add_node_mgr("127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.2", "8088")
 
     # Add endpoints for both nodes
     endpoints1 = {1: Endpoint(id=1, ip="127.0.0.1", business_port="1001", mgmt_port="9001")}
@@ -1397,7 +1395,7 @@ def test_filter_abnormal_endpoints_invalid_response(instance_assembler, test_con
     )
 
     # Add node manager and endpoints
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.1", "8088")
     endpoints = {1: Endpoint(id=1, ip="127.0.0.1", business_port="1001", mgmt_port="9001")}
     instance.add_endpoints("127.0.0.1", endpoints)
 
@@ -1424,7 +1422,7 @@ def test_filter_abnormal_endpoints_connection_error(instance_assembler, test_con
     )
 
     # Add node manager and endpoints
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.1", "8088")
     endpoints = {1: Endpoint(id=1, ip="127.0.0.1", business_port="1001", mgmt_port="9001")}
     instance.add_endpoints("127.0.0.1", endpoints)
 
@@ -1451,8 +1449,8 @@ def test_filter_abnormal_endpoints_mixed_scenarios(instance_assembler, test_conf
     )
 
     # Add node managers and endpoints
-    instance.add_node_mgr("127.0.0.1", "127.0.0.1", "8088")  # Will be reachable
-    instance.add_node_mgr("127.0.0.2", "127.0.0.2", "8088")  # Will fail connection
+    instance.add_node_mgr("127.0.0.1", "8088")  # Will be reachable
+    instance.add_node_mgr("127.0.0.2", "8088")  # Will fail connection
 
     endpoints1 = {1: Endpoint(id=1, ip="127.0.0.1", business_port="1001", mgmt_port="9001")}
     endpoints2 = {2: Endpoint(id=2, ip="127.0.0.2", business_port="1002", mgmt_port="9002")}
@@ -1506,7 +1504,7 @@ def test_assemble_instance_with_abnormal_endpoints(instance_assembler, test_conf
         pod_ip = f"127.0.0.{i}"
         endpoints = {i: Endpoint(id=i, ip=pod_ip, business_port=f"100{i}", mgmt_port=f"900{i}")}
         instance.add_endpoints(pod_ip, endpoints)
-        instance.add_node_mgr(pod_ip, pod_ip, "8088")
+        instance.add_node_mgr(pod_ip, "8088")
 
     # Create metadata
     metadata = AssembleInstanceMetadata(instance=instance, register_timestamp=time.time())
@@ -1542,7 +1540,7 @@ def test_assemble_instance_with_healthy_endpoints(instance_assembler, test_confi
         pod_ip = f"127.0.0.{i}"
         endpoints = {i: Endpoint(id=i, ip=pod_ip, business_port=f"100{i}", mgmt_port=f"900{i}")}
         instance.add_endpoints(pod_ip, endpoints)
-        instance.add_node_mgr(pod_ip, pod_ip, "8088")
+        instance.add_node_mgr(pod_ip, "8088")
 
     # Create metadata
     metadata = AssembleInstanceMetadata(instance=instance, register_timestamp=time.time())

@@ -21,25 +21,37 @@ Test cases are organized according to the following logical blocks:
 7. Data processing
 8. Node status extraction
 """
+import pytest
 from unittest.mock import patch, Mock
 
 from motor.controller.fault_tolerance.k8s.resource_monitor import ResourceMonitor
 from motor.controller.fault_tolerance.k8s.cluster_fault_codes import NodeStatus, FaultInfo
 
+
+@pytest.fixture(autouse=True)
+def mock_kubernetes_config():
+    """Mock Kubernetes configuration loading to avoid error logs in tests"""
+    with patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_incluster_config',
+               side_effect=Exception("In-cluster config not available")):
+        with patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_kube_config',
+                   side_effect=Exception("Kubeconfig not available")):
+            with patch('motor.controller.fault_tolerance.k8s.resource_monitor.logger'):
+                yield
+
 # Common test constants
-DEFAULT_HOST_IP = "192.168.1.100"
+DEFAULT_NODE_NAME = "test-node"
 DEFAULT_NAMESPACE = "default"
 DEFAULT_CONFIGMAP_PREFIX = "fault-config-"
 DEFAULT_RETRY_INTERVAL = 30
 
 
-def create_test_monitor(host_ip=DEFAULT_HOST_IP, namespace=DEFAULT_NAMESPACE,
+def create_test_monitor(node_name=DEFAULT_NODE_NAME, namespace=DEFAULT_NAMESPACE,
                        configmap_name_prefix=DEFAULT_CONFIGMAP_PREFIX,
                        retry_interval=DEFAULT_RETRY_INTERVAL,
                        node_handler=None, configmap_handler=None):
     """Helper function to create ResourceMonitor instance for testing"""
     return ResourceMonitor(
-        host_ip=host_ip,
+        node_name=node_name,
         namespace=namespace,
         configmap_name_prefix=configmap_name_prefix,
         retry_interval=retry_interval,
@@ -52,7 +64,7 @@ def test_resource_monitor_initialization_with_valid_params():
     """Test ResourceMonitor initialization with valid parameters"""
     monitor = create_test_monitor(retry_interval=30)
 
-    assert monitor.host_ip == DEFAULT_HOST_IP
+    assert monitor.node_name == DEFAULT_NODE_NAME
     assert monitor.namespace == DEFAULT_NAMESPACE
     assert monitor.configmap_name_prefix == DEFAULT_CONFIGMAP_PREFIX
     assert monitor.retry_interval == 30
@@ -85,7 +97,7 @@ def test_resource_monitor_kubernetes_config_incluster_success():
 
     # When kubernetes is not available, v1 client is not created
     # This test verifies the initialization logic
-    assert monitor.host_ip == DEFAULT_HOST_IP
+    assert monitor.node_name == DEFAULT_NODE_NAME
     assert monitor.namespace == DEFAULT_NAMESPACE
     assert monitor.configmap_name_prefix == DEFAULT_CONFIGMAP_PREFIX
 
@@ -96,7 +108,7 @@ def test_resource_monitor_kubernetes_config_incluster_failure_kubeconfig_success
     # Here we just verify basic initialization works
     monitor = create_test_monitor()
 
-    assert monitor.host_ip == DEFAULT_HOST_IP
+    assert monitor.node_name == DEFAULT_NODE_NAME
     assert monitor.retry_interval == DEFAULT_RETRY_INTERVAL
 
 
@@ -110,14 +122,8 @@ def test_resource_monitor_kubernetes_config_both_fail():
     assert monitor.configmap_change_handler is None
 
 
-@patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_incluster_config')
-@patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_kube_config')
-def test_resource_monitor_kubernetes_not_available(mock_kube_config, mock_incluster_config):
+def test_resource_monitor_kubernetes_not_available():
     """Test when Kubernetes client is not available"""
-    # Mock both config loading methods to raise exceptions
-    mock_incluster_config.side_effect = Exception("In-cluster config not available")
-    mock_kube_config.side_effect = Exception("Kubeconfig not available")
-    
     monitor = create_test_monitor()
 
     # Verify that v1 client was not created (when config loading fails, __init__ returns early)
@@ -150,14 +156,8 @@ def test_start_monitoring_hostname_not_found(caplog):
     assert len(monitor.monitor_threads) == 0
 
 
-@patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_incluster_config')
-@patch('motor.controller.fault_tolerance.k8s.resource_monitor.config.load_kube_config')
-def test_start_monitoring_kubernetes_not_available(mock_kube_config, mock_incluster_config, caplog):
+def test_start_monitoring_kubernetes_not_available(caplog):
     """Test start monitoring when Kubernetes is not available"""
-    # Mock both config loading methods to raise exceptions
-    mock_incluster_config.side_effect = Exception("In-cluster config not available")
-    mock_kube_config.side_effect = Exception("Kubeconfig not available")
-    
     monitor = create_test_monitor()
 
     # Start monitoring
@@ -278,7 +278,7 @@ def test_handle_node_change_added_modified():
     # Test ADDED event
     monitor._handle_node_change('ADDED', mock_node)
     assert len(handler_calls) == 1
-    assert handler_calls[0] == (NodeStatus.READY, DEFAULT_HOST_IP)
+    assert handler_calls[0] == (NodeStatus.READY, DEFAULT_NODE_NAME)
 
     # Test MODIFIED event with same status (should not trigger handler due to deduplication)
     monitor._handle_node_change('MODIFIED', mock_node)
@@ -316,12 +316,12 @@ def test_handle_node_change_deduplication_with_actual_change():
     # Test first change (READY)
     monitor._handle_node_change('ADDED', mock_node_ready)
     assert len(handler_calls) == 1
-    assert handler_calls[0] == (NodeStatus.READY, DEFAULT_HOST_IP)
+    assert handler_calls[0] == (NodeStatus.READY, DEFAULT_NODE_NAME)
 
     # Test second change with different status (NOT_READY)
     monitor._handle_node_change('MODIFIED', mock_node_not_ready)
     assert len(handler_calls) == 2  # Handler should be called again for different status
-    assert handler_calls[1] == (NodeStatus.NOT_READY, DEFAULT_HOST_IP)
+    assert handler_calls[1] == (NodeStatus.NOT_READY, DEFAULT_NODE_NAME)
 
 
 def test_handle_node_change_deleted():
@@ -346,7 +346,7 @@ def test_handle_node_change_deleted():
     # Test DELETED event
     monitor._handle_node_change('DELETED', mock_node)
     assert len(handler_calls) == 1
-    assert handler_calls[0] == (NodeStatus.NOT_READY, DEFAULT_HOST_IP)
+    assert handler_calls[0] == (NodeStatus.NOT_READY, DEFAULT_NODE_NAME)
 
 
 def test_handle_node_change_no_handler():
@@ -365,7 +365,7 @@ def test_handle_node_change_no_handler():
         monitor._handle_node_change('ADDED', mock_node)
 
         # Verify that warning was logged about no handler
-        mock_logger.warning.assert_called_with("No node change handler configured for host %s", DEFAULT_HOST_IP)
+        mock_logger.warning.assert_called_with("No node change handler configured for node %s", DEFAULT_NODE_NAME)
 
 
 def test_handle_node_change_handler_exception():
@@ -391,7 +391,7 @@ def test_handle_node_change_handler_exception():
         mock_logger.error.assert_called_once()
         args = mock_logger.error.call_args[0]
         assert args[0] == "Error in node status change handler for %s: %s"
-        assert args[1] == DEFAULT_HOST_IP  # hostname lookup fails in test, falls back to host_ip
+        assert args[1] == DEFAULT_NODE_NAME  # hostname lookup fails in test, falls back to node_name
         assert isinstance(args[2], Exception)
         assert str(args[2]) == "Handler exception"
 
@@ -416,7 +416,7 @@ def test_handle_configmap_change_added_modified():
     # Test ADDED event
     monitor._handle_configmap_change('ADDED', mock_configmap, mock_configmap.metadata.name)
     assert len(handler_calls) == 1
-    assert handler_calls[0][1] == DEFAULT_HOST_IP  # IP should be passed
+    assert handler_calls[0][1] == DEFAULT_NODE_NAME  # IP should be passed
 
     # Test MODIFIED event with same data (should not trigger handler due to deduplication)
     monitor._handle_configmap_change('MODIFIED', mock_configmap, mock_configmap.metadata.name)
@@ -481,36 +481,39 @@ def test_handle_configmap_change_no_npu_name():
 
 
 def test_handle_configmap_change_multiple_configmaps():
-    """Test that different ConfigMaps maintain separate caches"""
-    monitor = create_test_monitor()
+    """Test that different ResourceMonitor instances maintain separate caches"""
+    # Create two separate monitors for different nodes
+    monitor1 = create_test_monitor(node_name="node1")
+    monitor2 = create_test_monitor(node_name="node2")
 
-    # Mock first ConfigMap
+    # Mock ConfigMap for node1
     mock_configmap1 = Mock()
     mock_configmap1.metadata.name = "fault-config-node1"
     mock_configmap1.metadata.namespace = "default"
     mock_configmap1.data = {"DeviceInfoCfg": '{"DeviceInfo":{"DeviceList":{"huawei.com/Ascend910-Fault":[{"fault_type":"CardUnhealthy","npu_name":"npu0","fault_level":"L5","fault_code":"0x1001"}]},"UpdateTime":123456},"SuperPodID":1,"ServerIndex":1}'}
 
-    # Mock second ConfigMap with same data
+    # Mock ConfigMap for node2 with same data
     mock_configmap2 = Mock()
     mock_configmap2.metadata.name = "fault-config-node2"
     mock_configmap2.metadata.namespace = "default"
     mock_configmap2.data = {"DeviceInfoCfg": '{"DeviceInfo":{"DeviceList":{"huawei.com/Ascend910-Fault":[{"fault_type":"CardUnhealthy","npu_name":"npu0","fault_level":"L5","fault_code":"0x1001"}]},"UpdateTime":123456},"SuperPodID":1,"ServerIndex":1}'}
 
-    # Mock configmap change handler
+    # Mock configmap change handlers
     handler_calls = []
     def mock_configmap_handler(faults, ip):
         handler_calls.append((faults, ip))
 
-    monitor.configmap_change_handler = mock_configmap_handler
+    monitor1.configmap_change_handler = mock_configmap_handler
+    monitor2.configmap_change_handler = mock_configmap_handler
 
-    monitor._handle_configmap_change('ADDED', mock_configmap1, mock_configmap1.metadata.name)
+    monitor1._handle_configmap_change('ADDED', mock_configmap1, mock_configmap1.metadata.name)
     assert len(handler_calls) == 1
-    monitor._handle_configmap_change('ADDED', mock_configmap2, mock_configmap2.metadata.name)
-    assert len(handler_calls) == 2  # Should be called for different ConfigMap
-    monitor._handle_configmap_change('MODIFIED', mock_configmap1, mock_configmap1.metadata.name)
-    assert len(handler_calls) == 2  # Should not be called for duplicate data in same ConfigMap
-    monitor._handle_configmap_change('MODIFIED', mock_configmap2, mock_configmap2.metadata.name)
-    assert len(handler_calls) == 2  # Should not be called for duplicate data in same ConfigMap
+    monitor2._handle_configmap_change('ADDED', mock_configmap2, mock_configmap2.metadata.name)
+    assert len(handler_calls) == 2  # Should be called for different monitors
+    monitor1._handle_configmap_change('MODIFIED', mock_configmap1, mock_configmap1.metadata.name)
+    assert len(handler_calls) == 2  # Should not be called for duplicate data in same monitor
+    monitor2._handle_configmap_change('MODIFIED', mock_configmap2, mock_configmap2.metadata.name)
+    assert len(handler_calls) == 2  # Should not be called for duplicate data in same monitor
 
 
 def test_handle_configmap_change_deleted():
@@ -532,7 +535,7 @@ def test_handle_configmap_change_deleted():
     # Test DELETED event
     monitor._handle_configmap_change('DELETED', mock_configmap, mock_configmap.metadata.name)
     assert len(handler_calls) == 1
-    assert handler_calls[0] == ([], DEFAULT_HOST_IP)  # Empty fault list for deleted
+    assert handler_calls[0] == ([], DEFAULT_NODE_NAME)  # Empty fault list for deleted
 
 
 def test_handle_configmap_change_no_handler():
@@ -550,7 +553,7 @@ def test_handle_configmap_change_no_handler():
         monitor._handle_configmap_change('ADDED', mock_configmap, mock_configmap.metadata.name)
 
         # Verify that warning was logged about no handler
-        mock_logger.warning.assert_called_with("No configmap change handler configured for host %s", DEFAULT_HOST_IP)
+        mock_logger.warning.assert_called_with("No configmap change handler configured for node %s", DEFAULT_NODE_NAME)
 
 
 def test_handle_configmap_change_handler_exception():

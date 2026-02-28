@@ -232,7 +232,6 @@ class EngineManager(ThreadSafeSingleton):
             model_name = self._config.basic_config.model_name
             role = self._config.basic_config.role
             pod_ip = self._config.api_config.pod_ip
-            host_ip = self._config.api_config.host_ip
             business_port = self._config.endpoint_config.service_ports
             mgmt_port = self._config.endpoint_config.mgmt_ports
             node_manager_port = self._config.api_config.node_manager_port
@@ -243,7 +242,6 @@ class EngineManager(ThreadSafeSingleton):
             model_name=model_name,
             role=role,
             pod_ip=pod_ip,
-            host_ip=host_ip,
             business_port=business_port,
             mgmt_port=mgmt_port,
             nm_port=str(node_manager_port),
@@ -269,7 +267,6 @@ class EngineManager(ThreadSafeSingleton):
             model_name = self._config.basic_config.model_name
             role = self._config.basic_config.role
             pod_ip = self._config.api_config.pod_ip
-            host_ip = self._config.api_config.host_ip
             node_manager_port = self._config.api_config.node_manager_port
             parallel_config = self._config.basic_config.parallel_config
 
@@ -278,7 +275,6 @@ class EngineManager(ThreadSafeSingleton):
             model_name=model_name,
             role=role,
             pod_ip=pod_ip,
-            host_ip=host_ip,
             nm_port=str(node_manager_port),
             parallel_config=parallel_config,
             instance_id=self.instance_id,

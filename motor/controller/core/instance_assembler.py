@@ -206,8 +206,8 @@ class InstanceAssembler(ThreadSafeSingleton):
 
         pod_endpoints = build_endpoints(msg, metadata.instance.get_endpoints_num())
         metadata.instance.add_endpoints(msg.pod_ip, pod_endpoints)
-        metadata.instance.add_node_mgr(msg.pod_ip, msg.host_ip, msg.nm_port)
-        logger.info("Endpoints added for instance %s from pod %s.", msg.job_name, msg.host_ip)
+        metadata.instance.add_node_mgr(msg.pod_ip, msg.nm_port)
+        logger.info("Endpoints added for instance %s from pod %s.", msg.job_name, msg.pod_ip)
 
         # Persist data on state change
         with self.config_lock:
@@ -259,7 +259,7 @@ class InstanceAssembler(ThreadSafeSingleton):
             self.ins_id_cnt = max(self.ins_id_cnt, msg.instance_id + 1)
 
         metadata.instance.add_endpoints(msg.pod_ip, {endpoint.id: endpoint for endpoint in msg.endpoints})
-        metadata.instance.add_node_mgr(msg.pod_ip, msg.host_ip, msg.nm_port)
+        metadata.instance.add_node_mgr(msg.pod_ip, msg.nm_port)
         logger.info("Recovery instance assembler's info, current ins_id_idx is %d.", self.ins_id_cnt)
 
         # Persist data on state change
@@ -530,7 +530,7 @@ class InstanceAssembler(ThreadSafeSingleton):
         for node_mgr in node_managers:
             if not self._is_node_manager_alive(node_mgr, instance):
                 instance.del_endpoints(node_mgr.pod_ip)
-                instance.del_node_mgr(node_mgr.pod_ip, node_mgr.host_ip, node_mgr.port)
+                instance.del_node_mgr(node_mgr.pod_ip, node_mgr.port)
 
         logger.info("Endpoint filtering completed for instance %s(id:%d)",
                     instance.job_name, instance.id)

@@ -58,7 +58,6 @@ class InsConditionEvent(str, Enum):
 
 class NodeManagerInfo(BaseModel):
     pod_ip: str = Field(..., description="Node manager pod ip")
-    host_ip: str = Field(..., description="Node manager host ip")
     port: str = Field(..., description="Node manager port")
 
 
@@ -139,12 +138,12 @@ class Instance(BaseModel):
         self._cached_endpoints_tuple: Optional[tuple[Endpoint, ...]] = None
         self._cached_endpoints_version: Optional[int] = None  # Version at cache time
 
-    def add_node_mgr(self, pod_ip: str, host_ip: str, port: str) -> None:
-        if pod_ip is None or host_ip is None or port is None:
-            logger.warning("Invalid ip: %s or host_ip: %s or port: %s", pod_ip, host_ip, port)
+    def add_node_mgr(self, pod_ip: str, port: str) -> None:
+        if pod_ip is None or port is None:
+            logger.warning("Invalid pod_ip: %s or port: %s", pod_ip, port)
             return
 
-        node_mgr_info = NodeManagerInfo(pod_ip=pod_ip, host_ip=host_ip, port=port)
+        node_mgr_info = NodeManagerInfo(pod_ip=pod_ip, port=port)
         with self._lock:
             if node_mgr_info not in self.node_managers:
                 self.node_managers.append(node_mgr_info)
@@ -152,12 +151,12 @@ class Instance(BaseModel):
             else:
                 logger.info(f"Node manager {pod_ip}:{port} already in instance:{self.job_name}")
 
-    def del_node_mgr(self, pod_ip: str, host_ip: str, port: str) -> None:
-        if pod_ip is None or host_ip is None or port is None:
-            logger.warning("Invalid ip: %s or host_ip: %s or port: %s", pod_ip, host_ip, port)
+    def del_node_mgr(self, pod_ip: str, port: str) -> None:
+        if pod_ip is None or port is None:
+            logger.warning("Invalid pod_ip: %s or port: %s", pod_ip, port)
             return
 
-        node_mgr_info = NodeManagerInfo(pod_ip=pod_ip, host_ip=host_ip, port=port)
+        node_mgr_info = NodeManagerInfo(pod_ip=pod_ip, port=port)
         with self._lock:
             if node_mgr_info in self.node_managers:
                 self.node_managers.remove(node_mgr_info)

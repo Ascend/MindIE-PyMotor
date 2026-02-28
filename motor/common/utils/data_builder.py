@@ -28,7 +28,9 @@ def build_ins_ranktable(ins: Instance) -> Ranktable:
         server_count=str(ins.get_node_managers_num()),
         server_list=[
             ServerInfo(
-                server_id=str(nm.host_ip),
+                # Note: currently, we just assume server_id is pod_ip, actually is host_ip.
+                # but A5 doesn't have any of these ip related field, so we use pod_ip as server_id.
+                server_id=str(nm.pod_ip),
                 container_ip=nm.pod_ip,
                 device=[
                     d

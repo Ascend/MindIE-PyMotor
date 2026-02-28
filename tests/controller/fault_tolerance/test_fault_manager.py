@@ -33,7 +33,6 @@ from motor.controller.fault_tolerance.k8s.cluster_fault_codes import (
 # Test constants
 TEST_IPS = ["192.168.1.1", "192.168.1.2", "192.168.1.99"]
 TEST_PORT = "8080"
-TEST_NODE_NAMES = ["node_0", "node_1"]
 TEST_FAULT_CODES = [0x1234, 0x2000, 0x3000, 0x3001, 0x4000, 0x00f1fef5]
 
 
@@ -85,10 +84,10 @@ def _assert_fault_info(fault, *, fault_level, fault_code, fault_type):
     assert fault.fault_type == fault_type
 
 
-def _etcd_node_entry(*, pod_ip, host_ip, instance_id, node_status, fault_infos):
+def _etcd_node_entry(*, pod_ip, node_name, instance_id, node_status, fault_infos):
     return {
         "pod_ip": pod_ip,
-        "host_ip": host_ip,
+        "node_name": node_name,
         "instance_id": instance_id,
         "node_status": node_status.value,
         "fault_infos": fault_infos,
@@ -142,18 +141,12 @@ def fault_manager_with_instances():
 
         ins_metadata1 = InstanceMetadata(instance_id=1)
         manager.instances[1] = ins_metadata1
-        manager.nodes["10.0.0.1"] = NodeMetadata(
-            pod_ip="192.168.1.1", host_ip="10.0.0.1", instance_id=1
-        )
-        manager.nodes["10.0.0.2"] = NodeMetadata(
-            pod_ip="192.168.1.2", host_ip="10.0.0.2", instance_id=1
-        )
+        manager.nodes["node_0"] = NodeMetadata(pod_ip="192.168.1.1", node_name="node_0", instance_id=1)
+        manager.nodes["node_1"] = NodeMetadata(pod_ip="192.168.1.2", node_name="node_1", instance_id=1)
 
         ins_metadata2 = InstanceMetadata(instance_id=2)
         manager.instances[2] = ins_metadata2
-        manager.nodes["10.0.0.3"] = NodeMetadata(
-            pod_ip="192.168.1.3", host_ip="10.0.0.3", instance_id=2
-        )
+        manager.nodes["node_2"] = NodeMetadata(pod_ip="192.168.1.3", node_name="node_2", instance_id=2)
 
         yield manager
 
@@ -164,9 +157,7 @@ def mock_instance():
     instance = Mock(spec=Instance)
     instance.id = 1
     instance.job_name = "test_job"
-    instance.get_node_managers.return_value = [
-        NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080")
-    ]
+    instance.get_node_managers.return_value = [NodeManagerInfo(pod_ip="192.168.1.1", port="8080")]
     return instance
 
 
@@ -274,9 +265,9 @@ def test_persist_data_success(fault_manager_with_instances):
         assert isinstance(nodes_data, dict)
         assert len(nodes_data) == 3  # Three nodes in test setup (instance 1: 2 nodes, instance 2: 1 node)
 
-        node_data = nodes_data["10.0.0.1"]  # Use host_ip as key
+        node_data = nodes_data["node_0"]  # Use node_name as key
         assert node_data['pod_ip'] == TEST_IPS[0]
-        assert node_data['host_ip'] == "10.0.0.1"
+        assert node_data['node_name'] == "node_0"
         assert node_data['node_status'] == NodeStatus.READY.value
         assert 'fault_infos' in node_data
 
@@ -347,9 +338,9 @@ def test_restore_data_success(fault_manager):
     manager = fault_manager
     fault_data = {
         'nodes': {
-            TEST_IPS[0]: _etcd_node_entry(
+            "node_0": _etcd_node_entry(
                 pod_ip=TEST_IPS[0],
-                host_ip=TEST_IPS[0],
+                node_name="node_0",
                 instance_id=1,
                 node_status=NodeStatus.READY,
                 fault_infos={
@@ -379,11 +370,11 @@ def test_restore_data_success(fault_manager):
         assert result is True # Verify restore_data success
 
         assert len(manager.nodes) == 1 # Verify nodes restored
-        assert TEST_IPS[0] in manager.nodes
+        assert "node_0" in manager.nodes
 
-        node = manager.nodes[TEST_IPS[0]]
+        node = manager.nodes["node_0"]
         assert node.pod_ip == TEST_IPS[0]
-        assert node.host_ip == TEST_IPS[0]
+        assert node.node_name == "node_0"
         assert node.node_status == NodeStatus.READY
         assert len(node.fault_infos) == 1
         fault_info = next(iter(node.fault_infos.values()))
@@ -429,7 +420,7 @@ def test_restore_data_corrupted_data(fault_manager):
         'nodes': {
             TEST_IPS[0]: _etcd_node_entry(
                 pod_ip=TEST_IPS[0],
-                host_ip=TEST_IPS[0],
+                node_name="node_0",
                 instance_id=1,
                 node_status=NodeStatus.READY,
                 fault_infos={},
@@ -523,52 +514,75 @@ def test_fault_manager_start_creates_resource_monitors(fault_manager_with_instan
 
     with patch.object(manager, 'restore_data', return_value=True):
         with patch('threading.Thread'):
-            with patch.object(manager, '_create_resource_monitor_for_host') as mock_create_monitor:
+            with patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
                 manager.start()
 
                 # Verify ResourceMonitors were created for all nodes (3 nodes in test setup)
                 assert mock_create_monitor.call_count == 3
-                mock_create_monitor.assert_any_call("10.0.0.1")
-                mock_create_monitor.assert_any_call("10.0.0.2")
-                mock_create_monitor.assert_any_call("10.0.0.3")
+                mock_create_monitor.assert_any_call("node_0")
+                mock_create_monitor.assert_any_call("node_1")
+                mock_create_monitor.assert_any_call("node_2")
 
 
 def test_update_instance_initial(fault_manager, mock_instance):
     """Test update method with INSTANCE_INITIAL event"""
-    with patch.object(fault_manager, '_handle_instance_initial') as mock_handler:
-        fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
-        mock_handler.assert_called_once_with(mock_instance)
+    mock_instance.get_node_managers.return_value = [
+        NodeManagerInfo(pod_ip="192.168.1.1", port="80880"),
+    ]
+    
+    with patch.object(fault_manager, "k8s_client") as mock_k8s_client:
+        mock_k8s_client.get_node_hostname_by_pod_ip.return_value = "node_0"
+        with patch.object(fault_manager, '_create_resource_monitor_for_node'):
+            fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
+    
+    assert mock_instance.id in fault_manager.instances
+    assert len(fault_manager.nodes) > 0
 
 
 def test_update_instance_removed(fault_manager, mock_instance):
     """Test update method with INSTANCE_REMOVED event"""
-    with patch.object(fault_manager, '_handle_instance_removed') as mock_handler:
+    mock_instance.id = 1
+    fault_manager.instances[1] = InstanceMetadata(instance_id=1)
+    fault_manager.nodes["node_0"] = NodeMetadata(
+        pod_ip="192.168.1.1", node_name="node_0", instance_id=1
+    )
+    
+    with patch.object(fault_manager, '_stop_resource_monitor_for_node'):
         fault_manager.update(mock_instance, ObserverEvent.INSTANCE_REMOVED)
-        mock_handler.assert_called_once_with(mock_instance)
+    
+    assert 1 not in fault_manager.instances
+    assert "node_0" not in fault_manager.nodes
 
 
 def test_handle_instance_initial_new_instance(fault_manager, mock_instance):
     """Test _handle_instance_initial with a new instance"""
     mock_instance.get_node_managers.return_value = [
-        NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
-        NodeManagerInfo(pod_ip="192.168.1.2", host_ip="10.0.0.2", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.1", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.2", port="8080"),
     ]
     mock_instance.id = 1
 
-    with patch.object(fault_manager, '_create_resource_monitor_for_host') as mock_create_monitor:
-        fault_manager._handle_instance_initial(mock_instance)
+    # Map pod_ip to node_name for this test
+    pod_to_node = {
+        "192.168.1.1": "node_0",
+        "192.168.1.2": "node_1",
+    }
+    with patch.object(fault_manager, "k8s_client") as mock_k8s_client, \
+         patch.object(fault_manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+        mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
+        fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
         assert set(fault_manager.instances.keys()) == {1}
         assert isinstance(fault_manager.instances[1], InstanceMetadata)
-        assert set(fault_manager.nodes.keys()) == {"10.0.0.1", "10.0.0.2"}
-        for host_ip, pod_ip in [("10.0.0.1", "192.168.1.1"), ("10.0.0.2", "192.168.1.2")]:
-            node = fault_manager.nodes[host_ip]
-            assert (node.pod_ip, node.host_ip, node.instance_id) == (pod_ip, host_ip, 1)
+        assert set(fault_manager.nodes.keys()) == {"node_0", "node_1"}
+        for node_name, pod_ip in [("node_0", "192.168.1.1"), ("node_1", "192.168.1.2")]:
+            node = fault_manager.nodes[node_name]
+            assert (node.pod_ip, node.node_name, node.instance_id) == (pod_ip, node_name, 1)
 
         # Check that ConfigMap monitors were created for both hosts
         assert mock_create_monitor.call_count == 2
-        mock_create_monitor.assert_any_call("10.0.0.1")
-        mock_create_monitor.assert_any_call("10.0.0.2")
+        mock_create_monitor.assert_any_call("node_0")
+        mock_create_monitor.assert_any_call("node_1")
 
 
 def test_handle_instance_initial_existing_instance(fault_manager, mock_instance):
@@ -577,8 +591,8 @@ def test_handle_instance_initial_existing_instance(fault_manager, mock_instance)
     fault_manager.instances[1] = InstanceMetadata(instance_id=1)
 
     with patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
-        with patch.object(fault_manager, '_create_resource_monitor_for_host') as mock_create_monitor:
-            fault_manager._handle_instance_initial(mock_instance)
+        with patch.object(fault_manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+            fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
             mock_logger.debug.assert_called_once_with(
                 "Instance %d already exists in fault manager, skipping add operation.", 1
@@ -592,26 +606,29 @@ def test_handle_instance_initial_preserves_fault_info(fault_manager):
     instance.id = 1
     instance.job_name = "test_job"
     node_mgr1 = Mock()
-    node_mgr1.host_ip = "10.0.0.1"
+    node_mgr1.node_name = "node_0"
     node_mgr1.pod_ip = "192.168.1.1"
 
     instance.get_node_managers.return_value = [node_mgr1]
 
     existing_node = NodeMetadata(
         pod_ip="192.168.1.100",  # Different pod_ip to test update
-        host_ip="10.0.0.1",
+        node_name="node_0",
         instance_id=999,  # Different instance_id to test update
         node_status=NodeStatus.READY,
         fault_infos={FAULT_DEVICE_L2_0x1000.fault_code: FAULT_DEVICE_L2_0x1000}  # This should be preserved
     )
 
     with fault_manager.lock:
-        fault_manager.nodes["10.0.0.1"] = existing_node
+        fault_manager.nodes["node_0"] = existing_node
 
-    fault_manager._handle_instance_initial(instance)
+    # Mock k8s_client to resolve pod_ip to the expected node_name
+    with patch.object(fault_manager, "k8s_client") as mock_k8s_client:
+        mock_k8s_client.get_node_hostname_by_pod_ip.return_value = "node_0"
+        fault_manager.update(instance, ObserverEvent.INSTANCE_INITIAL)
 
-    assert "10.0.0.1" in fault_manager.nodes
-    updated_node = fault_manager.nodes["10.0.0.1"]
+    assert "node_0" in fault_manager.nodes
+    updated_node = fault_manager.nodes["node_0"]
 
     # Verify pod_ip and instance_id were updated
     assert updated_node.pod_ip == "192.168.1.1"
@@ -635,15 +652,15 @@ def test_handle_instance_removed_existing_instance(fault_manager_with_instances)
     instance = Mock()
     instance.id = 1
 
-    with patch.object(manager, '_stop_resource_monitor_for_host') as mock_stop_monitor:
-        manager._handle_instance_removed(instance)
+    with patch.object(manager, '_stop_resource_monitor_for_node') as mock_stop_monitor:
+        manager.update(instance, ObserverEvent.INSTANCE_REMOVED)
         assert mock_stop_monitor.call_count == 2  # Two nodes in instance 1
-        mock_stop_monitor.assert_any_call("10.0.0.1")
-        mock_stop_monitor.assert_any_call("10.0.0.2")
+        mock_stop_monitor.assert_any_call("node_0")
+        mock_stop_monitor.assert_any_call("node_1")
 
         # Should remove all nodes belonging to the instance
-        assert "10.0.0.1" not in manager.nodes
-        assert "10.0.0.2" not in manager.nodes
+        assert "node_0" not in manager.nodes
+        assert "node_1" not in manager.nodes
 
         assert 1 not in manager.instances
 
@@ -653,8 +670,8 @@ def test_handle_instance_removed_nonexistent_instance(fault_manager):
     instance = Mock()
     instance.id = 999
 
-    with patch.object(fault_manager, '_stop_resource_monitor_for_host') as mock_stop_monitor:
-        fault_manager._handle_instance_removed(instance)
+    with patch.object(fault_manager, '_stop_resource_monitor_for_node') as mock_stop_monitor:
+        fault_manager.update(instance, ObserverEvent.INSTANCE_REMOVED)
         mock_stop_monitor.assert_not_called()
 
 
@@ -700,22 +717,22 @@ def test_update_config_with_configmap_changes():
     manager.instances[1] = ins_metadata
     manager.nodes["10.0.0.1"] = NodeMetadata(
         pod_ip="192.168.1.1",
-        host_ip="10.0.0.1",
+        node_name="node_0",
         instance_id=1
     )
     manager.nodes["10.0.0.2"] = NodeMetadata(
         pod_ip="192.168.1.2",
-        host_ip="10.0.0.2",
+        node_name="node_1",
         instance_id=1
     )
     mock_monitor1, mock_monitor2 = MagicMock(), MagicMock()
-    manager.resource_monitors.update({"10.0.0.1": mock_monitor1, "10.0.0.2": mock_monitor2})
+    manager.resource_monitors.update({"node_0": mock_monitor1, "node_1": mock_monitor2})
 
     new_config = ControllerConfig()
     new_config.fault_tolerance_config.configmap_prefix = "new-prefix"
     new_config.fault_tolerance_config.configmap_namespace = "new-namespace"
 
-    with patch.object(manager, '_create_resource_monitor_for_host') as mock_create_monitor, \
+    with patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor, \
          patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
         manager.update_config(new_config)
 
@@ -726,8 +743,8 @@ def test_update_config_with_configmap_changes():
         assert manager.resource_monitors == {}
 
         assert mock_create_monitor.call_count == 2
-        mock_create_monitor.assert_any_call("10.0.0.1")
-        mock_create_monitor.assert_any_call("10.0.0.2")
+        mock_create_monitor.assert_any_call("node_0")
+        mock_create_monitor.assert_any_call("node_1")
 
         assert mock_logger.info.call_count >= 4  # multiple log calls
 
@@ -744,19 +761,19 @@ def test_update_config_without_configmap_changes():
         manager = FaultManager(config)
 
         mock_monitor = MagicMock()
-        manager.resource_monitors["10.0.0.1"] = mock_monitor
+        manager.resource_monitors["node_0"] = mock_monitor
 
         new_config = ControllerConfig()
         new_config.fault_tolerance_config.configmap_prefix = manager.configmap_prefix
         new_config.fault_tolerance_config.configmap_namespace = manager.configmap_namespace
 
-        with patch.object(manager, '_create_resource_monitor_for_host') as mock_create_monitor:
+        with patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
             with patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
                 manager.update_config(new_config)
 
                 mock_monitor.stop_monitoring.assert_not_called()
                 assert len(manager.resource_monitors) == 1
-                assert manager.resource_monitors["10.0.0.1"] is mock_monitor
+                assert manager.resource_monitors["node_0"] is mock_monitor
 
                 mock_create_monitor.assert_not_called()
 
@@ -773,99 +790,112 @@ def test_update_instances(fault_manager):
         return inst
 
     mock_instance1 = mk_instance(1, "job1", [
-        {"pod_ip": "192.168.1.1", "host_ip": "10.0.0.1", "port": "8080"},
-        {"pod_ip": "192.168.1.2", "host_ip": "10.0.0.2", "port": "8080"},
+        {"pod_ip": "192.168.1.1", "port": "8080"},
+        {"pod_ip": "192.168.1.2", "port": "8080"},
     ])
     mock_instance2 = mk_instance(2, "job2", [
-        {"pod_ip": "192.168.1.3", "host_ip": "10.0.0.3", "port": "8080"},
+        {"pod_ip": "192.168.1.3", "port": "8080"},
     ])
 
+    # Mapping from pod_ip to node_name used in this test
+    pod_to_node = {
+        "192.168.1.1": "node_0",
+        "192.168.1.2": "node_1",
+        "192.168.1.3": "node_2",
+        "192.168.1.4": "node_1",
+    }
+
     # Test 1: Add new instances
-    with patch.object(manager, '_create_resource_monitor_for_host') as mock_create_monitor:
+    with patch.object(manager, 'k8s_client') as mock_k8s_client, \
+         patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+        mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
         manager.update_instances([mock_instance1, mock_instance2])
 
         assert set(manager.instances.keys()) == {1, 2}
-        assert set(manager.nodes.keys()) == {"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+        assert set(manager.nodes.keys()) == {"node_0", "node_1", "node_2"}
 
         # Verify ResourceMonitors were created for all nodes in new instances
         assert mock_create_monitor.call_count == 3
-        mock_create_monitor.assert_any_call("10.0.0.1")
-        mock_create_monitor.assert_any_call("10.0.0.2")
-        mock_create_monitor.assert_any_call("10.0.0.3")
+        mock_create_monitor.assert_any_call("node_0")
+        mock_create_monitor.assert_any_call("node_1")
+        mock_create_monitor.assert_any_call("node_2")
 
     # Test 2: Update existing instance with changed node managers
     mock_instance1.get_node_managers.return_value = [
-        NodeManagerInfo(pod_ip="192.168.1.1", host_ip="10.0.0.1", port="8080"),
-        NodeManagerInfo(pod_ip="192.168.1.4", host_ip="10.0.0.4", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.1", port="8080"),
+        NodeManagerInfo(pod_ip="192.168.1.4", port="8080"),
     ]
-    with patch.object(manager, '_stop_resource_monitor_for_host') as mock_stop_monitor, \
-         patch.object(manager, '_create_resource_monitor_for_host') as mock_create_monitor:
+    with patch.object(manager, 'k8s_client') as mock_k8s_client, \
+         patch.object(manager, '_stop_resource_monitor_for_node') as mock_stop_monitor, \
+         patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+        mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
         manager.update_instances([mock_instance1])
 
         assert set(manager.instances.keys()) == {1, 2}
-        assert set(manager.nodes.keys()) == {"10.0.0.1", "10.0.0.3", "10.0.0.4"}
+        assert set(manager.nodes.keys()) == {"node_0", "node_1", "node_2"}
+        mock_stop_monitor.assert_not_called()
+        mock_create_monitor.assert_not_called()
 
-        # Verify ResourceMonitor was stopped for removed node and created for added node
-        mock_stop_monitor.assert_called_once_with("10.0.0.2")
-        mock_create_monitor.assert_called_once_with("10.0.0.4")
+        # Verify that node_1's pod_ip has been updated to the new pod_ip
+        assert manager.nodes["node_1"].pod_ip == "192.168.1.4"
 
     # Test 3: Empty instance list should not cause issues
     manager.update_instances([])
     assert set(manager.instances.keys()) == {1, 2}
-    assert set(manager.nodes.keys()) == {"10.0.0.1", "10.0.0.3", "10.0.0.4"}
+    assert set(manager.nodes.keys()) == {"node_0", "node_1", "node_2"}
 
 
 # =============================================================================
 # 5. Resource Monitoring and Update
 # =============================================================================
 
-def test_create_resource_monitor_for_host(fault_manager):
-    """Test creating Resource monitor for a host"""
+def test_create_resource_monitor_for_node(fault_manager):
+    """Test creating Resource monitor for a node"""
     with patch('motor.controller.fault_tolerance.fault_manager.ResourceMonitor') as mock_monitor_class:
         mock_monitor = MagicMock()
         mock_monitor_class.return_value = mock_monitor
 
-        fault_manager._create_resource_monitor_for_host("10.0.0.1")
+        fault_manager._create_resource_monitor_for_node("node_0")
 
         # Verify ResourceMonitor was created with correct parameters
         mock_monitor_class.assert_called_once()
         _, kwargs = mock_monitor_class.call_args
-        assert kwargs['host_ip'] == "10.0.0.1"
+        assert kwargs['node_name'] == "node_0"
         assert 'node_change_handler' in kwargs
         assert 'configmap_change_handler' in kwargs
 
         # Verify monitor was stored and started
-        assert "10.0.0.1" in fault_manager.resource_monitors
-        assert fault_manager.resource_monitors["10.0.0.1"] is mock_monitor
+        assert "node_0" in fault_manager.resource_monitors
+        assert fault_manager.resource_monitors["node_0"] is mock_monitor
         mock_monitor.start_monitoring.assert_called_once()
 
 
-def test_stop_resource_monitor_for_host(fault_manager):
-    """Test stopping Resource monitor for a host"""
+def test_stop_resource_monitor_for_node(fault_manager):
+    """Test stopping Resource monitor for a node"""
     with patch('motor.controller.fault_tolerance.fault_manager.ResourceMonitor') as mock_monitor_class:
         mock_monitor = MagicMock()
         mock_monitor_class.return_value = mock_monitor
 
         # First create a monitor
-        fault_manager._create_resource_monitor_for_host("10.0.0.1")
-        assert "10.0.0.1" in fault_manager.resource_monitors
+        fault_manager._create_resource_monitor_for_node("node_0")
+        assert "node_0" in fault_manager.resource_monitors
 
         # Now stop it
-        fault_manager._stop_resource_monitor_for_host("10.0.0.1")
+        fault_manager._stop_resource_monitor_for_node("node_0")
 
         # Verify monitor was stopped and removed
         mock_monitor.stop_monitoring.assert_called_once()
-        assert "10.0.0.1" not in fault_manager.resource_monitors
+        assert "node_0" not in fault_manager.resource_monitors
 
 
 @pytest.mark.parametrize("fault", [FAULT_CM_DEVICE_L3_0x1234, FAULT_CM_SWITCH_L2_0x5678,],)
 def test_handle_configmap_update_with_faults_parametrized(fault_manager, fault):
     """Test handling ConfigMap update with device/switch faults (parametrized)."""
-    host_ip = "10.0.0.1"
-    fault_manager.nodes[host_ip] = NodeMetadata(pod_ip="192.168.1.1", host_ip=host_ip, instance_id=1)
+    node_name = "node_0"
+    fault_manager.nodes[node_name] = NodeMetadata(pod_ip="192.168.1.1", node_name=node_name, instance_id=1)
 
-    fault_manager._handle_fault_info_update([fault], host_ip)
-    node = fault_manager.nodes[host_ip]
+    fault_manager._handle_fault_info_update([fault], node_name)
+    node = fault_manager.nodes[node_name]
     assert len(node.fault_infos) == 1
     _assert_fault_info(
         next(iter(node.fault_infos.values())),
@@ -882,14 +912,14 @@ def test_handle_configmap_update_with_faults_parametrized(fault_manager, fault):
 def test_handle_node_status_update_adds_node_reboot_fault_with_L6(fault_manager):
     """Test that node NOT_READY adds a NODE_REBOOT fault with level L6"""
     # Setup: Add a node to the manager
-    host_ip = "10.0.0.1"
-    fault_manager.nodes[host_ip] = NodeMetadata(
-        pod_ip="192.168.1.1", host_ip=host_ip, instance_id=1
+    node_name = "node_0"
+    fault_manager.nodes[node_name] = NodeMetadata(
+        pod_ip="192.168.1.1", node_name=node_name, instance_id=1
     )
-    fault_manager._handle_node_status_update(NodeStatus.NOT_READY, host_ip)
+    fault_manager._handle_node_status_update(NodeStatus.NOT_READY, node_name)
 
     # Verify NODE_REBOOT fault exists and has level L6
-    node = fault_manager.nodes[host_ip]
+    node = fault_manager.nodes[node_name]
     assert SpecialFaultCode.NODE_REBOOT in node.fault_infos
     reboot_fault = node.fault_infos[SpecialFaultCode.NODE_REBOOT]
     assert reboot_fault.fault_level == FaultLevel.L6
@@ -944,7 +974,7 @@ def test_refresh_instance_fault_level_with_device_faults(fault_manager_with_inst
     manager = fault_manager_with_instances
 
     # Set up node with device fault
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.fault_infos = {FAULT_DEVICE_L3.fault_code: FAULT_DEVICE_L3}
 
     instance = manager.instances[1]
@@ -979,7 +1009,7 @@ def test_refresh_instance_fault_level_with_l2_faults(fault_manager_with_instance
     manager = fault_manager_with_instances
 
     # Set up node with L2 fault
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.fault_infos = {FAULT_DEVICE_L2.fault_code: FAULT_DEVICE_L2}
 
     instance = manager.instances[1]
@@ -1018,19 +1048,19 @@ def test_refresh_instance_fault_level_multiple_nodes(fault_manager_with_instance
     manager = fault_manager_with_instances
 
     # Set up node 1 with L2 fault
-    node1 = manager.nodes["10.0.0.1"]
+    node1 = manager.nodes["node_0"]
     node1.fault_infos = {FAULT_DEVICE_L2.fault_code: FAULT_DEVICE_L2}
 
     # Set up node 2 with L3 fault (higher level)
-    node2 = manager.nodes["10.0.0.2"]
+    node2 = manager.nodes["node_1"]
     node2.fault_infos = {FAULT_NODE_L3.fault_code: FAULT_NODE_L3}
 
     instance = manager.instances[1]
 
-    def mock_eval_node_status(host_ip):
-        if host_ip == "10.0.0.1":
+    def mock_eval_node_status(node_name):
+        if node_name == "node_0":
             return next(iter(node1.fault_infos.values()))
-        elif host_ip == "10.0.0.2":
+        elif node_name == "node_1":
             return next(iter(node2.fault_infos.values()))
         return None
 
@@ -1048,35 +1078,35 @@ def test_refresh_instance_fault_level_multiple_nodes(fault_manager_with_instance
 
 def test_eval_node_status_node_not_found(fault_manager):
     """Test _eval_node_status when node is not found"""
-    result = fault_manager._eval_node_status("nonexistent_host_ip")
+    result = fault_manager._eval_node_status("nonexistent_node_name")
     assert result is None
 
 
 def test_eval_node_status_healthy_node(fault_manager_with_instances):
     """Test _eval_node_status for a healthy node"""
     manager = fault_manager_with_instances
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.node_status = NodeStatus.READY
 
-    result = manager._eval_node_status("10.0.0.1")
+    result = manager._eval_node_status("node_0")
     assert result is None
 
 
 def test_eval_node_status_unhealthy_no_device_faults(fault_manager_with_instances):
     """Test _eval_node_status for unhealthy node with no device faults"""
     manager = fault_manager_with_instances
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.node_status = NodeStatus.READY  # Node is ready, but has no device faults
     node.fault_infos = {}
 
-    result = manager._eval_node_status("10.0.0.1")
+    result = manager._eval_node_status("node_0")
     assert result is None
 
 
 def test_eval_node_status_with_device_faults(fault_manager_with_instances):
     """Test _eval_node_status for unhealthy node with device faults"""
     manager = fault_manager_with_instances
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.node_status = NodeStatus.READY  # Node is ready, evaluate device faults
     fault_infos = [
         FAULT_DEVICE_L1_0x1000,
@@ -1085,7 +1115,7 @@ def test_eval_node_status_with_device_faults(fault_manager_with_instances):
     ]
     node.fault_infos = {fault.fault_code: fault for fault in fault_infos}
 
-    result = manager._eval_node_status("10.0.0.1")
+    result = manager._eval_node_status("node_0")
 
     # Should return the highest fault level (L3)
     _assert_fault_info(result, fault_level=FaultLevel.L3, fault_code=0x3000, fault_type=FaultType.NODE_UNHEALTHY)
@@ -1094,11 +1124,11 @@ def test_eval_node_status_with_device_faults(fault_manager_with_instances):
 def test_eval_node_status_single_device_fault(fault_manager_with_instances):
     """Test _eval_node_status for unhealthy node with single device fault"""
     manager = fault_manager_with_instances
-    node = manager.nodes["10.0.0.1"]
+    node = manager.nodes["node_0"]
     node.node_status = NodeStatus.READY  # Node is ready, evaluate device fault
     node.fault_infos = {FAULT_DEVICE_L2.fault_code: FAULT_DEVICE_L2}
 
-    result = manager._eval_node_status("10.0.0.1")
+    result = manager._eval_node_status("node_0")
 
     _assert_fault_info(result, fault_level=FaultLevel.L2, fault_code=0x2000, fault_type=FaultType.CARD_UNHEALTHY)
 

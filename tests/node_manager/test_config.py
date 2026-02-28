@@ -143,7 +143,6 @@ def test_init_success(mock_safe_open, config_data, hccl_data):
     assert config.basic_config.role == PDRole.ROLE_U
     assert config.basic_config.device_num == 8
     assert config.api_config.pod_ip == "127.0.0.1"
-    assert config.api_config.host_ip == "90.90.97.30"
 
     # Verify logging config
     assert config.logging_config.log_level == "DEBUG"
@@ -547,14 +546,12 @@ def test_get_config_summary():
     config.basic_config.model_name = "test_model"
     config.basic_config.role = PDRole.ROLE_U
     config.api_config.pod_ip = "127.0.0.1"
-    config.api_config.host_ip = "192.168.1.100"
 
     summary = config.get_config_summary()
 
     assert "8080" in summary
     assert "test_model" in summary
     assert "127.0.0.1" in summary
-    assert "192.168.1.100" in summary
 
 @patch.dict('os.environ', {'ROLE': 'both'})
 def test_from_json_success():

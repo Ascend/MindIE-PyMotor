@@ -38,24 +38,24 @@ class ResourceMonitor:
 
     def __init__(
         self,
-        host_ip: str,
+        node_name: str,
         namespace: str,
         configmap_name_prefix: str,
         node_change_handler: Callable[[NodeStatus, str], None] | None = None,
         configmap_change_handler: Callable[[list[FaultInfo], str], None] | None = None,
         retry_interval: int = 30
     ):
-        """ Initialize Resource monitor for a specific host
+        """ Initialize Resource monitor for a specific node
 
         Args:
-            host_ip: Host IP address to monitor
+            node_name: Kubernetes node name to monitor
             namespace: Namespace for ConfigMap monitoring
-            configmap_name_prefix: Prefix for ConfigMap name, will be combined with hostname
-            node_change_handler: Handler for node status changes, NodeStatus, host_ip
+            configmap_name_prefix: Prefix for ConfigMap name, will be combined with node_name
+            node_change_handler: Handler for node status changes, NodeStatus, node_name
             configmap_change_handler: Handler for processed fault info updates, list[FaultInfo]
             retry_interval: Retry interval in seconds for failed monitoring
         """
-        self.host_ip = host_ip
+        self.node_name = node_name
         self.namespace = namespace
         self.configmap_name_prefix = configmap_name_prefix
         self.node_change_handler = node_change_handler
@@ -65,14 +65,11 @@ class ResourceMonitor:
         self.stop_event = threading.Event()
         self.monitor_threads: list[threading.Thread] = []
 
-        # Cache for last processed fault information for each ConfigMap
-        self.last_fault_infos_cache: dict[str, list[FaultInfo]] = {}
+        # Cache for last processed fault information
+        self.last_fault_infos: list[FaultInfo] | None = None
 
-        # Cache for last processed node status for each hostname
-        self.last_node_status_cache: dict[str, NodeStatus] = {}
-
-        # Initialize Kubernetes client for hostname lookup
-        self.k8s_client = K8sClient()
+        # Cache for last processed node status
+        self.last_node_status: NodeStatus | None = None
 
         # Load Kubernetes configuration
         try:
@@ -105,30 +102,26 @@ class ResourceMonitor:
             return NodeStatus.NOT_READY
 
     def start_monitoring(self) -> None:
-        """ Start monitoring both Node and ConfigMap for this host """
+        """ Start monitoring both Node and ConfigMap for this node """
         if not hasattr(self, 'v1') or self.v1 is None:
-            logger.error("Resource monitoring not available for host %s", self.host_ip)
+            logger.error("Resource monitoring not available for node %s", self.node_name)
             return
 
-        hostname = self.k8s_client.get_node_hostname_by_ip(self.host_ip)
-        if hostname is None:
-            logger.error("Cannot start Resource monitor for host %s: hostname not found", self.host_ip)
-            return
-
-        logger.info("Starting Resource monitor for host %s (%s)", self.host_ip, hostname)
+        node_name = self.node_name
+        logger.info("Starting Resource monitor for node %s", node_name)
 
         # Start Node monitoring thread
         node_thread = threading.Thread(
             target=self._monitor_node,
             daemon=True,
-            name=f"ResourceMonitor-Node-{hostname}"
+            name=f"ResourceMonitor-Node-{node_name}"
         )
         node_thread.start()
         self.monitor_threads.append(node_thread)
-        logger.info("Started Node monitoring for %s", hostname)
+        logger.info("Started Node monitoring for %s", node_name)
 
         # Start ConfigMap monitoring thread
-        configmap_name = f"{self.configmap_name_prefix}{hostname}"
+        configmap_name = f"{self.configmap_name_prefix}{node_name}"
         cm_thread = threading.Thread(
             target=self._monitor_configmap,
             args=(configmap_name,),
@@ -139,11 +132,11 @@ class ResourceMonitor:
         self.monitor_threads.append(cm_thread)
         logger.info("Started ConfigMap monitoring for %s/%s", self.namespace, configmap_name)
 
-        logger.info("Resource monitor started for host %s", self.host_ip)
+        logger.info("Resource monitor started for node %s", node_name)
 
     def stop_monitoring(self) -> None:
-        """ Stop monitoring for this host """
-        logger.info("Stopping Resource monitor for host %s", self.host_ip)
+        """ Stop monitoring for this node """
+        logger.info("Stopping Resource monitor for node %s", self.node_name)
         self.stop_event.set()
 
         # Wait for all monitoring threads to finish
@@ -154,7 +147,7 @@ class ResourceMonitor:
                     logger.warning("Thread %s did not stop within timeout", thread.name)
 
         self.monitor_threads.clear()
-        logger.info("Resource monitor stopped for host %s", self.host_ip)
+        logger.info("Resource monitor stopped for node %s", self.node_name)
 
     def is_alive(self) -> bool:
         """ Check if the Resource monitor is alive and functioning """
@@ -174,11 +167,8 @@ class ResourceMonitor:
         return any(thread.is_alive() for thread in self.monitor_threads)
 
     def _monitor_node(self) -> None:
-        """ Monitor Node status changes for this host """
-        hostname = self.k8s_client.get_node_hostname_by_ip(self.host_ip)
-        if hostname is None:
-            logger.error("Cannot monitor Node for host %s: hostname not found", self.host_ip)
-            return
+        """ Monitor Node status changes for this node """
+        node_name = self.node_name
 
         while not self.stop_event.is_set():
             try:
@@ -186,7 +176,7 @@ class ResourceMonitor:
 
                 # Monitor Node changes
                 for event in w.stream(self.v1.list_node,
-                                      field_selector=f"metadata.name={hostname}"):
+                                      field_selector=f"metadata.name={node_name}"):
                     if self.stop_event.is_set():
                         w.stop()
                         break
@@ -197,7 +187,7 @@ class ResourceMonitor:
                     self._handle_node_change(event_type, node)
 
             except Exception as e:
-                logger.error("Error monitoring Node %s: %s", hostname, e)
+                logger.error("Error monitoring Node %s: %s", node_name, e)
                 if not self.stop_event.is_set():
                     logger.info("Retrying Node monitoring in %s seconds...", self.retry_interval)
                     time.sleep(self.retry_interval)
@@ -240,29 +230,28 @@ class ResourceMonitor:
         node_status = self._get_node_ready_status(node)
 
         # Call the node change handler
-        hostname = self.k8s_client.get_node_hostname_by_ip(self.host_ip)
+        node_name = self.node_name
         if self.node_change_handler:
             try:
                 if event_type in ['ADDED', 'MODIFIED']:
                     # Check if node status has actually changed (ignore duplicate status updates)
-                    node_key = node.metadata.name  # Use node name as cache key
-                    if self._has_node_status_changed(node_key, node_status):
-                        logger.info("Node %s status changed to: %s", hostname or self.host_ip, node_status)
-                        self.last_node_status_cache[node_key] = node_status  # Update cache
-                        self.node_change_handler(node_status, self.host_ip)
+                    if node_status != self.last_node_status:
+                        logger.info("Node %s status changed to: %s", node_name, node_status)
+                        self.last_node_status = node_status  # Update cache
+                        self.node_change_handler(node_status, node_name)
                     else:
                         logger.debug("Node status unchanged, skipping duplicate processing")
                 elif event_type == 'DELETED':
                     logger.warning("Node %s was deleted", node.metadata.name)
                     # Node deletion is always processed (reset cache)
-                    self.last_node_status_cache.pop(node.metadata.name, None)
+                    self.last_node_status = None
                     # Node deleted means not ready
-                    self.node_change_handler(NodeStatus.NOT_READY, self.host_ip)
+                    self.node_change_handler(NodeStatus.NOT_READY, node_name)
 
             except Exception as e:
-                logger.error("Error in node status change handler for %s: %s", hostname or self.host_ip, e)
+                logger.error("Error in node status change handler for %s: %s", node_name, e)
         else:
-            logger.warning("No node change handler configured for host %s", self.host_ip)
+            logger.warning("No node change handler configured for node %s", self.node_name)
 
     def _handle_configmap_change(self, event_type: str, configmap, configmap_name: str) -> None:
         """
@@ -287,35 +276,33 @@ class ResourceMonitor:
                     fault_infos = self._process_configmap_data(data)
 
                     # Check if fault information has actually changed (ignore time-only updates)
-                    if self._has_fault_info_changed(configmap_name, fault_infos):
+                    if self._has_fault_info_changed(fault_infos):
                         logger.info("Fault information changed, processing ConfigMap update")
-                      
-                        self.last_fault_infos_cache[configmap_name] = fault_infos.copy()  # Update cache
-                        self.configmap_change_handler(fault_infos, self.host_ip)
+                        self.last_fault_infos = fault_infos.copy()  # Update cache
+                        self.configmap_change_handler(fault_infos, self.node_name)
                     else:
                         logger.debug("Fault information unchanged, skipping duplicate processing")
                 elif event_type == 'DELETED':
                     logger.warning("ConfigMap %s was deleted", cm_metadata.name)
                     # ConfigMap deleted means no fault information available
-                    self.last_fault_infos_cache.pop(configmap_name, None)  # Reset cache on deletion
-                    self.configmap_change_handler([], self.host_ip)
+                    self.last_fault_infos = None  # Reset cache on deletion
+                    self.configmap_change_handler([], self.node_name)
 
             except Exception as e:
                 logger.error("Error in configmap change handler for %s: %s", cm_metadata.name, e)
         else:
-            logger.warning("No configmap change handler configured for host %s", self.host_ip)
+            logger.warning("No configmap change handler configured for node %s", self.node_name)
 
-    def _has_fault_info_changed(self, configmap_name: str, new_fault_infos: list[FaultInfo]) -> bool:
+    def _has_fault_info_changed(self, new_fault_infos: list[FaultInfo]) -> bool:
         """
-        Check if the fault information has actually changed compared to the last processed data for this ConfigMap.
-        Will return True if fault information has changed or this is the first time processing this ConfigMap.
+        Check if the fault information has actually changed compared to the last processed data.
+        Will return True if fault information has changed or this is the first time processing.
         """
-        last_fault_infos = self.last_fault_infos_cache.get(configmap_name)
-        if last_fault_infos is None:
-            return True  # First time processing this ConfigMap
+        if self.last_fault_infos is None:
+            return True  # First time processing
 
         # Compare fault info lists (FaultInfo is a dataclass, so we can compare directly)
-        if len(new_fault_infos) != len(last_fault_infos):
+        if len(new_fault_infos) != len(self.last_fault_infos):
             return True  # Different number of faults
 
         # Sort both lists by fault attributes for consistent comparison
@@ -323,20 +310,9 @@ class ResourceMonitor:
             return (fault.fault_type, fault.npu_name, fault.fault_code, fault.fault_level)
 
         sorted_new = sorted(new_fault_infos, key=sort_key)
-        sorted_last = sorted(last_fault_infos, key=sort_key)
+        sorted_last = sorted(self.last_fault_infos, key=sort_key)
 
         return sorted_new != sorted_last
-
-    def _has_node_status_changed(self, hostname: str, new_node_status: NodeStatus) -> bool:
-        """
-        Check if the node status has actually changed compared to the last processed status for this hostname.
-        Will return True if node status has changed or this is the first time processing this hostname.
-        """
-        last_node_status = self.last_node_status_cache.get(hostname)
-        if last_node_status is None:
-            return True  # First time processing this hostname
-
-        return new_node_status != last_node_status
 
     def _process_configmap_data(self, config_data: dict[str, Any]) -> list[FaultInfo]:
         """ Process ConfigMap configuration data and extract fault information """
@@ -372,7 +348,7 @@ class ResourceMonitor:
                 logger.debug("ConfigMap data is not in expected configuration format")
 
         except Exception as e:
-            logger.error("Error processing ConfigMap data for host %s: %s", self.host_ip, e)
+            logger.error("Error processing ConfigMap data for node %s: %s", self.node_name, e)
 
-        logger.debug("Total processed %d fault infos for host %s", len(fault_infos), self.host_ip)
+        logger.debug("Total processed %d fault infos for node %s", len(fault_infos), self.node_name)
         return fault_infos

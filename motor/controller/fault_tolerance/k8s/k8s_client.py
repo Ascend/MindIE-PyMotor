@@ -32,26 +32,23 @@ class K8sClient:
             except Exception as e2:
                 logger.warning("Failed to load Kubernetes config: %s, %s", e, e2)
 
-    def get_node_hostname_by_ip(self, host_ip: str) -> str | None:
-        """ Get Kubernetes node hostname by host IP """
+    def get_node_hostname_by_pod_ip(self, pod_ip: str) -> str | None:
+        """Get Kubernetes node hostname (nodeName) by Pod IP"""
         if self.v1 is None:
             logger.warning("Kubernetes client not available, cannot get node hostname")
             return None
 
         try:
-            # List all nodes
-            nodes = self.v1.list_node()
-            for node in nodes.items:
-                # Check node internal IP addresses
-                addresses = node.status.addresses or []
-                for address in addresses:
-                    if address.type == "InternalIP" and address.address == host_ip:
-                        # Return node name (hostname)
-                        return node.metadata.name
-            logger.warning("Node with IP %s not found in Kubernetes cluster", host_ip)
+            # Find Pod by IP and return its nodeName
+            pods = self.v1.list_pod_for_all_namespaces(field_selector=f"status.podIP={pod_ip}")
+            for pod in pods.items:
+                node_name = getattr(pod.spec, "node_name", None)
+                if node_name:
+                    return node_name
+            logger.warning("Pod with IP %s not found in Kubernetes cluster", pod_ip)
             return None
         except Exception as e:
-            logger.error("Error getting node hostname for IP %s: %s", host_ip, e)
+            logger.error("Error getting node hostname for Pod IP %s: %s", pod_ip, e)
             return None
 
     def is_available(self) -> bool:

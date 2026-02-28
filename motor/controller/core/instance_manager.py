@@ -274,31 +274,28 @@ class InstanceManager(ThreadSafeSingleton):
         with self.ins_lock:
             return len(self.instances)
 
-    # Get all instances with the status of 'ACTION'
-    def get_active_instances(self) -> list[Instance]:
+    def get_active_instances(self) -> list[ReadOnlyInstance]:
         active_instances = []
         with self.ins_lock:
             for instance in self.instances.values():
                 if instance.status == InsStatus.ACTIVE:
-                    active_instances.append(instance)
+                    active_instances.append(ReadOnlyInstance(instance))
         return active_instances
 
-    # Get all instances with the status of 'INITIAL'
-    def get_initial_instances(self) -> list[Instance]:
+    def get_initial_instances(self) -> list[ReadOnlyInstance]:
         initial_instances = []
         with self.ins_lock:
             for instance in self.instances.values():
                 if instance.status == InsStatus.INITIAL:
-                    initial_instances.append(instance)
+                    initial_instances.append(ReadOnlyInstance(instance))
         return initial_instances
 
-    # Get all instances with the status of 'INACTIVE'
-    def get_inactive_instances(self) -> list[Instance]:
+    def get_inactive_instances(self) -> list[ReadOnlyInstance]:
         inactive_instances = []
         with self.ins_lock:
             for instance in self.instances.values():
                 if instance.status == InsStatus.INACTIVE:
-                    inactive_instances.append(instance)
+                    inactive_instances.append(ReadOnlyInstance(instance))
         return inactive_instances
 
     def add_instance(self, ins: Instance):
