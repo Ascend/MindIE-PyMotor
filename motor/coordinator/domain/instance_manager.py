@@ -269,20 +269,26 @@ class InstanceManager:
     async def refresh_instances(self, event_type: EventType, instances: list[Instance]) -> bool:
         """Apply instance refresh; return True if pools were modified (for Scheduler notify)."""
         async with self._lock:
+            # Log instance change summary: event type, count, and instance ids
+            change_summary = [(inst.id, getattr(inst, "role", None)) for inst in instances]
             logger.info(
-                "Refresh instances with event type: %s, number of instances: %d",
-                event_type, len(instances),
+                "Refresh instances: event_type=%s, count=%d, instance_ids=%s",
+                event_type, len(instances), change_summary,
             )
             if event_type == EventType.ADD:
-                self._add_instances(instances)
-                return len(instances) > 0
-            if event_type == EventType.DEL:
-                self._delete_instances(instances)
-                return len(instances) > 0
-            if event_type == EventType.SET:
-                return self._apply_set_diff(instances)
-            logger.error("Unknown event type: %s, cannot refresh instances", event_type)
-            return False
+                result = self._add_instances(instances)
+            elif event_type == EventType.DEL:
+                result = self._delete_instances(instances)
+            elif event_type == EventType.SET:
+                result = self._apply_set_diff(instances)
+            else:
+                logger.error("Unknown event type: %s, cannot refresh instances", event_type)
+                result = False
+            logger.info(
+                "Refresh instances done: P=%d, D=%d, U=%d",
+                len(self._prefill_pool), len(self._decode_pool), len(self._hybrid_pool),
+            )
+            return result
 
     def _find_available_pool(self, instance_id: int) -> dict[int, Instance] | None:
         # This is a private method that should only be called within locked contexts
@@ -291,8 +297,10 @@ class InstanceManager:
             return None
         return self._available_role_pools.get(_role_to_pdrole(instance.role))
 
-    def _add_instances(self, instances: list[Instance]) -> None:
+    def _add_instances(self, instances: list[Instance]) -> bool:
+        """Add instances to pool. Return True if at least one instance was actually added (pool modified)."""
         # This is a private method that should only be called within locked contexts
+        modified = False
         for instance in instances:
             if instance.id in self._unavailable_pool:
                 logger.warning("Instance ID %d (role: %s, job_name: %s) already exists in unavailable pool, "
@@ -305,6 +313,7 @@ class InstanceManager:
                                instance.id, instance.role, instance.job_name)
                 continue
 
+            modified = True
             # Initialize workload info
             instance.gathered_workload = Workload()
             for pod_eps in (instance.endpoints or {}).values():
@@ -316,23 +325,31 @@ class InstanceManager:
                 "Added instance ID %d (role: %s, job_name: %s) with %d endpoints to available pool successfully",
                 instance.id, instance.role, instance.job_name, num_endpoints,
             )
+        return modified
 
-    def _delete_instances(self, instances: list[Instance]) -> None:
+    def _delete_instances(self, instances: list[Instance]) -> bool:
+        """Delete instances from pool. Return True if at least one instance was actually deleted (pool modified)."""
         # This is a private method that should only be called within locked contexts
+        modified = False
         for instance in instances:
             if instance.id in self._unavailable_pool:
                 del self._unavailable_pool[instance.id]
+                modified = True
                 logger.info("Deleted instance ID %d (role: %s, job_name: %s) from unavailable pool successfully",
                             instance.id, instance.role, instance.job_name)
                 continue
 
-            if not self._delete_instance_from_available_pool(instance.id):
+            if self._delete_instance_from_available_pool(instance.id):
+                modified = True
+            else:
                 logger.warning("Instance ID %d (role: %s, job_name: %s) not found in instance pool, "
                                "cannot delete instance",
                                instance.id, instance.role, instance.job_name)
+                continue
 
             logger.info("Deleted instance ID %d (role: %s, job_name: %s) from available pool successfully",
                         instance.id, instance.role, instance.job_name)
+        return modified
 
     def _compute_set_diff(self, instances: list[Instance]) -> tuple[list[Instance], list[Instance]]:
         """Compute to_add and to_remove for SET: (ids in new not in current, ids in current not in new).

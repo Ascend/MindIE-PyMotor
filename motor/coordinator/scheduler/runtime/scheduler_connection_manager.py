@@ -114,6 +114,11 @@ class SchedulerConnectionManager:
                 await asyncio.sleep(_CONNECT_RETRY_SLEEP)
         logger.error("Failed to connect to scheduler process after retries")
 
+    async def ensure_connected(self) -> None:
+        if self._connected:
+            return
+        await self.connect()
+
     async def disconnect(self) -> None:
         """Disconnect Scheduler client (idempotent: only first call does work)."""
         if not self._client or not self._connected:
@@ -127,5 +132,5 @@ class SchedulerConnectionManager:
             self._connected = False
 
     def get_client(self):
-        """Return current SchedulerClient instance; may be None."""
-        return self._client
+        """Return current SchedulerClient when connected; None otherwise."""
+        return self._client if self._connected else None

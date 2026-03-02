@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from threading import Lock
+
 from motor.common.resources.instance import Instance, PDRole
 from motor.common.resources.endpoint import Endpoint
 from motor.coordinator.domain import InstanceProvider
@@ -22,13 +24,16 @@ class RoundRobinPolicy(BaseSchedulingPolicy):
     """
     Round Robin Scheduler Policy implementation.
     Selects instances and endpoints in a round-robin fashion.
+    Uses per-role instance counters so P and D are round-robin'd independently.
     """
 
     def __init__(self, instance_provider: InstanceProvider):
         super().__init__(instance_provider=instance_provider)
         self._instance_provider = instance_provider
-        self._instance_rr_counter = 0
-        self._endpoint_rr_counters: dict[str, int] = {}
+        self._instance_rr_counters: dict[PDRole | None, int] = {}
+        self._endpoint_rr_counters: dict[int | str, int] = {}
+        self._instance_lock = Lock()
+        self._endpoint_lock = Lock()
         logger.info("RoundRobinPolicy started.")
 
     @staticmethod
@@ -81,16 +86,21 @@ class RoundRobinPolicy(BaseSchedulingPolicy):
     def _select_instance(self, role: PDRole = None) -> Instance | None:
         """
         Select an instance using round-robin algorithm.
+        Uses per-role counter so P and D are round-robin'd independently.
         """
         active_instances = list(self._instance_provider.get_available_instances(role).values())
         if not active_instances:
             logger.warning("No active instances available for scheduling")
             return None
 
-        selected_instance, next_counter = RoundRobinPolicy.select_instance_from_list(
-            active_instances, self._instance_rr_counter
-        )
-        self._instance_rr_counter = next_counter % len(active_instances)
+        if role not in self._instance_rr_counters:
+            self._instance_rr_counters[role] = 0
+        with self._instance_lock:
+            counter = self._instance_rr_counters[role]
+            selected_instance, next_counter = RoundRobinPolicy.select_instance_from_list(
+                active_instances, counter
+            )
+            self._instance_rr_counters[role] = next_counter % len(active_instances)
         return selected_instance
 
     def _select_endpoint(self, instance: Instance) -> Endpoint | None:
@@ -112,7 +122,7 @@ class RoundRobinPolicy(BaseSchedulingPolicy):
             logger.warning(f"No endpoints available in instance {instance.id}")
             return None
 
-        # Reuse static method with instance's own counter dict
-        return RoundRobinPolicy.select_endpoint_from_instance(
-            instance, self._endpoint_rr_counters
-        )
+        with self._endpoint_lock:
+            return RoundRobinPolicy.select_endpoint_from_instance(
+                instance, self._endpoint_rr_counters
+            )

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 import anyio
 
 from motor.common.resources.instance import PDRole
+from motor.coordinator.tracer.tracing import TraceObj
 
 
 class RequestType(Enum):
@@ -49,6 +50,7 @@ class RequestInfo(BaseModel):
     api: str = Field(..., description="API need to be forwarded")
     state: ReqState = Field(default=ReqState.ARRIVE, description="Request current status")
     status: dict[ReqState, float] = Field(default={}, description="Request status time")
+    trace_obj: TraceObj = Field(default_factory=TraceObj, description="Tracing object")
     _p_cancel_scope: anyio.CancelScope | None = PrivateAttr(default=None)
     _d_cancel_scope: anyio.CancelScope | None = PrivateAttr(default=None)
 

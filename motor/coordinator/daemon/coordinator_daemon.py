@@ -27,7 +27,6 @@ from motor.coordinator.process.constants import (
     PROCESS_KEY_INFERENCE,
     PROCESS_KEY_MGMT,
     PROCESS_KEY_SCHEDULER,
-    START_ORDER,
     STOP_ORDER,
 )
 from motor.coordinator.process.inference_manager import (
@@ -44,7 +43,11 @@ logger = get_logger(__name__)
 
 
 class CoordinatorDaemon:
-    """Coordinator daemon: starts and monitors Mgmt / Scheduler / Infer processes."""
+    """Coordinator daemon: starts and monitors Mgmt / Scheduler / Infer processes.
+
+    With master/standby enabled: Scheduler and Mgmt run on both nodes; only Inference
+    is started on master and stopped on standby (on_become_master / on_become_standby).
+    """
 
     def __init__(self, config: CoordinatorConfig):
         self.config = config
@@ -67,21 +70,27 @@ class CoordinatorDaemon:
             daemon_pid,
         )
 
+        # Scheduler always first (both master and standby); Mgmt can then connect to it.
+        self._start_processes([PROCESS_KEY_SCHEDULER])
+
         if self.config.standby_config.enable_master_standby:
             self._standby_manager = StandbyManager(self.config)
             self._standby_manager.start(
-                on_become_master=self._start_all_processes,
-                on_become_standby=self._stop_all_processes_except_mgmt,
+                on_become_master=self._start_inference_only,
+                on_become_standby=self._stop_inference_only,
             )
             is_master_provider = self._is_master_via_standby
         else:
-            self._start_all_processes()
+            self._start_processes([PROCESS_KEY_INFERENCE])
             is_master_provider = None
             # Non-standby: still write heartbeat if configured, so Mgmt can detect Daemon liveness
             sc = self.config.standby_config
             if float(getattr(sc, "role_heartbeat_interval_sec", 0) or 0) > 0:
                 self._heartbeat_writer = DaemonHeartbeatWriter(sc)
                 self._heartbeat_writer.start()
+
+        # Mgmt always runs last (readiness/metrics; after Scheduler so connect() succeeds).
+        self._start_processes([PROCESS_KEY_MGMT])
 
         self._supervisor = SubprocessSupervisor(
             self._process_managers,
@@ -109,9 +118,15 @@ class CoordinatorDaemon:
                 self._heartbeat_writer.stop()
                 self._heartbeat_writer = None
 
-    def _stop_all_processes_except_mgmt(self) -> None:
-        """Stop all processes except Mgmt (used when becoming standby)."""
-        self._stop_all_processes(exclude_processes={PROCESS_KEY_MGMT})
+    def _start_inference_only(self) -> None:
+        """Start only Inference (used when becoming master; Scheduler and Mgmt already running)."""
+        self._start_processes([PROCESS_KEY_INFERENCE])
+
+    def _stop_inference_only(self) -> None:
+        """Stop only Inference (used when becoming standby); keep Mgmt and Scheduler."""
+        self._stop_all_processes(
+            exclude_processes={PROCESS_KEY_MGMT, PROCESS_KEY_SCHEDULER}
+        )
 
     def _initialize_process_managers(self) -> None:
         """Initialize Mgmt / Scheduler / Infer process managers."""
@@ -132,9 +147,9 @@ class CoordinatorDaemon:
         else:
             logger.warning("Shared socket not available, inference workers disabled")
 
-    def _start_all_processes(self) -> None:
-        """Start in order: Scheduler, sleep(2), Mgmt, Infer."""
-        for name in START_ORDER:
+    def _start_processes(self, names: list[str]) -> None:
+        """Start given process managers in order; sleep(2) after Scheduler."""
+        for name in names:
             mgr = self._process_managers.get(name)
             if mgr is None:
                 continue

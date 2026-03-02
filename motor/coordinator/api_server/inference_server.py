@@ -41,6 +41,7 @@ from motor.coordinator.models.request import RequestType
 from motor.coordinator.domain import InstanceReadiness
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.coordinator.router.router import handle_request, handle_metaserver_request
+from motor.coordinator.tracer.tracing import TracerManager
 
 logger = get_logger(__name__)
 
@@ -131,6 +132,7 @@ class InferenceServer(BaseCoordinatorServer):
     async def _lifespan(self, app: FastAPI):
         logger.info("Inference server is starting...")
         app.state.request_manager = self._request_manager
+        TracerManager(self.coordinator_config)
         await self._scheduler_connection.connect()
         try:
             yield
@@ -141,6 +143,10 @@ class InferenceServer(BaseCoordinatorServer):
             raise
         finally:
             logger.info("Inference server is shutting down...")
+            try:
+                TracerManager().shutdown()
+            except Exception as e:
+                logger.warning("TracerManager shutdown during lifespan: %s", e)
             await self._scheduler_connection.disconnect()
 
     async def handle_metaserver_request(self, request: Request):

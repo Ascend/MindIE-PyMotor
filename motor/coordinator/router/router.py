@@ -30,6 +30,7 @@ import httpx
 from motor.config.coordinator import CoordinatorConfig, DeployMode
 from motor.coordinator.models.request import RequestInfo
 from motor.coordinator.domain import InstanceReadiness
+from motor.coordinator.tracer.tracing import TracerManager
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.coordinator.router.base_router import BaseRouter
 from motor.common.resources.instance import PDRole
@@ -127,6 +128,9 @@ async def handle_request(
     """
 
     req_info = await __create_request_info(raw_request, request_manager)
+
+    if TracerManager().contains_trace_headers(raw_request.headers):
+        req_info.trace_obj.parent_context = TracerManager().extract_trace_context(raw_request.headers)
 
     if scheduler is None:
         raise HTTPException(

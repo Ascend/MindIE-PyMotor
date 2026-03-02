@@ -10,8 +10,6 @@
 # See the Mulan PSL v2 for more details.
 from typing import Dict, AsyncGenerator, Any
 import asyncio
-from contextlib import nullcontext
-
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from motor.coordinator.models.request import ReqState
@@ -38,20 +36,16 @@ class PDHybridRouter(BaseRouter):
         """
         Handling hybrid streaming requests
         """
-        trace_obj = getattr(self.req_info, "trace_obj", None)
-        if trace_obj:
-            span_ctx = TracerManager().tracer.start_as_current_span(
-                "PDHybrid_stream", context=trace_obj.parent_context
-            )
-        else:
-            span_ctx = nullcontext(None)
+        trace_obj = self.req_info.trace_obj
+        span_ctx = TracerManager().tracer.start_as_current_span(
+            "PDHybrid_stream", context=trace_obj.parent_context
+        )
         with span_ctx as span:
-            if trace_obj:
-                trace_obj.set_time_start()
-                trace_obj.span = span
-                trace_obj.trace_headers = TracerManager().inject_trace_context()
-                trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
-                trace_obj.set_trace_attribute("stream", True)
+            trace_obj.set_time_start()
+            trace_obj.span = span
+            trace_obj.trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
+            trace_obj.set_trace_attribute("stream", True)
 
             self.logger.debug("Handling hybrid streaming request")
             max_retry = self.config.exception_config.max_retry
@@ -67,8 +61,7 @@ class PDHybridRouter(BaseRouter):
                             yield chunk
 
                         self.req_info.update_state(ReqState.DECODE_END)
-                        if trace_obj:
-                            self.logger.info(trace_obj.set_end_and_ttft_ttot())
+                        self.logger.info(trace_obj.set_end_and_ttft_tpot())
                         return
                 except asyncio.CancelledError:
                     self.logger.debug("Stream request was cancelled")
@@ -82,8 +75,7 @@ class PDHybridRouter(BaseRouter):
                     # If chunk was already sent, cannot retry the HTTP stream.
                     # Send error chunk and terminate.
                     if self.first_chunk_sent or attempt == max_retry - 1:
-                        if trace_obj:
-                            trace_obj.set_trace_status(e)
+                        trace_obj.set_trace_status(e)
                         self.req_info.update_state(ReqState.EXCEPTION)
                         yield self._generate_streaming_error_chunk(e)
                         return
@@ -96,19 +88,15 @@ class PDHybridRouter(BaseRouter):
         """
         Handling hybrid non-streaming requests
         """
-        trace_obj = getattr(self.req_info, "trace_obj", None)
-        if trace_obj:
-            span_ctx = TracerManager().tracer.start_as_current_span(
-                "PDHybrid", context=trace_obj.parent_context
-            )
-        else:
-            span_ctx = nullcontext(None)
+        trace_obj = self.req_info.trace_obj
+        span_ctx = TracerManager().tracer.start_as_current_span(
+            "PDHybrid", context=trace_obj.parent_context
+        )
         with span_ctx as span:
-            if trace_obj:
-                trace_obj.span = span
-                trace_obj.trace_headers = TracerManager().inject_trace_context()
-                trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
-                trace_obj.set_trace_attribute("stream", False)
+            trace_obj.span = span
+            trace_obj.trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
+            trace_obj.set_trace_attribute("stream", False)
 
             self.logger.debug("Handling hybrid non-streaming request")
             max_retries = self.config.exception_config.max_retry
@@ -131,9 +119,8 @@ class PDHybridRouter(BaseRouter):
                 except Exception as e:
                     self.logger.error("Error in post (attempt %d/%d): %s", attempt + 1, max_retries, str(e))
 
+                    trace_obj.set_trace_exception(e)
                     if attempt < max_retries - 1:
-                        if trace_obj:
-                            trace_obj.set_trace_exception(e)
                         wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
                         self.logger.info("Retrying non-streaming request in %.2f seconds...", wait_time)
                         await asyncio.sleep(wait_time)

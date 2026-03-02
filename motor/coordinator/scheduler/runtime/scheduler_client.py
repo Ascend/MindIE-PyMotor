@@ -479,7 +479,7 @@ class AsyncSchedulerClient:
             config.scheduler_address, config.timeout, self._serializer
         )
         self._cache = _SchedulerInstanceCache()
-        self._request_counter = 0
+        self._instance_rr_counters: dict[PDRole, int] = {}
         self._endpoint_rr_counters: dict[int, int] = {}
         self._scheduler_type: str = config.scheduler_type or "round_robin"
         self._workload_reader = None
@@ -526,6 +526,7 @@ class AsyncSchedulerClient:
         cache_role = role if role is not None else PDRole.ROLE_U
         cached_instances = self._cache.get_instances(cache_role)
         if cached_instances:
+            # Cache stores instances sorted by id (see replace_all call sites); use as-is for RR
             selected = self._select_instance_and_endpoint_from_list(cached_instances, cache_role)
             if selected:
                 logger.debug("Selected instance from cache (role=%s, policy=%s)", role, self._scheduler_type)
@@ -534,7 +535,8 @@ class AsyncSchedulerClient:
         if not instances:
             return None
 
-        instance_list = list(instances.values())
+        # get_available_instances already wrote sorted list to cache; build sorted list once for this path
+        instance_list = sorted(instances.values(), key=lambda i: i.id)
         selected = self._select_instance_and_endpoint_from_list(instance_list, cache_role)
         if selected:
             logger.debug("Selected instance from fresh fetch (role=%s, policy=%s)", role, self._scheduler_type)
@@ -730,8 +732,11 @@ class AsyncSchedulerClient:
                         self._last_instance_version = None
 
             if instances:
+                # Store sorted by instance.id so round-robin order is stable without sorting on each select
                 if role is not None:
-                    await self._cache.replace_all(role, list(instances.values()))
+                    await self._cache.replace_all(
+                        role, sorted(instances.values(), key=lambda i: i.id)
+                    )
                 else:
                     role_to_list: dict[PDRole, list] = {
                         PDRole.ROLE_P: [],
@@ -752,7 +757,9 @@ class AsyncSchedulerClient:
                         if role_enum is not None:
                             role_to_list[role_enum].append(inst)
                     for r, lst in role_to_list.items():
-                        await self._cache.replace_all(r, lst)
+                        await self._cache.replace_all(
+                            r, sorted(lst, key=lambda i: i.id)
+                        )
 
             return instances
 
@@ -841,29 +848,27 @@ class AsyncSchedulerClient:
         if not instances:
             return None
         st = self._scheduler_type or "round_robin"
+        selected_instance = None
         if st == "load_balance":
             n = len(instances)
             start_index = (n * self._client_index) // self._client_count if n else 0
             selected_instance = LoadBalancePolicy.select_instance_from_list(
                 instances, role, start_index=start_index
             )
-            if selected_instance is None:
-                logger.warning("All instances failed workload calculation, falling back to round-robin")
-                n = len(instances)
-                start_offset = (n * self._client_index) // self._client_count if n else 0
-                effective_counter = self._request_counter + start_offset
-                selected_instance, _ = RoundRobinPolicy.select_instance_from_list(
-                    instances, effective_counter
-                )
-                self._request_counter += 1
-        else:
-            n = len(instances)
-            start_offset = (n * self._client_index) // self._client_count if n else 0
-            effective_counter = self._request_counter + start_offset
-            selected_instance, _ = RoundRobinPolicy.select_instance_from_list(
-                instances, effective_counter
-            )
-            self._request_counter += 1
+            if selected_instance is not None:
+                return self._select_endpoint_for_instance(selected_instance)
+            logger.warning("All instances failed workload calculation, falling back to round-robin")
+        # Round-robin path: default policy or load_balance fallback
+        if role not in self._instance_rr_counters:
+            self._instance_rr_counters[role] = 0
+        n = len(instances)
+        start_offset = (n * self._client_index) // self._client_count if n else 0
+        counter = self._instance_rr_counters[role]
+        effective_counter = counter + start_offset
+        selected_instance, next_counter = RoundRobinPolicy.select_instance_from_list(
+            instances, effective_counter
+        )
+        self._instance_rr_counters[role] = next_counter - start_offset
         if not selected_instance:
             return None
         return self._select_endpoint_for_instance(selected_instance)

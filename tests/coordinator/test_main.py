@@ -82,8 +82,8 @@ def test_daemon_stop_all_processes_no_exclude(mock_create_socket):
 
 
 @patch('motor.coordinator.daemon.coordinator_daemon.create_shared_socket')
-def test_daemon_start_all_processes_order(mock_create_socket):
-    """_start_all_processes starts in order: Scheduler -> Mgmt -> Infer, sleep(2) after Scheduler."""
+def test_stop_inference_only_stops_inference_only(mock_create_socket):
+    """_stop_inference_only stops only Inference; Mgmt and Scheduler are not stopped."""
     mock_create_socket.return_value = None
 
     mock_config = MagicMock()
@@ -93,9 +93,36 @@ def test_daemon_start_all_processes_order(mock_create_socket):
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()
-    mock_scheduler.start.return_value = True
     mock_mgmt = MagicMock()
-    mock_mgmt.start.return_value = True
+    mock_infer = MagicMock()
+
+    daemon = CoordinatorDaemon(mock_config)
+    daemon._process_managers = {
+        PROCESS_KEY_SCHEDULER: mock_scheduler,
+        PROCESS_KEY_MGMT: mock_mgmt,
+        PROCESS_KEY_INFERENCE: mock_infer,
+    }
+
+    daemon._stop_inference_only()
+
+    mock_infer.stop.assert_called_once()
+    mock_mgmt.stop.assert_not_called()
+    mock_scheduler.stop.assert_not_called()
+
+
+@patch('motor.coordinator.daemon.coordinator_daemon.create_shared_socket')
+def test_start_inference_only_starts_inference_only(mock_create_socket):
+    """_start_inference_only starts only Inference; Scheduler and Mgmt are not started."""
+    mock_create_socket.return_value = None
+
+    mock_config = MagicMock()
+    mock_config.standby_config.enable_master_standby = False
+    mock_config.http_config.coordinator_api_host = "0.0.0.0"
+    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.inference_workers_config.num_workers = 1
+
+    mock_scheduler = MagicMock()
+    mock_mgmt = MagicMock()
     mock_infer = MagicMock()
     mock_infer.start.return_value = True
 
@@ -106,12 +133,42 @@ def test_daemon_start_all_processes_order(mock_create_socket):
         PROCESS_KEY_INFERENCE: mock_infer,
     }
 
+    daemon._start_inference_only()
+
+    mock_infer.start.assert_called_once()
+    mock_scheduler.start.assert_not_called()
+    mock_mgmt.start.assert_not_called()
+
+
+@patch('motor.coordinator.daemon.coordinator_daemon.create_shared_socket')
+def test_start_processes_scheduler_then_inference_order(mock_create_socket):
+    """Non-standby flow: _start_processes([SCHEDULER]) then [INFERENCE] calls sleep(2) after Scheduler."""
+    mock_create_socket.return_value = None
+
+    mock_config = MagicMock()
+    mock_config.standby_config.enable_master_standby = False
+    mock_config.http_config.coordinator_api_host = "0.0.0.0"
+    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.inference_workers_config.num_workers = 1
+
+    mock_scheduler = MagicMock()
+    mock_scheduler.start.return_value = True
+    mock_infer = MagicMock()
+    mock_infer.start.return_value = True
+
+    daemon = CoordinatorDaemon(mock_config)
+    daemon._process_managers = {
+        PROCESS_KEY_SCHEDULER: mock_scheduler,
+        PROCESS_KEY_MGMT: MagicMock(),
+        PROCESS_KEY_INFERENCE: mock_infer,
+    }
+
     with patch('motor.coordinator.daemon.coordinator_daemon.time.sleep') as mock_sleep:
-        daemon._start_all_processes()
+        daemon._start_processes([PROCESS_KEY_SCHEDULER])
+        daemon._start_processes([PROCESS_KEY_INFERENCE])
 
     mock_scheduler.start.assert_called_once()
     mock_sleep.assert_called_once_with(2)
-    mock_mgmt.start.assert_called_once()
     mock_infer.start.assert_called_once()
 
 

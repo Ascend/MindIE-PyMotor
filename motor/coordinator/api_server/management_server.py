@@ -536,6 +536,7 @@ class ManagementServer(BaseCoordinatorServer):
                 detail=f"Invalid request format: {str(e)}",
             ) from e
 
+        await self._scheduler_connection.ensure_connected()
         client = self._scheduler_connection.get_client()
         if client is not None:
             await client.refresh_instances(event_msg.event, event_msg.instances)

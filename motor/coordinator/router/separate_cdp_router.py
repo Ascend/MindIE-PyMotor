@@ -23,6 +23,7 @@ from motor.coordinator.models.constants import CHAT_COMPLETION_PREFIX, COMPLETIO
 from motor.coordinator.models.constants import REQUEST_ID_KEY
 from motor.coordinator.models.request import ReqState
 from motor.coordinator.router.base_router import BaseRouter
+from motor.coordinator.tracer.tracing import TracerManager
 
 
 class SeparateCDPRouter(BaseRouter):
@@ -57,30 +58,42 @@ class SeparateCDPRouter(BaseRouter):
         """
         self.is_meta = True
         req_data = await self._gen_p_request()
+        trace_obj = self.req_info.trace_obj
+        headers = trace_obj.get_trace_headers_dict()
+        if headers:
+            trace_context = TracerManager().extract_trace_context(headers)
+        else:
+            trace_context = trace_obj.parent_context
+        span_ctx = TracerManager().tracer.start_as_current_span("CDP_Prefill", context=trace_context)
         t0_metaserver = time.perf_counter()
         try:
-            # Schedule Prefill instance and forward the request
-            async with self._manage_resource_context(PDRole.ROLE_P, self.release_all) as resource, \
-                       self._manage_client_context(resource) as client:
+            with span_ctx as span:
+                trace_obj.meta_span = span
+                trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+                trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
+                trace_obj.set_trace_attribute("stream", False, is_meta=True)
+                # Schedule Prefill instance and forward the request
+                async with self._manage_resource_context(PDRole.ROLE_P, self.release_all) as resource, \
+                           self._manage_client_context(resource) as client:
 
-                cancel_scope = anyio.CancelScope()
-                self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_P)
-                with cancel_scope:
-                    response = await self.forward_request(
-                            req_data, client, self.config.exception_config.first_token_timeout
+                    cancel_scope = anyio.CancelScope()
+                    self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_P)
+                    with cancel_scope:
+                        response = await self.forward_request(
+                                req_data, client, self.config.exception_config.first_token_timeout
+                            )
+                        resp_json = response.json()
+
+                        self.logger.debug("Prefill response received: %s", resp_json)
+                        self.req_info.update_state(ReqState.PREFILL_END)
+                        elapsed_ms = (time.perf_counter() - t0_metaserver) * 1000
+                        self.logger.info(
+                            "Scheduling latency stage=metaserver_request_total elapsed_ms=%.2f role=ROLE_P",
+                            elapsed_ms
                         )
-                    resp_json = response.json()
-
-                    self.logger.debug("Prefill response received: %s", resp_json)
-                    self.req_info.update_state(ReqState.PREFILL_END)
-                    elapsed_ms = (time.perf_counter() - t0_metaserver) * 1000
-                    self.logger.info(
-                        "Scheduling latency stage=metaserver_request_total elapsed_ms=%.2f role=ROLE_P",
-                        elapsed_ms
-                    )
-                    return resp_json
-                if self.req_info.is_cancelled:
-                    raise Exception("exception occurred in Decode request")
+                        return resp_json
+                    if self.req_info.is_cancelled:
+                        raise Exception("exception occurred in Decode request")
         except asyncio.CancelledError:
             self.logger.info("Metaserver request was cancelled")
             self.req_info.cancel_scope()
@@ -99,94 +112,116 @@ class SeparateCDPRouter(BaseRouter):
         """
         Handles streaming Decode requests
         """
-        self.logger.debug("Handling streaming Decode request")
-        max_retry = self.config.exception_config.max_retry
-        for attempt in range(max_retry):
-            try:
-                # Use context managers to ensure resource locking and client cleanup
-                async with self._manage_request_context(), \
-                        self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as resource, \
-                        self._manage_client_context(resource) as client:
+        trace_obj = self.req_info.trace_obj
+        span_ctx = TracerManager().tracer.start_as_current_span(
+            "CDP_Decode_stream", context=trace_obj.parent_context
+        )
+        with span_ctx as span:
+            trace_obj.set_time_start()
+            trace_obj.span = span
+            trace_obj.trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
+            trace_obj.set_trace_attribute("stream", True)
+            self.logger.debug("Handling streaming Decode request")
+            max_retry = self.config.exception_config.max_retry
+            for attempt in range(max_retry):
+                try:
+                    # Use context managers to ensure resource locking and client cleanup
+                    async with self._manage_request_context(), \
+                            self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as resource, \
+                            self._manage_client_context(resource) as client:
 
-                    cancel_scope = anyio.CancelScope()
-                    self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_D)
-                    with cancel_scope:
-                        async for chunk in self.forward_stream_request(
-                                req_data, client, self.config.exception_config.first_token_timeout
+                        cancel_scope = anyio.CancelScope()
+                        self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_D)
+                        with cancel_scope:
+                            async for chunk in self.forward_stream_request(
+                                    req_data, client, self.config.exception_config.first_token_timeout
                             ):
-                            yield chunk
+                                yield chunk
 
-                        self.req_info.update_state(ReqState.DECODE_END)
+                            self.req_info.update_state(ReqState.DECODE_END)
+                            self.logger.info(trace_obj.set_end_and_ttft_tpot())
+                            return
+                        if self.req_info.is_cancelled:
+                            raise Exception("exception occurred in Prefill request")
+                except asyncio.CancelledError:
+                    self.logger.info("The streaming request was terminated because of "
+                                    "infer timeout or client disconnect.")
+                    self.req_info.cancel_scope()
+                    raise
+                except Exception as e:
+                    self.logger.error(
+                        "Error in streaming Decode (attempt %d/%d): %s",
+                        attempt + 1, max_retry, str(e), exc_info=True
+                    )
+                    self.req_info.cancel_scope()
+
+                    # If chunk was already sent, cannot retry the HTTP stream.
+                    # Send error chunk and terminate.
+                    if self.first_chunk_sent or attempt == max_retry - 1:
+                        trace_obj.set_trace_status(e)
+                        self.req_info.update_state(ReqState.EXCEPTION)
+                        yield self._generate_streaming_error_chunk(e)
                         return
-                    if self.req_info.is_cancelled:
-                        raise Exception("exception occurred in Prefill request")
-            except asyncio.CancelledError:
-                self.logger.info("The streaming request was terminated because of "
-                                "infer timeout or client disconnect.")
-                self.req_info.cancel_scope()
-                raise
-            except Exception as e:
-                self.logger.error(
-                    "Error in streaming Decode (attempt %d/%d): %s",
-                    attempt + 1, max_retry, str(e), exc_info=True
-                )
-                self.req_info.cancel_scope()
 
-                # If chunk was already sent, cannot retry the HTTP stream.
-                # Send error chunk and terminate.
-                if self.first_chunk_sent or attempt == max_retry - 1:
-                    self.req_info.update_state(ReqState.EXCEPTION)
-                    yield self._generate_streaming_error_chunk(e)
-                    return
-
-                wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
-                self.logger.info("Retrying streaming request in %.2f seconds...", wait_time)
-                await asyncio.sleep(wait_time)
+                    wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
+                    self.logger.info("Retrying streaming request in %.2f seconds...", wait_time)
+                    await asyncio.sleep(wait_time)
 
     async def _generate_response(self, req_data: dict[str, Any]) -> JSONResponse:
         """
         Handles non-streaming Decode requests
         """
-        self.logger.debug("Handling non-streaming Decode request")
-        max_retries = self.config.exception_config.max_retry
-        for attempt in range(max_retries):
-            try:
-                async with self._manage_request_context(), \
-                        self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as resource, \
-                        self._manage_client_context(resource) as client:
+        trace_obj = self.req_info.trace_obj
+        span_ctx = TracerManager().tracer.start_as_current_span(
+            "CDP_Decode", context=trace_obj.parent_context
+        )
+        with span_ctx as span:
+            trace_obj.span = span
+            trace_obj.trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id)
+            trace_obj.set_trace_attribute("stream", False)
+            self.logger.debug("Handling non-streaming Decode request")
+            max_retries = self.config.exception_config.max_retry
+            for attempt in range(max_retries):
+                try:
+                    async with self._manage_request_context(), \
+                            self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as resource, \
+                            self._manage_client_context(resource) as client:
 
-                    cancel_scope = anyio.CancelScope()
-                    self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_D)
-                    with cancel_scope:
-                        response = await self.forward_request(
-                                req_data, client, self.config.exception_config.infer_timeout
-                            )
+                        cancel_scope = anyio.CancelScope()
+                        self.req_info.set_cancel_scope(cancel_scope, PDRole.ROLE_D)
+                        with cancel_scope:
+                            response = await self.forward_request(
+                                    req_data, client, self.config.exception_config.infer_timeout
+                                )
 
-                        self.req_info.update_state(ReqState.DECODE_END)
-                        return JSONResponse(content=response.json())
-                    if self.req_info.is_cancelled:
-                        raise Exception("exception occurred in Prefill request")
-            except asyncio.CancelledError:
-                self.logger.info("The non streaming request was terminated because of "
-                                "infer timeout or client disconnect.")
-                self.req_info.cancel_scope()
-                raise
-            except Exception as e:
-                self.logger.error(
-                    "Error in post Decode (attempt %d/%d): %s",
-                    attempt + 1, max_retries, str(e)
-                )
-                self.req_info.cancel_scope()
+                            self.req_info.update_state(ReqState.DECODE_END)
+                            return JSONResponse(content=response.json())
+                        if self.req_info.is_cancelled:
+                            raise Exception("exception occurred in Prefill request")
+                except asyncio.CancelledError:
+                    self.logger.info("The non streaming request was terminated because of "
+                                    "infer timeout or client disconnect.")
+                    self.req_info.cancel_scope()
+                    raise
+                except Exception as e:
+                    self.logger.error(
+                        "Error in post Decode (attempt %d/%d): %s",
+                        attempt + 1, max_retries, str(e)
+                    )
+                    self.req_info.cancel_scope()
+                    trace_obj.set_trace_exception(e)
 
-                if attempt < max_retries - 1:
-                    wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
-                    self.logger.info("Retrying non-streaming request in %.2f seconds...", wait_time)
-                    await asyncio.sleep(wait_time)
-                    continue
+                    if attempt < max_retries - 1:
+                        wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
+                        self.logger.info("Retrying non-streaming request in %.2f seconds...", wait_time)
+                        await asyncio.sleep(wait_time)
+                        continue
 
-                self.logger.error("All retries failed for non-streaming decode request.")
-                self.req_info.update_state(ReqState.EXCEPTION)
-                raise e
+                    self.logger.error("All retries failed for non-streaming decode request.")
+                    self.req_info.update_state(ReqState.EXCEPTION)
+                    raise e
 
     def _gen_d_request(self) -> dict:
         """Generate D request parameters.

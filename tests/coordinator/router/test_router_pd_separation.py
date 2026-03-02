@@ -582,36 +582,40 @@ class TestRouterPDSeparation:
                                                   monkeypatch: MonkeyPatch,
                                                   setup_pd_separation,
                                                   setup_forward_request):
-
-        with patch('motor.coordinator.router.base_router.httpx.AsyncClient', return_value=MockAsyncClient()):
+        # Router gets client via HTTPClientPool().get_client(), not httpx.AsyncClient.
+        # Use recomputed=False so the mock stream yields all 10 chunks without triggering
+        # early exit on stop_reason="recomputed" (which would yield only ",1,2").
+        mock_client = MockAsyncClient(recomputed=False)
+        mock_pool = MagicMock()
+        mock_pool.get_client = AsyncMock(return_value=mock_client)
+        with patch("motor.coordinator.router.base_router.HTTPClientPool", return_value=mock_pool):
             import json
             result = ""
             response = client.post("/v1/chat/completions", json={
-                "model": "qwen3", 
+                "model": "qwen3",
                 "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 10,
                 "stream": True
             })
             assert response.status_code == status.HTTP_200_OK
-            
+
             # Parse streaming response
             for chunk in response.iter_lines():
-                if not chunk: continue
-                
-                # Process SSE format data
+                if not chunk:
+                    continue
                 if chunk.startswith("data: "):
-                    chunk = chunk[6:]  # Remove "data: " prefix
+                    chunk = chunk[6:]
                 if chunk == "[DONE]":
                     break
                 try:
-                    chunk_json = json.loads(chunk)  # Validate if it's valid JSON
+                    chunk_json = json.loads(chunk)
                     if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
-                            delta = chunk_json["choices"][0].get("delta", {})
-                            if "content" in delta:
-                                result += delta["content"]
+                        delta = chunk_json["choices"][0].get("delta", {})
+                        if "content" in delta:
+                            result += delta["content"]
                 except json.JSONDecodeError:
                     continue
-        
+
             assert result == ",1,2,3,4,5,6,7,8,9,10"
 
             
@@ -620,31 +624,33 @@ class TestRouterPDSeparation:
                                                     monkeypatch: MonkeyPatch,
                                                     setup_pd_separation,
                                                     setup_forward_request):
-        
-        with patch('motor.coordinator.router.base_router.httpx.AsyncClient', return_value=MockAsyncClient()):
+        # Router gets client via HTTPClientPool().get_client(), not httpx.AsyncClient
+        mock_client = MockAsyncClient()
+        mock_pool = MagicMock()
+        mock_pool.get_client = AsyncMock(return_value=mock_client)
+        with patch("motor.coordinator.router.base_router.HTTPClientPool", return_value=mock_pool):
             import json
             result = ""
             response = client.post("/v1/chat/completions", json={
-                "model": "qwen3", 
+                "model": "qwen3",
                 "messages": [{"role": "user", "content": "Hello"}],
                 "max_tokens": 10,
                 "stream": False
             })
             assert response.status_code == status.HTTP_200_OK
-            
-            # Parse streaming response
+
             for chunk in response.iter_lines():
-                if not chunk: continue
-                
+                if not chunk:
+                    continue
                 try:
-                    chunk_json = json.loads(chunk)  # Validate if it's valid JSON
+                    chunk_json = json.loads(chunk)
                     if "choices" in chunk_json and len(chunk_json["choices"]) > 0:
-                            message = chunk_json["choices"][0].get("message", {})
-                            if "content" in message:
-                                result += message["content"]
+                        message = chunk_json["choices"][0].get("message", {})
+                        if "content" in message:
+                            result += message["content"]
                 except json.JSONDecodeError:
                     continue
-        
+
             assert result == ",1,2,3,4,5,6,7,8,9,10"
 
     @pytest.mark.asyncio
