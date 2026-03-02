@@ -18,23 +18,13 @@ VERBOSE=${VERBOSE:-0}
 
 # Clean up any existing build artifacts that might cause import issues.
 rm -rf build/
-rm -rf motor.egg-info/
 rm -rf dist/
 
-echo "Generating protobuf files..."
-./scripts/generate_proto.sh
-
-touch ./motor/version.info
-cat>./motor/version.info<<EOF
-motor_version : 1.0.0
-vllm_version : 0.13.0
-vllm_ascend_version : 0.13.0
-EOF
 
 echo "Building wheel package with pip wheel (PEP517)... (VERBOSE=${VERBOSE})"
 
 # Use pep517 build interface to avoid legacy setup.py warning.
-cmd=(python -m pip wheel . --no-deps --use-pep517 -w dist)
+cmd=(python setup.py sdist bdist_wheel)
 if [[ "${VERBOSE}" -eq 0 ]]; then
   cmd+=(-q) # quiet output by default
 fi

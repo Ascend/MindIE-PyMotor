@@ -124,6 +124,8 @@ spec:
               mountPath: /var/coredump
             - name: mnt
               mountPath: /mnt
+            - name: plog-path
+              mountPath: /root/ascend/log
       volumes:
         - name: motor-config
           configMap:
@@ -136,6 +138,10 @@ spec:
         - name: mnt
           hostPath:
             path: /mnt
+        - name: plog-path
+          hostPath:
+            path: /root/ascend/log
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service

@@ -37,11 +37,12 @@ class ConnectionMode(Enum):
 class SafeHTTPSClient:
     def __init__(self,
                  address: str,
+                 protocol: str = 'http://',
                  tls_config: Optional[TLSConfig] = None,
                  mode: ConnectionMode = ConnectionMode.SHORT,
                  timeout: float = 5):
 
-        self.protocol = 'http://'
+        self.protocol = protocol
         self.timeout = timeout
         self.session = requests.Session()
 

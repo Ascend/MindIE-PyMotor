@@ -56,6 +56,7 @@ SP_BLOCK = "sp-block"
 DATA = "data"
 NAME_FLAG = " -n "
 BOOT_SHELL_PATH = "./boot_helper/boot.sh"
+MOTOR_COMMON_ENV = "motor_common_env"
 KV_CACHE_POOL_CONFIG = "kv_cache_pool_config"
 KV_POOL_PORT = "port"
 KV_POOL_EVICTION_HIGH_WATERMARK_RATIO = "eviction_high_watermark_ratio"
@@ -181,7 +182,7 @@ def shell_escape(value):
 
 def update_shell_script_safely(script_path, env_config, component_key="", function_name="set_common_env"):
     all_env_vars = {}
-    all_env_vars.update(env_config["motor_common_env"])
+    all_env_vars.update(env_config[MOTOR_COMMON_ENV])
     if component_key and component_key in env_config:
         all_env_vars.update(env_config[component_key])
 
@@ -651,11 +652,43 @@ def exec_all_kubectl_multi(deploy_config, baseline_config, user_config_path):
         elastic_distributed_engine_deploy(deploy_config, baseline_deploy_config, out_deploy_yaml_path)
 
 
-def set_env_to_shell(deploy_config):
+def get_json_by_path(data, path, default=None):
+    keys = path.split(".")
+    current = data
+    for key in keys:
+        if isinstance(current, dict):
+            current = current.get(key)
+            if current is None:
+                return default
+        else:
+            return default
+    return current
+
+
+def set_env_to_shell(deploy_config, user_config):
     env_config_path = deploy_config.get("env_path", "./conf/env.json")
     if os.path.exists(env_config_path):
         env_config = read_json(env_config_path)
-        update_shell_script_safely(BOOT_SHELL_PATH, env_config, "motor_common_env", "set_common_env")
+
+        # Extract and add engine_type and model_name from user_config
+        engine_type = get_json_by_path(user_config, "motor_engine_prefill_config.engine_type", "Unknown")
+        model_name = get_json_by_path(user_config, "motor_engine_prefill_config.model_config.model_name", "Unknown")
+        north_platform = get_json_by_path(user_config, "north_config.name")
+
+        # Add to motor_common_env if not already present
+        if MOTOR_COMMON_ENV not in env_config:
+            env_config[MOTOR_COMMON_ENV] = {}
+
+        env_config[MOTOR_COMMON_ENV]["ENGINE_TYPE"] = engine_type
+        logger.info(f"Set ENGINE_TYPE environment variable to: {engine_type}")
+
+        env_config[MOTOR_COMMON_ENV]["MODEL_NAME"] = model_name
+        logger.info(f"Set MODEL_NAME environment variable to: {model_name}")
+
+        env_config[MOTOR_COMMON_ENV]["NORTH_PLATFORM"] = north_platform
+        logger.info(f"Set NORTH_PLATFORM environment variable to: {north_platform}")
+
+        update_shell_script_safely(BOOT_SHELL_PATH, env_config, MOTOR_COMMON_ENV, "set_common_env")
         update_shell_script_safely(BOOT_SHELL_PATH, env_config, "motor_controller_env", "set_controller_env")
         update_shell_script_safely(BOOT_SHELL_PATH, env_config, "motor_coordinator_env", "set_coordinator_env")
         update_shell_script_safely(BOOT_SHELL_PATH, env_config, "motor_engine_prefill_env", "set_prefill_env")
@@ -837,7 +870,7 @@ def get_deploy_paths(single_container_yaml_file):
 def deploy_services(user_config, deploy_config, user_config_path, single_container_yaml_file):
     update_kv_pool_enabled_flag(user_config)
     update_engine_base_name(user_config)
-    set_env_to_shell(deploy_config)
+    set_env_to_shell(deploy_config, user_config)
 
     paths = get_deploy_paths(single_container_yaml_file)
 

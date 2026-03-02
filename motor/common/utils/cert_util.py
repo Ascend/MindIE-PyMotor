@@ -39,6 +39,7 @@ SSL_MUST_KEYS = [CA_CERTS, TLS_CERT, TLS_KEY]
 
 MIN_RSA_LENGTH = 3072
 RSA_SHA_256 = "sha256WithRSAEncryption"
+RSA_SHA_384 = "sha384WithRSAEncryption"
 RSA_SHA_512 = "sha512WithRSAEncryption"
 
 # Common string constants to avoid duplicate magic literals
@@ -137,10 +138,10 @@ def validate_server_certs(server_cert: CryptoX509) -> bool:
         # 2. Check signature algorithm
         pkey_algorithm = server_cert.get_signature_algorithm()
         pkey_algorithm = pkey_algorithm.decode(decode_format)
-        if pkey_algorithm not in [RSA_SHA_256, RSA_SHA_512]:
+        if pkey_algorithm not in [RSA_SHA_256, RSA_SHA_384, RSA_SHA_512]:
             logger.error(
                 f"Insecure encryption algorithm detected: {pkey_algorithm}, "
-                f"only {RSA_SHA_256} and {RSA_SHA_512} are allowed"
+                f"only {RSA_SHA_256}, {RSA_SHA_384}, and {RSA_SHA_512} are allowed"
             )
             return False
 
@@ -361,11 +362,11 @@ class CertValidationUtil:
 
             # Validate signature algorithm
             pkey_algorithm = ca_cert.get_signature_algorithm().decode(decode_format)
-            if pkey_algorithm not in [RSA_SHA_256, RSA_SHA_512]:
+            if pkey_algorithm not in [RSA_SHA_256, RSA_SHA_384, RSA_SHA_512]:
                 logger.error(
                     f"CA {os.path.basename(ca_crt_path)} uses insecure encryption "
-                    f"algorithm: {pkey_algorithm}, only {RSA_SHA_256} and "
-                    f"{RSA_SHA_512} are allowed"
+                    f"algorithm: {pkey_algorithm}, only {RSA_SHA_256}, {RSA_SHA_384}, "
+                    f"and {RSA_SHA_512} are allowed"
                 )
                 return False
 

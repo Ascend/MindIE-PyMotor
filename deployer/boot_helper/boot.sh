@@ -13,6 +13,40 @@ set_common_env
 
 echo "Current node role: ROLE=$ROLE"
 
+
+# Setup log and work paths for different roles
+setup_motor_log_path() {
+    if [ -n "$MOTOR_LOG_ROOT_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$SERVICE_ID" ]; then
+        chmod 750 "$MOTOR_LOG_ROOT_PATH"
+        if [ ! -d "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/motor" ]; then
+            mkdir -p -m 750 "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/motor"
+        fi
+        export MOTOR_LOG_PATH="$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/motor"
+    fi
+}
+
+# Setup ascend work path for prefill/decode roles
+setup_ascend_work_path() {
+    if [ -n "$MOTOR_LOG_ROOT_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$SERVICE_ID" ]; then
+        chmod 750 "$MOTOR_LOG_ROOT_PATH"
+        if [ ! -d "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_work_path" ];then
+            mkdir -p -m 750 "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_work_path"
+        fi
+        export ASCEND_WORK_PATH="$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_work_path"
+    fi
+}
+
+# Setup ascend cache path for prefill/decode roles
+setup_ascend_cache_path() {
+    if [ -n "$MOTOR_LOG_ROOT_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$SERVICE_ID" ]; then
+        chmod 750 "$MOTOR_LOG_ROOT_PATH"
+        if [ ! -d "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_cache_path" ];then
+            mkdir -p -m 750 "$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_cache_path"
+        fi
+        export ASCEND_CACHE_PATH="$MOTOR_LOG_ROOT_PATH/$MODEL_NAME/$SERVICE_ID/ascend_cache_path"
+    fi
+}
+
 # Search for libjemalloc.so.2 in /usr directory
 jemalloc_path=$(find /usr -type f -name "libjemalloc.so.2" 2>/dev/null | head -n 1)
 if [[ -n "$jemalloc_path" ]]; then
@@ -28,8 +62,8 @@ fi
 USER_CONFIG_FILE="$CONFIGMAP_PATH/user_config.json"
 export USER_CONFIG_PATH="$USER_CONFIG_FILE"
 
-mkdir $CONFIG_PATH -p
-chmod 750 $CONFIG_PATH
+mkdir "$CONFIG_PATH" -p
+chmod 750 "$CONFIG_PATH"
 
 # Avoid using a symlinked ConfigMap file directly (security check rejects it).
 # Copy user_config.json from CONFIGMAP_PATH to CONFIG_PATH and use the real file path.
@@ -63,7 +97,7 @@ if [ -f "$USER_CONFIG_FILE" ]; then
                 sync_user_config
             done
         ) &
-        echo $! > "$CONFIG_SYNC_PID_FILE"
+        echo "$!" > "$CONFIG_SYNC_PID_FILE"
     fi
 fi
 
@@ -186,24 +220,9 @@ if [ "$ROLE" = "prefill" ] || [ "$ROLE" = "decode" ]; then
     gen_kv_pool_config
 
     # Set log and work paths
-    if [ -n "$MINDIE_LOG_CONFIG_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$MODEL_ID" ]; then
-        chmod 750 "$MINDIE_LOG_CONFIG_PATH"
-        if [ ! -d "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID" ];then
-            mkdir -p -m 750 "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID"
-        fi
-        if [ ! -d "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/mindie" ];then
-            mkdir -p -m 750 "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/mindie"
-        fi
-        if [ ! -d "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_work_path" ];then
-            mkdir -p -m 750 "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_work_path"
-        fi
-        if [ ! -d "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_cache_path" ];then
-            mkdir -p -m 750 "$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_cache_path"
-        fi
-        export MINDIE_LOG_PATH="$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/mindie"
-        export ASCEND_WORK_PATH="$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_work_path"
-        export ASCEND_CACHE_PATH="$MINDIE_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/ascend_cache_path"
-    fi
+    setup_motor_log_path
+    setup_ascend_work_path
+    setup_ascend_cache_path
 
     # Set role-specific environment variables
     if [ "$ROLE" = "decode" ]; then
@@ -227,32 +246,18 @@ if [ "$ROLE" = "prefill" ] || [ "$ROLE" = "decode" ]; then
 fi
 
 if [ "$ROLE" = "controller" ]; then
-    export MOTOR_CONTROLLER_CONFIG_PATH="$USER_CONFIG_PATH"
-    
-    if [ -n "$CONTROLLER_LOG_CONFIG_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$MODEL_ID" ]; then
-        chmod 750 "$CONTROLLER_LOG_CONFIG_PATH"
-        if [ ! -d "$CONTROLLER_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID" ];then
-            mkdir -p -m 750 "$CONTROLLER_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID"
-        fi
-        export MINDIE_LOG_PATH="$CONTROLLER_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/mindie"
-    fi
     set_controller_env
+    export MOTOR_CONTROLLER_CONFIG_PATH="$USER_CONFIG_PATH"
+    setup_motor_log_path
 
     # Controller start command
     python3 -m motor.controller.main --config $MOTOR_CONTROLLER_CONFIG_PATH
 fi
 
 if [ "$ROLE" == "coordinator" ]; then
-    export MOTOR_COORDINATOR_CONFIG_PATH="$USER_CONFIG_PATH"
-    
-    if [ -n "$COORDINATOR_LOG_CONFIG_PATH" ] && [ -n "$MODEL_NAME" ] && [ -n "$MODEL_ID" ]; then
-        chmod 750 "$COORDINATOR_LOG_CONFIG_PATH"
-        if [ ! -d "$COORDINATOR_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID" ];then
-            mkdir -p -m 750 "$COORDINATOR_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID"
-        fi
-        export MINDIE_LOG_PATH="$COORDINATOR_LOG_CONFIG_PATH/$MODEL_NAME/$MODEL_ID/mindie"
-    fi
     set_coordinator_env
+    export MOTOR_COORDINATOR_CONFIG_PATH="$USER_CONFIG_PATH"
+    setup_motor_log_path
 
     # Coordinator start command
     python3 -m motor.coordinator.main
