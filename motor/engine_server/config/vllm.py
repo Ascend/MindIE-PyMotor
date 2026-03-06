@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -11,7 +13,7 @@
 import argparse
 import sys
 import json
-from typing import Any
+from typing import Any, Optional
 from dataclasses import dataclass, field
 
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
@@ -56,11 +58,11 @@ def _get_default_mapping() -> dict[str, str]:
 
 @dataclass
 class VLLMConfig(BaseConfig):
-    args: argparse.Namespace | None = None
-    data_parallel_address: str | None = None
-    data_parallel_rpc_port: int | None = None
-    kv_transfer_config: str | None = None
-    mapping: dict[str, str] | None = field(default_factory=_get_default_mapping)
+    args: Optional[argparse.Namespace] = None
+    data_parallel_address: Optional[str] = None
+    data_parallel_rpc_port: Optional[int] = None
+    kv_transfer_config: Optional[str] = None
+    mapping: Optional[dict[str, str]] = field(default_factory=_get_default_mapping)
 
     def initialize(self):
         super().initialize()

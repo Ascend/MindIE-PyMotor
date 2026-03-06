@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -67,7 +69,7 @@ def mock_dependencies():
 # Import classes inside a function to be called after mocks are set up
 def get_classes():
     """Import the classes needed for testing."""
-    from motor.engine_server.utils.config_parser import ConfigParser
+    from motor.engine_server.parser.config_parser import ConfigParser
     from motor.engine_server.config.base import IConfig, ServerConfig
     return ConfigParser, IConfig, ServerConfig
 

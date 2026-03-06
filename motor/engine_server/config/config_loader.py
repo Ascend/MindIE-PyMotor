@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -8,8 +10,8 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Dict, Any
 import json
 from pathlib import Path
 
@@ -33,7 +35,7 @@ class ParallelConfig:
     dp_rpc_port: int
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ParallelConfig":
+    def from_dict(cls, data: Dict[str, Any]) -> "ParallelConfig":
         return cls(**data)
 
 
@@ -47,7 +49,7 @@ class ModelConfig:
     decode_parallel_config: ParallelConfig
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ModelConfig":
+    def from_dict(cls, data: Dict[str, Any]) -> "ModelConfig":
         return cls(
             model_name=data["model_name"],
             model_path=data["model_path"],
@@ -60,10 +62,10 @@ class ModelConfig:
 @dataclass
 class EngineConfig:
     """Configuration for the engine with dynamic key-value pairs"""
-    configs: dict[str, Any]
+    configs: Dict[str, Any]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "EngineConfig":
+    def from_dict(cls, data: Dict[str, Any]) -> "EngineConfig":
         """Parse EngineConfig from a dictionary (stores dynamic key-value pairs directly)"""
         return cls(configs=data)
 
@@ -75,16 +77,6 @@ class EngineConfig:
 
 
 @dataclass
-class HealthCheckConfig:
-    """Configuration for health check"""
-    health_collector_timeout: int = 2
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "HealthCheckConfig":
-        return cls(**data)
-
-
-@dataclass
 class DeployConfig:
     """Root configuration class representing the entire JSON structure"""
     engine_type: str
@@ -92,10 +84,9 @@ class DeployConfig:
     engine_config: EngineConfig
     mgmt_tls_config: TLSConfig | None
     infer_tls_config: TLSConfig | None
-    health_check_config: HealthCheckConfig = field(default_factory=HealthCheckConfig)
 
     @staticmethod
-    def _sync_parallel_config(role: str | None, data: dict[str, Any]) -> None:
+    def _sync_parallel_config(role: str | None, data: Dict[str, Any]) -> None:
         if role not in ("prefill", "decode"):
             return
         model_cfg = data.get(MODEL_CONFIG_KEY)
@@ -120,8 +111,8 @@ class DeployConfig:
             raw_data = json.load(f)
         data = raw_data
         if isinstance(raw_data, dict) and (
-                MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
-                or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
+            MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
+            or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
         ):
             key = (
                 MOTOR_ENGINE_DECODE_CONFIG_KEY
@@ -140,8 +131,7 @@ class DeployConfig:
             model_config=ModelConfig.from_dict(data["model_config"]),
             engine_config=EngineConfig.from_dict(data["engine_config"]),
             mgmt_tls_config=TLSConfig.from_dict(mgmt_tls_config) if mgmt_tls_config else None,
-            infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None,
-            health_check_config=HealthCheckConfig.from_dict(data.get("health_check_config", {}))
+            infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None
         )
 
     def get_parallel_config(self, role: str = "union") -> ParallelConfig:

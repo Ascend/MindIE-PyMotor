@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -8,6 +10,7 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+from typing import Dict, Optional
 import importlib
 
 from motor.engine_server.config.base import IConfig, ServerConfig
@@ -17,7 +20,7 @@ logger = get_logger("engine_server")
 
 
 class ConfigParser:
-    _ENGINE_CONFIG_MAP: dict[str, str] = {
+    _ENGINE_CONFIG_MAP: Dict[str, str] = {
         "vllm": "motor.engine_server.config.vllm.VLLMConfig"
     }
 
@@ -39,7 +42,7 @@ class ConfigParser:
             module_path, class_name = config_class_path.rsplit('.', 1)
             module = importlib.import_module(module_path)
             config_class = getattr(module, class_name)
-
+            
             config_instance = config_class(server_config=self.server_config)
             config_instance.initialize()
             config_instance.convert()

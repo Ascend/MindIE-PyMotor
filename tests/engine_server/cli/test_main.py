@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -20,10 +22,9 @@ def mock_modules():
     original_modules = {}
     modules_to_mock = [
         'motor.engine_server.config.base',
-        'motor.engine_server.utils.config_parser',
+        'motor.engine_server.parser.config_parser',
         'motor.engine_server.factory.core_factory',
-        'motor.common.utils.logger',
-        'motor.engine_server.utils.prometheus'
+        'motor.common.utils.logger'
     ]
 
     for module_name in modules_to_mock:
@@ -59,16 +60,11 @@ def mock_modules():
     mock_logger_module = Mock()
     mock_logger_module.get_logger = MagicMock(return_value=mock_logger)
 
-    # Mock prometheus module
-    mock_prometheus = Mock()
-    mock_prometheus.setup_multiprocess_prometheus = MagicMock()
-
     # Replace modules in sys.modules
     sys.modules['motor.engine_server.config.base'] = mock_base
-    sys.modules['motor.engine_server.utils.config_parser'] = mock_config_parser
+    sys.modules['motor.engine_server.parser.config_parser'] = mock_config_parser
     sys.modules['motor.engine_server.factory.core_factory'] = mock_core_factory
     sys.modules['motor.common.utils.logger'] = mock_logger_module
-    sys.modules['motor.engine_server.utils.prometheus'] = mock_prometheus
 
     # Build dictionary of mock objects to return
     mock_objects = {
@@ -79,8 +75,7 @@ def mock_modules():
         'factory_class': mock_factory_class,
         'factory_instance': mock_factory_instance,
         'server_core': mock_server_core,
-        'logger': mock_logger,
-        'prometheus_module': mock_prometheus
+        'logger': mock_logger
     }
 
     yield mock_objects
@@ -102,7 +97,6 @@ def test_main(mock_modules):
     mock_modules['server_core'].initialize.side_effect = None
 
     # Reset mocks before test
-    mock_modules['prometheus_module'].setup_multiprocess_prometheus.reset_mock()
     mock_modules['server_config_class'].init_engine_server_config.reset_mock()
     mock_modules['parser_class'].reset_mock()
     mock_modules['parser_instance'].parse.reset_mock()
@@ -117,7 +111,6 @@ def test_main(mock_modules):
     main()
 
     # Verify all expected calls were made
-    mock_modules['prometheus_module'].setup_multiprocess_prometheus.assert_called_once()
     mock_modules['server_config_class'].init_engine_server_config.assert_called_once()
     mock_modules['parser_class'].assert_called_once_with(server_config=mock_modules['mock_config_obj'])
     mock_modules['parser_instance'].parse.assert_called_once()

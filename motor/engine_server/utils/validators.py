@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -10,7 +12,7 @@
 
 import os
 from typing import Callable, Any
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from motor.engine_server.constants.constants import (MAX_SIZE, MIN_SIZE, MIN_RANK_SIZE, MAX_RANK_SIZE,
                                                      MAX_FILE_NUMS, MIN_DEVICE_NUM, MAX_DEVICE_NUM, MUSK_PRIVILEGE)
@@ -175,7 +177,7 @@ class DirectoryValidator(StringValidator):
         self.register_checker(lambda x: isinstance(x, str), "type is not str")
 
     @staticmethod
-    def remove_prefix(string: str | None, prefix: str | None) -> Tuple[bool, str | None]:
+    def remove_prefix(string: Optional[str], prefix: Optional[str]) -> Tuple[bool, Optional[str]]:
         if string is None or prefix is None or len(string) < len(prefix):
             return False, string
         if string.startswith(prefix):

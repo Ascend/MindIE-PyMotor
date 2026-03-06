@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -93,6 +95,9 @@ class ProcManager:
                 break
 
         return children_pids
+
+    def is_shutting_down(self) -> bool:
+        return self._shutdown_triggered
 
     def shutdown(self) -> None:
         if self._shutdown_triggered:

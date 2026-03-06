@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -10,25 +12,8 @@
 
 import pytest
 import threading
-from unittest.mock import Mock, MagicMock, patch, AsyncMock
+from unittest.mock import Mock, MagicMock, patch
 import sys
-
-mock_prometheus = MagicMock()
-sys.modules['prometheus_client'] = mock_prometheus
-sys.modules['prometheus_client.Counter'] = MagicMock()
-sys.modules['prometheus_client.Gauge'] = MagicMock()
-sys.modules['prometheus_client.Histogram'] = MagicMock()
-sys.modules['prometheus_client.Summary'] = MagicMock()
-sys.modules['prometheus_client.REGISTRY'] = MagicMock()
-
-# Mock the missing prometheus_fastapi_instrumentator module
-mock_instrumentator = MagicMock()
-sys.modules['prometheus_fastapi_instrumentator'] = mock_instrumentator
-sys.modules['prometheus_fastapi_instrumentator.Instrumentator'] = MagicMock()
-
-# Also mock attach_metrics_router if it's imported from somewhere that depends on prometheus
-sys.modules['motor.engine_server.core.metrics'] = MagicMock()
-sys.modules['motor.engine_server.core.metrics.attach_metrics_router'] = MagicMock()
 
 from motor.engine_server.constants import constants
 
@@ -86,33 +71,34 @@ def mock_modules():
                         del sys.modules[module_name]
 
 
-from motor.engine_server.config.base import IConfig
+from motor.engine_server.config.base import ServerConfig
+from motor.engine_server.core.service import Service
 from motor.engine_server.core.endpoint import Endpoint
+from motor.engine_server.core.endpoint import METRICS_SERVICE, HEALTH_SERVICE
 
 
 @pytest.fixture(scope="function")
 def endpoint():
-    mock_config = Mock(spec=IConfig)
-    mock_server_config = Mock()
+    mock_server_config = Mock(spec=ServerConfig)
     mock_server_config.server_host = "127.0.0.1"
     mock_server_config.server_port = 8000
-    mock_config.get_server_config.return_value = mock_server_config
+    mock_metrics_service = Mock(spec=Service)
+    mock_health_service = Mock(spec=Service)
+    mock_services = {
+        METRICS_SERVICE: mock_metrics_service,
+        HEALTH_SERVICE: mock_health_service
+    }
 
-    # Mock both HealthCollector and attach_metrics_router to avoid prometheus dependencies
-    with patch("motor.engine_server.core.endpoint.HealthCollector") as mock_health_collector_cls, \
-            patch("motor.engine_server.core.endpoint.attach_metrics_router") as mock_attach_metrics:
-        mock_health_collector = Mock()
-        mock_health_collector_cls.return_value = mock_health_collector
+    ep = Endpoint(
+        server_config=mock_server_config,
+        services=mock_services
+    )
+    ep._mock_metrics = mock_metrics_service
+    ep._mock_health = mock_health_service
 
-        # Make is_healthy an async method
-        mock_health_collector.is_healthy = AsyncMock(return_value=True)  # Default healthy
-
-        ep = Endpoint(config=mock_config)
-        ep._mock_health_collector = mock_health_collector
-
-        yield ep
-        if hasattr(ep, '_server_thread') and ep._server_thread.is_alive():
-            ep.shutdown()
+    yield ep
+    if ep._server_thread.is_alive():
+        ep.shutdown()
 
 
 def _get_route_by_path(endpoint, path):
@@ -126,61 +112,132 @@ def test_initialization(endpoint):
     """test Endpoint should initialize with correct properties and routes when created"""
     assert endpoint.host == "127.0.0.1"
     assert endpoint.port == 8000
+    assert endpoint.metrics_service == endpoint._mock_metrics
+    assert endpoint.health_service == endpoint._mock_health
     assert hasattr(endpoint, "app")
     assert isinstance(endpoint._stop_event, threading.Event)
     assert isinstance(endpoint._server_thread, threading.Thread)
     assert endpoint._server_thread.name == "endpoint_server_thread"
-    assert hasattr(endpoint, "health_collector")
-    assert endpoint.health_collector == endpoint._mock_health_collector
 
-    # Check status route
     status_route = _get_route_by_path(endpoint, "/status")
+    metrics_route = _get_route_by_path(endpoint, "/metrics")
     assert status_route is not None
+    assert metrics_route is not None
 
 
-def test_status_normal(endpoint):
-    """test /status endpoint should return {"status": "normal"} when health_collector returns True"""
-    import asyncio
-
-    # Mock is_healthy to return True using AsyncMock
-    endpoint._mock_health_collector.is_healthy = AsyncMock(return_value=True)
+def test_status_health_service_none(endpoint):
+    """test /status endpoint should return {"status": "initial"} when health service returns empty data"""
+    endpoint._mock_health.get_data.return_value = {}
     mock_response = Mock()
     status_route = _get_route_by_path(endpoint, "/status")
 
-    # Run async endpoint function
-    result = asyncio.run(status_route.endpoint(response=mock_response))
+    result = status_route.endpoint(response=mock_response)
     assert mock_response.status_code == 200
-    assert result == {"status": constants.NORMAL_STATUS}
+    assert result == {"status": constants.INIT_STATUS}
+
+
+def test_status_server_core_init(endpoint):
+    """test /status endpoint should return {"status": "initial"} when server_core_status is init"""
+    endpoint._mock_health.get_data.return_value = {
+        "latest_health": {"core_status": constants.INIT_STATUS, "status": "success"}
+    }
+    mock_response = Mock()
+    status_route = _get_route_by_path(endpoint, "/status")
+
+    result = status_route.endpoint(response=mock_response)
+    assert mock_response.status_code == 200
+    assert result == {"status": constants.INIT_STATUS}
 
 
 def test_status_abnormal(endpoint):
-    """test /status endpoint should return {"status": "abnormal"} when health_collector returns False"""
-    import asyncio
-
-    # Mock is_healthy to return False using AsyncMock
-    endpoint._mock_health_collector.is_healthy = AsyncMock(return_value=False)
+    """test /status endpoint should return {"status": "abnormal"} when collect_status is failed or server_core_status is abnormal"""
     mock_response = Mock()
     status_route = _get_route_by_path(endpoint, "/status")
 
-    # Run async endpoint function
-    result = asyncio.run(status_route.endpoint(response=mock_response))
-    assert mock_response.status_code == 200
-    assert result == {"status": constants.ABNORMAL_STATUS}
+    endpoint._mock_health.get_data.return_value = {
+        "latest_health": {"core_status": "normal", "status": "failed"}
+    }
+    result1 = status_route.endpoint(response=mock_response)
+    assert result1 == {"status": "abnormal"}
+
+    endpoint._mock_health.get_data.return_value = {
+        "latest_health": {"core_status": "abnormal", "status": "success"}
+    }
+    result2 = status_route.endpoint(response=mock_response)
+    assert result2 == {"status": "abnormal"}
 
 
-def test_status_initial(endpoint):
-    """test /status endpoint should return {"status": "initial"} when health_collector raises exception"""
-    import asyncio
-
-    # Mock is_healthy to raise exception
-    endpoint._mock_health_collector.is_healthy.side_effect = Exception("Health check failed")
+def test_status_normal(endpoint):
+    """test /status endpoint should return {"status": "normal"} when server_core_status is normal and collection succeeds"""
+    endpoint._mock_health.get_data.return_value = {
+        "latest_health": {"core_status": "normal", "status": "success"}
+    }
     mock_response = Mock()
     status_route = _get_route_by_path(endpoint, "/status")
 
-    # Run async endpoint function
-    result = asyncio.run(status_route.endpoint(response=mock_response))
+    result = status_route.endpoint(response=mock_response)
     assert mock_response.status_code == 200
-    assert result == {"status": constants.INIT_STATUS}
+    assert result == {"status": "normal"}
+
+
+def test_metrics_service_none(endpoint):
+    """test /metrics endpoint should return empty body when metrics service returns empty data"""
+    endpoint._mock_metrics.get_data.return_value = {}
+    mock_response = Mock()
+    metrics_route = _get_route_by_path(endpoint, "/metrics")
+
+    result = metrics_route.endpoint(response=mock_response)
+    assert result.status_code == 200
+    assert result.body == b""
+    assert result.media_type == "text/plain"
+
+
+def test_metrics_server_core_init(endpoint):
+    """test /metrics endpoint should return empty body when server_core_status is init"""
+    endpoint._mock_metrics.get_data.return_value = {
+        "latest_metrics": {"core_status": constants.INIT_STATUS, "status": "success"}
+    }
+    mock_response = Mock()
+    metrics_route = _get_route_by_path(endpoint, "/metrics")
+
+    result = metrics_route.endpoint(response=mock_response)
+    assert result.status_code == 200
+    assert result.body == b""
+
+
+def test_metrics_collect_success(endpoint):
+    """test /metrics endpoint should return collected data when metrics collection succeeds"""
+    endpoint._mock_metrics.get_data.return_value = {
+        "latest_metrics": {
+            "core_status": "normal",
+            "status": "success",
+            "data": "cpu_usage 0.5\nmemory_usage 0.8"
+        }
+    }
+    mock_response = Mock()
+    metrics_route = _get_route_by_path(endpoint, "/metrics")
+
+    result = metrics_route.endpoint(response=mock_response)
+    assert result.status_code == 200
+    assert result.body == b"cpu_usage 0.5\nmemory_usage 0.8"
+    assert result.media_type == "text/plain"
+
+
+def test_metrics_collect_failed(endpoint):
+    """test /metrics endpoint should return empty body when metrics collection fails"""
+    endpoint._mock_metrics.get_data.return_value = {
+        "latest_metrics": {
+            "core_status": "normal",
+            "status": "failed",
+            "data": "some_data"
+        }
+    }
+    mock_response = Mock()
+    metrics_route = _get_route_by_path(endpoint, "/metrics")
+
+    result = metrics_route.endpoint(response=mock_response)
+    assert result.status_code == 200
+    assert result.body == b""
 
 
 def test_run_server(endpoint):
@@ -200,13 +257,6 @@ def test_shutdown_server(mock_join, endpoint):
     assert mock_server.should_exit is True
     assert endpoint._stop_event.is_set()
     mock_join.assert_not_called()
-
-
-def test_set_server_core(endpoint):
-    """test Endpoint.set_server_core() should set server_core attribute"""
-    mock_server_core = Mock()
-    endpoint.set_server_core(mock_server_core)
-    assert endpoint._server_core == mock_server_core
 
 
 if __name__ == "__main__":

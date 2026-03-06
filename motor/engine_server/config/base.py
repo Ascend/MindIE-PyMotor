@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -12,6 +14,7 @@ import argparse
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Optional
 
 from motor.engine_server.config import config_loader
 from motor.engine_server.config.config_loader import DeployConfig
@@ -35,7 +38,7 @@ class ServerConfig:
     engine_port: int = 8000
     instance_id: int = 0
     dp_rank: int = 0
-    config_path: str | None = None
+    config_path: Optional[str] = None
     deploy_config: DeployConfig = None
 
     @classmethod
@@ -163,11 +166,11 @@ class IConfig(ABC):
         pass
 
     @abstractmethod
-    def get_args(self) -> argparse.Namespace | None:
+    def get_args(self) -> Optional[argparse.Namespace]:
         pass
 
     @abstractmethod
-    def get_server_config(self) -> ServerConfig | None:
+    def get_server_config(self) -> Optional[ServerConfig]:
         pass
 
 
@@ -184,8 +187,8 @@ class BaseConfig(IConfig):
     def convert(self):
         pass
 
-    def get_args(self) -> argparse.Namespace | None:
+    def get_args(self) -> Optional[argparse.Namespace]:
         return None
 
-    def get_server_config(self) -> ServerConfig | None:
+    def get_server_config(self) -> Optional[ServerConfig]:
         return self.server_config

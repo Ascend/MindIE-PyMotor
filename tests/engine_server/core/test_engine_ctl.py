@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -9,6 +11,7 @@
 # See the Mulan PSL v2 for more details.
 
 import pytest
+from abc import ABC, abstractmethod
 from motor.engine_server.core.engine_ctl import EngineController
 
 

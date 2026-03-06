@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -12,12 +14,11 @@ import os
 from abc import ABC, abstractmethod
 
 from motor.engine_server.config.base import IConfig
+from motor.engine_server.core.data_controller import DataController
 from motor.engine_server.core.endpoint import Endpoint
-from motor.engine_server.core.http_server import HttpServer
+from motor.engine_server.core.service import MetricsService, HealthService
+from motor.engine_server.constants.constants import METRICS_SERVICE, HEALTH_SERVICE
 from motor.engine_server.utils.proc import ProcManager
-from motor.common.utils.logger import get_logger
-
-logger = get_logger("engine_server")
 
 
 class IServerCore(ABC):
@@ -50,50 +51,31 @@ class BaseServerCore(IServerCore):
     def __init__(self, config: IConfig):
         super().__init__(config)
         self.config = config
-        self.http_server: HttpServer | None = None
-        self.endpoint = Endpoint(self.config)
+        self.data_controller = DataController(self.config)
+        self.services = {
+            METRICS_SERVICE: MetricsService(self.data_controller),
+            HEALTH_SERVICE: HealthService(self.data_controller),
+        }
+        self.endpoint = Endpoint(self.config.get_server_config(), self.services)
         self.proc_manager = ProcManager(os.getpid())
-        self._http_server_settings = None
-
-    @property
-    def http_server_settings(self) -> dict | None:
-        return self._http_server_settings
-
-    @http_server_settings.setter
-    def http_server_settings(self, value: dict | None) -> None:
-        if self._http_server_settings is None and value is not None:
-            if self.http_server is None:
-                self.http_server = HttpServer(
-                    config=self.config,
-                    init_params=value,
-                )
-                if hasattr(self, '_is_running') and self._is_running:
-                    self.http_server.run()
-                    logger.info("HttpServer started successfully after http_server_settings was set")
-            else:
-                logger.warning("HttpServer already initialized, skipping creation")
-        self._http_server_settings = value
 
     def initialize(self) -> None:
         pass
 
     def run(self) -> None:
-        self._is_running = True
+        self.data_controller.run()
         self.endpoint.run()
 
     def join(self) -> None:
         self.proc_manager.join()
 
     def shutdown(self) -> None:
-        self._is_running = False
-
-        if self.http_server is not None:
-            self.http_server.shutdown()
-            self.http_server = None
-            logger.info("HttpServer shutdown completed")
-
         self.endpoint.shutdown()
+        self.data_controller.shutdown()
         self.proc_manager.shutdown()
+
+    def is_shutting_down(self) -> bool:
+        return self.proc_manager.is_shutting_down()
 
     def status(self) -> str:
         pass

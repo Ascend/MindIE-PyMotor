@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -10,12 +12,13 @@
 
 import json
 import os
+from typing import Optional
 
 from motor.common.utils.env import Env
 from motor.engine_server.utils.validators import FileValidator
 
 
-def get_data_parallel_address() -> str | None:
+def get_data_parallel_address() -> Optional[str]:
     file_path = Env.ranktable_path
     if not file_path:
         raise ValueError("Environment variable RANKTABLE_PATH is not set")

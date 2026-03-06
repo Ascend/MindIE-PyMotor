@@ -9,3 +9,13 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
+
+import inspect
+
+
+def func_has_parameter(func, param_name: str) -> bool:
+    try:
+        sig = inspect.signature(func)
+        return param_name in sig.parameters
+    except (ValueError, TypeError):
+        return False

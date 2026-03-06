@@ -71,9 +71,15 @@ ENGINE_ID = "engine_id"
 INIT_STATUS = "initial"
 ABNORMAL_STATUS = "abnormal"
 NORMAL_STATUS = "normal"
+FAILED_STATUS = "failed"
+SUCCESS_STATUS = "success"
 
 # response keys
 STATUS_KEY = "status"
+LATEST_HEALTH = "latest_health"
+LATEST_METRICS = "latest_metrics"
+CORE_STATUS = "core_status"
+DATA_KEY = "data"
 
 # content type
 TEXT_PLAIN = "text/plain"
@@ -106,3 +112,7 @@ STATUS_INTERFACE = "/status"
 # service type
 METRICS_SERVICE = "metrics_service"
 HEALTH_SERVICE = "health_service"
+
+# vllm api server ready check times
+API_READY_CHECK_TIMES = 3600
+API_SERVER_PROC_CHECK_TIMES = 20
