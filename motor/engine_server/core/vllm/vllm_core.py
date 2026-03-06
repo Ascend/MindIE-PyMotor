@@ -12,10 +12,13 @@
 
 import signal
 import time
+import asyncio
 from typing import Optional
 
 import requests
 import vllm
+import httpx
+
 from vllm.entrypoints.utils import cli_env_setup
 from vllm.entrypoints.openai.api_server import setup_server
 from vllm.usage.usage_lib import UsageContext
@@ -25,6 +28,7 @@ from vllm.v1.engine.coordinator import DPCoordinator
 from vllm.v1.engine.utils import CoreEngineProcManager
 
 from motor.common.utils.http_client import SafeHTTPSClient
+from motor.engine_server.core.sim_inference import SimInference
 from motor.engine_server.config.base import IConfig
 from motor.engine_server.core.base_core import BaseServerCore
 from motor.common.utils.logger import get_logger
@@ -32,6 +36,7 @@ from motor.engine_server.constants import constants
 from motor.engine_server.core.vllm.launch_engine import engine_server_launch_vllm_core_engines
 from motor.engine_server.core.vllm.launch_server import engine_server_run_api_server_worker_proc
 from motor.engine_server.utils.proc import ProcManager
+from motor.engine_server.core.endpoint import Endpoint
 
 logger = get_logger("engine_server")
 
@@ -45,12 +50,18 @@ class VLLMServerCore(BaseServerCore):
         self.coordinator: Optional[DPCoordinator] = None
         self._status: str = constants.INIT_STATUS
         self.infer_tls_config = config.get_server_config().deploy_config.infer_tls_config
+        
+        # Get health check configuration from deploy config
+        health_check_config = self.config.get_server_config().deploy_config.health_check_config or {}
+        self.sim_inference = SimInference(self.args, self.infer_tls_config, health_check_config)
+        self.endpoint = Endpoint(self.config.get_server_config(), self.services, self.sim_inference)
 
     def initialize(self) -> None:
         self._register_signal_handlers()
         super().initialize()
         cli_env_setup()
         self.data_controller.set_server_core(self)
+
 
     def run(self) -> None:
         super().run()
@@ -61,6 +72,7 @@ class VLLMServerCore(BaseServerCore):
 
     def shutdown(self) -> None:
         self._status = constants.ABNORMAL_STATUS
+        self.sim_inference.stop_health_check()
         super().shutdown()
         logger.info(f"[VLLMServerCore] vLLM shutdown completed")
 
@@ -157,6 +169,9 @@ class VLLMServerCore(BaseServerCore):
 
             retry += 1
             time.sleep(1)
+        # start health check
+        self.sim_inference.set_status(constants.NORMAL_STATUS)
+        self.sim_inference.start_health_check()
 
     def _check_api_server_ready(self):
         try:
@@ -166,5 +181,6 @@ class VLLMServerCore(BaseServerCore):
                 response.raise_for_status()
             self._status = constants.NORMAL_STATUS
             logger.info(f"API server health check passed, status change to: {self._status}")
+            
         except Exception as e:
             logger.debug(f"Failed to check API server health: {e}, try again")

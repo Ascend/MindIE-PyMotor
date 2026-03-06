@@ -14,6 +14,7 @@ import asyncio
 import pytest
 import time
 import threading
+from unittest.mock import patch
 from unittest.mock import patch, AsyncMock
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.coordinator.models.request import RequestInfo, ReqState

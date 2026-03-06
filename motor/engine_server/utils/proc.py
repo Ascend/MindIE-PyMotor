@@ -79,7 +79,15 @@ class ProcManager:
             for process in current_level_processes:
                 try:
                     direct_children = process.children(recursive=False)
-                    child_pids = {child.pid for child in direct_children}
+                    child_pids = set()
+                    for child in direct_children:
+                        try:
+                            # 获取进程命令行并检查是否包含npu-smi
+                            cmd_line = ' '.join(child.cmdline())
+                            if 'npu-smi' not in cmd_line:
+                                child_pids.add(child.pid)
+                        except psutil.NoSuchProcess:
+                            logger.warning(f"Process {child.pid} no longer exists, skipping")
                     children_pids.update(child_pids)
 
                     _log_process_info(depth, direct_children, process)

@@ -81,6 +81,10 @@
           }
         }
       }
+    },
+    "health_check_config": {
+      "enable_virtual_inference": false,
+      "npu_usage_threshold": 10
     }
   },
   "motor_engine_decode_config": {
@@ -120,6 +124,10 @@
           }
         }
       }
+    },
+    "health_check_config": {
+      "enable_virtual_inference": false,
+      "npu_usage_threshold": 10
     }
   },
   "kv_cache_pool_config": {

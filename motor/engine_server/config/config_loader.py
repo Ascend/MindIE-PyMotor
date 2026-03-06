@@ -77,6 +77,17 @@ class EngineConfig:
 
 
 @dataclass
+class HealthCheckConfig:
+    """Configuration for health check"""
+    npu_usage_threshold: int = 10
+    enable_virtual_inference: bool = True
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HealthCheckConfig":
+        return cls(**data)
+
+
+@dataclass
 class DeployConfig:
     """Root configuration class representing the entire JSON structure"""
     engine_type: str
@@ -84,6 +95,7 @@ class DeployConfig:
     engine_config: EngineConfig
     mgmt_tls_config: TLSConfig | None
     infer_tls_config: TLSConfig | None
+    health_check_config: HealthCheckConfig = None
 
     @staticmethod
     def _sync_parallel_config(role: str | None, data: Dict[str, Any]) -> None:
@@ -131,7 +143,8 @@ class DeployConfig:
             model_config=ModelConfig.from_dict(data["model_config"]),
             engine_config=EngineConfig.from_dict(data["engine_config"]),
             mgmt_tls_config=TLSConfig.from_dict(mgmt_tls_config) if mgmt_tls_config else None,
-            infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None
+            infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None,
+            health_check_config=HealthCheckConfig.from_dict(data.get("health_check_config", {}))
         )
 
     def get_parallel_config(self, role: str = "union") -> ParallelConfig:

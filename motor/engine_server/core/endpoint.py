@@ -37,12 +37,14 @@ from motor.engine_server.constants.constants import (
 )
 from motor.engine_server.core.service import Service
 from motor.common.utils.logger import get_logger
+from motor.engine_server.core.sim_inference import SimInference
 
 logger = get_logger("engine_server")
 
 
 class Endpoint:
-    def __init__(self, server_config: ServerConfig, services: dict[str, Service]):
+    def __init__(self, server_config: ServerConfig, services: dict[str, Service],
+                 sim_inference: SimInference | None = None):
         self.host = server_config.server_host
         self.port = server_config.server_port
         self.mgmt_tls_config = server_config.deploy_config.mgmt_tls_config
@@ -51,6 +53,7 @@ class Endpoint:
                 raise ValueError(f"services must contain key: {service_key}")
         self.metrics_service = services[METRICS_SERVICE]
         self.health_service = services[HEALTH_SERVICE]
+        self.sim_inference = sim_inference
         self.app = FastAPI(title="EngineServer Endpoint")
         self._stop_event = threading.Event()
         self._server: Optional[uvicorn.Server] = None
@@ -87,6 +90,7 @@ class Endpoint:
                 health_data = self.health_service.get_data()
                 server_core_status = health_data.get(LATEST_HEALTH, {}).get(CORE_STATUS, INIT_STATUS)
                 collect_status = health_data.get(LATEST_HEALTH, {}).get(STATUS_KEY, INIT_STATUS)
+            
             if server_core_status == INIT_STATUS:
                 logger.debug("Server core is initializing.")
                 return {
@@ -96,9 +100,16 @@ class Endpoint:
                 return {
                     STATUS_KEY: ABNORMAL_STATUS
                 }
+            # check sim_inference status
+            if self.sim_inference and self.sim_inference.is_abnormal():
+                logger.warning("SimInference is in abnormal status, returning ABNORMAL_STATUS")
+                return {
+                    STATUS_KEY: ABNORMAL_STATUS
+                }
+            
             return {
                 STATUS_KEY: NORMAL_STATUS
-            }
+                }
 
         @self.app.get(METRICS_INTERFACE)
         def get_metrics(response: Response):
