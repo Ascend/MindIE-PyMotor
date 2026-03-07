@@ -270,11 +270,6 @@ if [ "$ROLE" == "coordinator" ]; then
     export MOTOR_COORDINATOR_CONFIG_PATH="$USER_CONFIG_PATH"
     setup_motor_log_path
 
-    # When the mooncake_conductor feature is enabled, torch_device_backend_autoload must be disabled.
-    if [ -n "$KV_CONDUCTOR_SERVICE" ]; then
-        export TORCH_DEVICE_BACKEND_AUTOLOAD=0
-    fi
-
     # Coordinator start command
     python3 -m motor.coordinator.main
 fi

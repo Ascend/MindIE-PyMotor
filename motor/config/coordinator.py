@@ -267,9 +267,12 @@ class TracerConfig:
 
 @dataclass
 class PrefillKvEventConfig:
-    """Prefill kv event configuration class"""
+    """
+    Prefill kv event configuration class
+    If the value of conductor_service is empty, the kv conductor is disabled.
+    """
 
-    conductor_service: str = field(default_factory=lambda: Env.conductor_service or '127.0.0.1')
+    conductor_service: str = field(default_factory=lambda: Env.conductor_service or "")
     http_server_port: int = 13333
     block_size: int = 128
     endpoint: str = ""

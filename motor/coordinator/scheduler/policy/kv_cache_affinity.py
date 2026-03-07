@@ -7,9 +7,9 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+import os
 import threading
 
-from transformers import AutoTokenizer
 from motor.common.resources.instance import Instance, PDRole
 from motor.common.resources.endpoint import Endpoint
 from motor.coordinator.domain import InstanceProvider
@@ -133,8 +133,14 @@ class TokenizerManager(ThreadSafeSingleton):
 
         self.tokenizer = None
 
+        if config.prefill_kv_event_config.conductor_service == "":
+            logger.info("conductor_service is empty. disable TokenizerManager!")
+            return
+
         model_path = config.prefill_kv_event_config.model_path
-        if model_path != "":
+        if model_path:
+            os.environ['TORCH_DEVICE_BACKEND_AUTOLOAD'] = '0'
+            from transformers import AutoTokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
         logger.info(f"TokenizerManager init.(model_path:{model_path})")
