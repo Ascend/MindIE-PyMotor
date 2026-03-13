@@ -47,16 +47,22 @@ spec:
   template:
     metadata:
       labels:
-        fault-scheduling: force
-        fault-retry-times: "10000"
         app: mindie-motor-controller
         deploy-name: mindie-motor-controller
     spec:
       serviceAccountName: mindie-motor-controller
-      schedulerName: volcano
       terminationGracePeriodSeconds: 0
       securityContext:
         fsGroup: 1001
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
       containers:
         - image: mindie:1.0.0-aarch64-800I-A2
           imagePullPolicy: IfNotPresent
