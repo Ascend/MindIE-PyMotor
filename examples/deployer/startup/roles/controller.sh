@@ -17,4 +17,7 @@ fi
 set_controller_env
 setup_motor_log_path
 
+# not necessary if no ccae
+python3 -m ccae_reporter.run Controller &
+
 python3 -m motor.controller.main --config $USER_CONFIG_PATH

@@ -26,10 +26,18 @@ set_cann_env
 pids=()
 
 set_coordinator_env
+
+# not necessary if no ccae
+python3 -m ccae_reporter.run Coordinator &
+
 ROLE=coordinator python3 -m motor.coordinator.main &
 pids+=($!)
 
 set_controller_env
+
+# not necessary if no ccae
+python3 -m ccae_reporter.run Controller &
+
 ROLE=controller python3 -m motor.controller.main --config $USER_CONFIG_PATH &
 pids+=($!)
 

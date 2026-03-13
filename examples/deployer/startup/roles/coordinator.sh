@@ -17,4 +17,7 @@ fi
 set_coordinator_env
 setup_motor_log_path
 
+# not necessary if no ccae
+python3 -m ccae_reporter.run Coordinator &
+
 python3 -m motor.coordinator.main
