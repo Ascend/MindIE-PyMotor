@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindie-motor-coordinator
+  labels:
+    app: mindie-motor-coordinator
+  namespace: mindie
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mindie-motor-coordinator
+  template:
+    metadata:
+      labels:
+        app: mindie-motor-coordinator
+    spec:
+      terminationGracePeriodSeconds: 0
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1001
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
+      containers:
+        - image: mindie:1.0.0-aarch64-800I-A2
+          imagePullPolicy: IfNotPresent
+          name: mindie-motor-coordinator
+          startupProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh startup"
+            periodSeconds: 5
+            failureThreshold: 100
+          readinessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh readiness"
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh liveness"
+            periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 12
+          env:
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: HOST_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+          - name: CONFIGMAP_PATH
+            value: /mnt/configmap
+          - name: CONFIG_PATH
+            value: /usr/local/Ascend/pyMotor/conf
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          command: ["/bin/bash", "-c", "
+              source /mnt/configmap/boot.sh; \n
+          "]
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "16"
+            limits:
+              memory: "8Gi"
+              cpu: "64"
+          volumeMounts:
+          - name: motor-config
+            mountPath: /mnt/configmap
+          - name: coredump
+            mountPath: /var/coredump
+          - name: mnt
+            mountPath: /mnt
+          - name: plog-path
+            mountPath: /root/ascend/log
+      volumes:
+      - name: motor-config
+        configMap:
+          name: motor-config
+          defaultMode: 0550
+      - name: coredump
+        hostPath:
+          path: /var/coredump
+          type: DirectoryOrCreate
+      - name: mnt
+        hostPath:
+          path: /mnt
+      - name: plog-path
+        hostPath:
+          path: /root/ascend/log
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: mindie-motor-coordinator
+  name: mindie-motor-coordinator-service
+  namespace: mindie
+spec:
+  ports:
+    - port: 1026
+      protocol: TCP
+      targetPort: 1026
+  selector:
+    app: mindie-motor-coordinator
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: mindie-motor-coordinator
+  name: mindie-motor-coordinator-infer
+  namespace: mindie
+spec:
+  ports:
+    - nodePort: 31015
+      port: 1025
+      protocol: TCP
+      targetPort: 1025
+  selector:
+    app: mindie-motor-coordinator
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}

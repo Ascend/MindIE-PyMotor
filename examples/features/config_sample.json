@@ -1,0 +1,248 @@
+{
+  "version": "v2.0",
+  "motor_deploy_config": {
+    "p_instances_num": 1,
+    "d_instances_num": 1,
+    "single_p_instance_pod_num": 1,
+    "single_d_instance_pod_num": 1,
+    "p_pod_npu_num": 16,
+    "d_pod_npu_num": 16,
+    "image_name": "mindie-motor-vllm:dev-2.2.RC1.B153-800I-A3-py311-Ubuntu24.04-lts-aarch64",
+    "job_id": "mindie-motor",
+    "hardware_type": "800I_A3",
+    "weight_mount_path": "/mnt/weight/",
+    "tls_config": {
+      "infer_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "mgmt_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "etcd_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      },
+      "grpc_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
+      }
+    }
+  },
+  "motor_controller_config": {
+    "logging_config": {
+      "log_level": "INFO",
+      "log_max_line_length": 8192,
+      "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
+      "log_date_format": "%Y-%m-%d %H:%M:%S",
+       "host_log_dir": "/root/ascend/log",
+       "log_rotation_size": 10,
+       "log_rotation_count": 10,
+       "log_compress": true,
+       "log_compress_level": 6,
+       "log_max_total_size": 200
+    },
+    "api_config": {
+      "controller_api_host": "127.0.0.1",
+      "controller_api_dns": "mindie-motor-controller-service.mindie-motor.svc.cluster.local",
+      "controller_api_port": 1026
+    },
+    "instance_config": {
+      "instance_assemble_timeout": 600,
+      "instance_assembler_check_interval": 1,
+      "instance_assembler_cmd_send_interval": 1,
+      "instance_manager_check_interval": 1,
+      "instance_heartbeat_timeout": 5,
+      "instance_expired_timeout": 300,
+      "send_cmd_retry_times": 3
+    },
+    "event_config": {
+      "event_consumer_sleep_interval": 1.0,
+      "coordinator_heartbeat_interval": 5.0
+    },
+    "fault_tolerance_config": {
+      "enable_fault_tolerance": false,
+      "strategy_center_check_interval": 1,
+      "enable_scale_p2d": false,
+      "enable_lingqu_network_recover": false
+    },
+    "standby_config": {
+      "enable_master_standby": false,
+      "master_standby_check_interval": 5,
+      "master_lock_ttl": 10,
+      "master_lock_retry_interval": 5,
+      "master_lock_max_failures": 3,
+      "master_lock_key": "/controller/master_lock"
+    },
+    "etcd_config": {
+      "etcd_host": "etcd.default.svc.cluster.local",
+      "etcd_port": 2379,
+      "etcd_timeout": 5,
+      "enable_etcd_persistence": false
+    }
+  },
+  "motor_coordinator_config": {
+    "logging_config": {
+      "log_level": "INFO",
+      "log_max_line_length": 8192,
+      "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
+      "log_date_format": "%Y-%m-%d %H:%M:%S",
+       "host_log_dir": "/root/ascend/log",
+       "log_rotation_size": 10,
+       "log_rotation_count": 10,
+       "log_compress": true,
+       "log_compress_level": 6,
+       "log_max_total_size": 200
+    },
+    "prometheus_metrics_config": {
+      "reuse_time": 3
+    },
+    "exception_config": {
+      "max_retry": 5,
+      "retry_delay": 0.2,
+      "first_token_timeout": 600,
+      "infer_timeout": 3600
+    },
+    "scheduler_config": {
+      "deploy_mode": "pd_separate",
+      "scheduler_type": "load_balance"
+    },
+    "timeout_config": {
+      "request_timeout": 30,
+      "connection_timeout": 10,
+      "read_timeout": 15,
+      "write_timeout": 15,
+      "keep_alive_timeout": 60
+    },
+    "api_key_config": {
+      "enable_api_key": false,
+      "valid_keys": [],
+      "header_name": "Authorization",
+      "key_prefix": "Bearer ",
+      "skip_paths": [
+        "/",
+        "/openapi.json",
+        "/docs",
+        "/instances/refresh",
+        "/redoc",
+        "/liveness",
+        "/favicon.ico",
+        "/startup",
+        "/metrics",
+        "/readiness"
+      ],
+      "encryption_algorithm": "PBKDF2_SHA256"
+    },
+    "rate_limit_config": {
+      "enable_rate_limit": false,
+      "max_requests": 1000,
+      "window_size": 60,
+      "scope": "global",
+      "skip_paths": [
+        "/liveness",
+        "/readiness",
+        "/metrics",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/favicon.ico",
+        "/startup"
+      ],
+      "error_message": "too many requests, please try again later",
+      "error_status_code": 429
+    },
+    "standby_config": {
+      "enable_master_standby": false,
+      "master_standby_check_interval": 5,
+      "master_lock_ttl": 10,
+      "master_lock_retry_interval": 5,
+      "master_lock_max_failures": 3,
+      "master_lock_key": "/coordinator/master_lock"
+    },
+    "etcd_config": {
+      "etcd_host": "etcd.default.svc.cluster.local",
+      "etcd_port": 2379,
+      "etcd_timeout": 5,
+      "enable_etcd_persistence": false
+    },
+    "http_config": {
+      "combined_mode": false,
+      "coordinator_api_host": "127.0.0.1",
+      "coordinator_api_infer_port": 1025,
+      "coordinator_api_mgmt_port": 1026
+    },
+    "aigw_model": null,
+    "api_config": {
+      "coordinator_api_host": "127.0.0.1",
+      "coordinator_api_dns": "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local",
+      "coordinator_api_port": 1026
+    },
+    "tracer_config": {
+      "endpoint": "",
+      "root_sampling_rate": 1.0,
+      "remote_parent_sampled": 1.0,
+      "remote_parent_not_sampled": 1.0,
+      "local_parent_sampled": 1.0,
+      "local_parent_not_sampled": 1.0
+    }
+  },
+  "motor_nodemanger_config": {
+    "api_config": {
+      "pod_ip": "127.0.0.1",
+      "host_ip": "127.0.0.1",
+      "node_manager_port": 1026
+    },
+    "endpoint_config": {
+      "endpoint_num": 0,
+      "base_port": 10000,
+      "mgmt_ports": [],
+      "service_ports": []
+    },
+    "basic_config": {
+      "job_name": null,
+      "role": "both",
+      "model_name": "",
+      "hardware_type": "800I-A3",
+      "heartbeat_interval_seconds": 1,
+      "device_num": 0,
+      "parallel_config": {
+        "dp_size": 1,
+        "cp_size": 1,
+        "tp_size": 1,
+        "sp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "world_size": 1
+      }
+    },
+    "logging_config": {
+      "log_level": "INFO",
+      "log_max_line_length": 8192,
+      "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
+      "log_date_format": "%Y-%m-%d %H:%M:%S",
+       "host_log_dir": "/root/ascend/log",
+       "log_rotation_size": 10,
+       "log_rotation_count": 10,
+       "log_compress": true,
+       "log_compress_level": 6,
+       "log_max_total_size": 200
+    }
+  }
+}

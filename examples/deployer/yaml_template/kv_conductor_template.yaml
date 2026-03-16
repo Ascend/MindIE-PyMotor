@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindie-motor-kv-conductor
+  labels:
+    app: mindie-motor-kv-conductor
+  namespace: mindie
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mindie-motor-kv-conductor
+  template:
+    metadata:
+      labels:
+        app: mindie-motor-kv-conductor
+        deploy-name: mindie-motor-kv-conductor
+    spec:
+      terminationGracePeriodSeconds: 0
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1001
+      containers:
+        - image: mindie:1.0.0-aarch64-800I-A2
+          imagePullPolicy: IfNotPresent
+          name: mindie-motor-kv-conductor
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: "RuntimeDefault"
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONFIGMAP_PATH
+              value: /mnt/configmap
+            - name: CONFIG_PATH
+              value: /usr/local/Ascend/pyMotor/conf
+            - name: ROLE
+              value: kv_conductor
+          command: ["/bin/bash", "-c", "
+              source /mnt/configmap/boot.sh; \n
+          "]
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "4"
+            limits:
+              memory: "4Gi"
+              cpu: "8"
+          volumeMounts:
+            - name: motor-config
+              mountPath: /mnt/configmap
+            - name: coredump
+              mountPath: /var/coredump
+            - name: ascend-driver
+              mountPath: /usr/local/Ascend/driver
+      volumes:
+        - name: motor-config
+          configMap:
+            name: motor-config
+            defaultMode: 0550
+        - name: coredump
+          hostPath:
+            path: /var/coredump
+            type: DirectoryOrCreate
+        - name: ascend-driver
+          hostPath:
+            path: /usr/local/Ascend/driver
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: mindie-motor-kv-conductor
+  name: kv-conductor
+  namespace: mindie
+spec:
+  ports:
+  - port: 13333
+    protocol: TCP
+    targetPort: 13333
+  selector:
+    app: mindie-motor-kv-conductor
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

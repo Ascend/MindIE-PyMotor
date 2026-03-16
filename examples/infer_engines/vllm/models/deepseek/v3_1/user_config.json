@@ -1,0 +1,140 @@
+{
+    "version": "v2.0",
+    "motor_deploy_config": {
+      "p_instances_num": 2,
+      "d_instances_num": 1,
+      "single_p_instance_pod_num": 2,
+      "single_d_instance_pod_num": 4,
+      "p_pod_npu_num": 8,
+      "d_pod_npu_num": 8,
+      "image_name": "",
+      "job_id": "mindie-motor",
+      "hardware_type": "800I_A2",
+      "weight_mount_path": "/mnt/weight/",
+      "tls_config": {
+        "infer_tls_config": {
+          "tls_enable": false
+        },
+        "mgmt_tls_config": {
+          "tls_enable": false
+        },
+        "etcd_tls_config": {
+          "tls_enable": false
+        },
+        "grpc_tls_config": {
+          "tls_enable": false
+        }
+      }
+    },
+    "motor_controller_config": {
+      "standby_config": {
+        "enable_master_standby": false
+      }
+    },
+    "motor_coordinator_config": {
+      "standby_config": {
+        "enable_master_standby": false
+      },
+      "request_limit": {
+        "single_node_max_requests": 4096,
+        "max_requests": 10000
+      }
+    },
+    "motor_nodemanger_config": {
+    },
+    "motor_engine_prefill_config": {
+      "engine_type": "vllm",
+      "model_config": {
+        "model_name": "dsv3_1",
+        "model_path": "/mnt/weights/DeepSeek-V3.1_w8a8mix_mtp/",
+        "npu_mem_utils": 0.93,
+        "prefill_parallel_config": {
+          "dp_size": 2,
+          "tp_size": 8,
+          "pp_size": 1,
+          "enable_ep": true,
+          "dp_rpc_port": 9000
+        }
+      },
+      "engine_config": {
+        "enforce-eager": true,
+        "trust-remote-code": true,
+        "max_model_len": 40000,
+        "max-num-batched-tokens": 16384,
+        "max-num-seqs": 8,
+        "quantization": "ascend",
+        "seed": 1024,
+        "no-enable-prefix-caching": true,
+        "distributed-executor-backend": "mp",
+        "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
+        "additional-config": {"enable_shared_expert_dp": true},
+        "kv_transfer_config": {
+          "kv_connector": "MooncakeLayerwiseConnector",
+          "kv_buffer_device": "npu",
+          "kv_role": "kv_producer",
+          "kv_parallel_size": 1,
+          "kv_port": "20001",
+          "engine_id": "0",
+          "kv_rank": 0,
+          "kv_connector_module_path": "vllm_ascend.distributed.mooncake_layerwise_connector",
+          "kv_connector_extra_config": {
+        "use_ascend_direct": true,
+            "prefill": {},
+            "decode": {}
+          }
+        }
+      }
+    },
+    "motor_engine_decode_config": {
+      "engine_type": "vllm",
+      "model_config": {
+        "model_name": "dsv3_1",
+        "model_path": "/mnt/weights/DeepSeek-V3.1_w8a8mix_mtp/",
+        "npu_mem_utils": 0.9,
+        "decode_parallel_config": {
+          "dp_size": 32,
+          "tp_size": 1,
+          "pp_size": 1,
+          "enable_ep": true,
+          "dp_rpc_port": 9000
+        }
+      },
+      "engine_config": {
+        "trust-remote-code": true,
+        "max_model_len": 40000,
+        "max-num-batched-tokens": 256,
+        "max-num-seqs": 28,
+        "quantization": "ascend",
+        "seed": 1024,
+        "no-enable-prefix-caching": true,
+        "compilation_config": {
+          "cudagraph_mode": "FULL_DECODE_ONLY"
+          },      
+        "distributed-executor-backend": "mp",
+        "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
+        "kv_transfer_config": {
+          "kv_connector": "MooncakeLayerwiseConnector",
+          "kv_buffer_device": "npu",
+          "kv_role": "kv_consumer",
+          "kv_parallel_size": 1,
+          "kv_port": "20001",
+          "engine_id": "0",
+          "kv_rank": 0,
+          "kv_connector_module_path": "vllm_ascend.distributed.mooncake_layerwise_connector",
+          "kv_connector_extra_config": {
+            "use_ascend_direct": true,
+            "prefill": {},
+            "decode": {}
+          }
+        }
+      }
+    },
+    "kv_cache_pool_config": {
+      "metadata_server": "P2PHANDSHAKE",
+      "protocol": "ascend",
+      "device_name": "",
+      "alloc_in_same_node": true,
+      "global_segment_size": "1GB"
+    }
+  }
+  

@@ -1,0 +1,163 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mindie-motor-controller
+  namespace: mindie
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mindie-controller-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mindie-controller-binding
+subjects:
+- kind: ServiceAccount
+  name: mindie-motor-controller
+  namespace: mindie
+roleRef:
+  kind: ClusterRole
+  name: mindie-controller-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindie-motor-controller
+  labels:
+    app: mindie-motor-controller
+  namespace: mindie
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mindie-motor-controller
+  template:
+    metadata:
+      labels:
+        app: mindie-motor-controller
+        deploy-name: mindie-motor-controller
+    spec:
+      serviceAccountName: mindie-motor-controller
+      terminationGracePeriodSeconds: 0
+      securityContext:
+        fsGroup: 1001
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 30
+      containers:
+        - image: mindie:1.0.0-aarch64-800I-A2
+          imagePullPolicy: IfNotPresent
+          name: mindie-motor-controller
+          startupProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh startup"
+            periodSeconds: 5
+            failureThreshold: 100
+          readinessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh readiness"
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+              - bash
+              - -c
+              - "$CONFIGMAP_PATH/probe.sh liveness"
+            periodSeconds: 5
+            timeoutSeconds: 4
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: CONFIGMAP_PATH
+              value: /mnt/configmap
+            - name: CONFIG_PATH
+              value: /usr/local/Ascend/pyMotor/conf
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command: ["/bin/bash", "-c", "
+              source /mnt/configmap/boot.sh; \n
+          "]
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "4"
+            limits:
+              memory: "4Gi"
+              cpu: "8"
+          volumeMounts:
+            - name: motor-config
+              mountPath: /mnt/configmap
+            - name: coredump
+              mountPath: /var/coredump
+            - name: mnt
+              mountPath: /mnt
+            - name: plog-path
+              mountPath: /root/ascend/log
+      volumes:
+        - name: motor-config
+          configMap:
+            name: motor-config
+            defaultMode: 0550
+        - name: coredump
+          hostPath:
+            path: /var/coredump
+            type: DirectoryOrCreate
+        - name: mnt
+          hostPath:
+            path: /mnt
+        - name: plog-path
+          hostPath:
+            path: /root/ascend/log
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: mindie-motor-controller
+  name: mindie-motor-controller-service
+  namespace: mindie
+spec:
+  ports:
+  - port: 1026
+    protocol: TCP
+    targetPort: 1026
+  selector:
+    app: mindie-motor-controller
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}

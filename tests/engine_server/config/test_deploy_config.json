@@ -1,0 +1,44 @@
+{
+  "engine_type": "vllm",
+  "model_config": {
+    "model_name": "test_model",
+    "model_path": "/path/to/model",
+    "npu_mem_utils": 0.8,
+    "prefill_parallel_config": {
+      "dp_size": 2,
+      "tp_size": 4,
+      "pp_size": 1,
+      "enable_ep": true,
+      "dp_rpc_port": 9000
+    },
+    "decode_parallel_config": {
+      "dp_size": 1,
+      "tp_size": 2,
+      "pp_size": 1,
+      "enable_ep": false,
+      "dp_rpc_port": 9001
+    }
+  },
+  "engine_config": {
+    "max_batch_size": 128,
+    "gpu_memory_utilization": 0.9,
+    "tensor_parallel_size": 4,
+    "max_context_len_to_capture": 8192
+  },
+  "mgmt_tls_config": {
+    "enable_tls": false,
+    "ca_file": "",
+    "cert_file": "",
+    "key_file": "",
+    "passwd_file": "",
+    "crl_file": ""
+  },
+  "infer_tls_config": {
+    "enable_tls": false,
+    "ca_file": "",
+    "cert_file": "",
+    "key_file": "",
+    "passwd_file": "",
+    "crl_file": ""
+  }
+}

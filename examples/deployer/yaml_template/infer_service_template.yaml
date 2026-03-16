@@ -1,0 +1,489 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mindie-motor-controller
+  namespace: mindie
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mindie-controller-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mindie-controller-binding
+subjects:
+- kind: ServiceAccount
+  name: mindie-motor-controller
+  namespace: mindie
+roleRef:
+  kind: ClusterRole
+  name: mindie-controller-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: mindcluster.huawei.com/v1
+kind: InferServiceSet
+metadata:
+  name: vllm
+  namespace: mindie
+  labels: {}
+  annotations: {}
+spec:
+  replicas: 1
+  template:
+    roles:
+    - name: controller
+      replicas: 1
+      services:
+      - name: mindie-motor-service
+        spec:
+          ports:
+          - port: 1026
+            protocol: TCP
+            targetPort: 1026
+          selector:
+            app: mindie-motor-controller
+          sessionAffinity: None
+          type: ClusterIP
+      workload:
+        apiVersion: apps/v1
+        kind: Deployment
+      metadata:
+        labels:
+          app: mindie-motor-controller
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: mindie-motor-controller
+        template:
+          metadata:
+            labels:
+              app: mindie-motor-controller
+              deploy-name: mindie-motor-controller
+          spec:
+            serviceAccountName: mindie-motor-controller
+            terminationGracePeriodSeconds: 0
+            securityContext:
+              fsGroup: 1001
+            tolerations:
+            - key: "node.kubernetes.io/not-ready"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 30
+            - key: "node.kubernetes.io/unreachable"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 30
+            containers:
+            - image: mindie:1.0.0-aarch64-800I-A2
+              imagePullPolicy: IfNotPresent
+              name: mindie-motor-controller
+              startupProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh startup"]
+                periodSeconds: 5
+                failureThreshold: 100
+              readinessProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh readiness"]
+                periodSeconds: 5
+              livenessProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh liveness"]
+                periodSeconds: 5
+                timeoutSeconds: 4
+              env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HOST_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.hostIP
+              - name: CONFIGMAP_PATH
+                value: /mnt/configmap
+              - name: CONFIG_PATH
+                value: /usr/local/Ascend/pyMotor/conf
+              - name: POD_NAMESPACE
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              command: ["/bin/bash", "-c", "source /mnt/configmap/boot.sh;"]
+              resources:
+                requests:
+                  memory: "2Gi"
+                  cpu: "4"
+                limits:
+                  memory: "4Gi"
+                  cpu: "8"
+              volumeMounts:
+              - name: motor-config
+                mountPath: /mnt/configmap
+              - name: coredump
+                mountPath: /var/coredump
+              - name: mnt
+                mountPath: /mnt
+            volumes:
+            - name: motor-config
+              configMap:
+                name: motor-config
+                defaultMode: 360
+            - name: coredump
+              hostPath:
+                path: /var/coredump
+                type: DirectoryOrCreate
+            - name: mnt
+              hostPath:
+                path: /mnt
+
+    - name: coordinator
+      replicas: 1
+      services:
+      - name: mindie-motor-service
+        spec:
+          ports:
+          - port: 1026
+            protocol: TCP
+            targetPort: 1026
+          selector:
+            app: mindie-motor-coordinator
+          sessionAffinity: None
+          type: ClusterIP
+      - name: mindie-motor-infer
+        spec:
+          ports:
+          - nodePort: 31015
+            port: 1025
+            protocol: TCP
+            targetPort: 1025
+          selector:
+            app: mindie-motor-coordinator
+          sessionAffinity: None
+          type: NodePort
+      workload:
+        apiVersion: apps/v1
+        kind: Deployment
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: mindie-motor-coordinator
+        template:
+          metadata:
+            labels:
+              app: mindie-motor-coordinator
+          spec:
+            terminationGracePeriodSeconds: 0
+            automountServiceAccountToken: false
+            securityContext:
+              fsGroup: 1001
+            tolerations:
+            - key: "node.kubernetes.io/not-ready"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 30
+            - key: "node.kubernetes.io/unreachable"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 30
+            containers:
+            - image: mindie:1.0.0-aarch64-800I-A2
+              imagePullPolicy: IfNotPresent
+              name: mindie-motor-coordinator
+              startupProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh startup"]
+                periodSeconds: 5
+                failureThreshold: 100
+              readinessProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh readiness"]
+                periodSeconds: 5
+                timeoutSeconds: 4
+                failureThreshold: 12
+              livenessProbe:
+                exec:
+                  command: ["bash", "-c", "$CONFIGMAP_PATH/probe.sh liveness"]
+                periodSeconds: 5
+                timeoutSeconds: 4
+                failureThreshold: 12
+              env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HOST_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.hostIP
+              - name: CONFIGMAP_PATH
+                value: /mnt/configmap
+              - name: CONFIG_PATH
+                value: /usr/local/Ascend/pyMotor/conf
+              - name: POD_NAMESPACE
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+              command: ["/bin/bash", "-c", "source /mnt/configmap/boot.sh;"]
+              resources:
+                requests:
+                  memory: "4Gi"
+                  cpu: "16"
+                limits:
+                  memory: "8Gi"
+                  cpu: "64"
+              volumeMounts:
+              - name: motor-config
+                mountPath: /mnt/configmap
+              - name: coredump
+                mountPath: /var/coredump
+              - name: mnt
+                mountPath: /mnt
+            volumes:
+            - name: motor-config
+              configMap:
+                name: motor-config
+                defaultMode: 360
+            - name: coredump
+              hostPath:
+                path: /var/coredump
+                type: DirectoryOrCreate
+            - name: mnt
+              hostPath:
+                path: /mnt
+
+    - name: prefill
+      replicas: 4
+      workload:
+        apiVersion: apps/v1
+        kind: StatefulSet
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: mindie-server
+        template:
+          metadata:
+            labels:
+              fault-scheduling: grace
+              fault-retry-times: "10000"
+              app: mindie-server
+              ring-controller.atlas: ascend-910b
+          spec:
+            schedulerName: volcano
+            nodeSelector:
+              accelerator: huawei-Ascend910
+              accelerator-type: module-910b-8
+            terminationGracePeriodSeconds: 10
+            automountServiceAccountToken: false
+            securityContext:
+              fsGroup: 1001
+            containers:
+            - image: mindie:1.0.0-aarch64-800I-A2
+              imagePullPolicy: IfNotPresent
+              name: mindie-server
+              env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HOST_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.hostIP
+              - name: CONFIGMAP_PATH
+                value: /mnt/configmap
+              - name: CONFIG_PATH
+                value: /usr/local/Ascend/pyMotor/conf
+              command: ["/bin/bash", "-c", "source /mnt/configmap/boot.sh;"]
+              resources:
+                requests:
+                  memory: "64Gi"
+                  cpu: "16"
+                  huawei.com/Ascend910: 1
+                limits:
+                  memory: "256Gi"
+                  cpu: "64"
+                  huawei.com/Ascend910: 1
+              volumeMounts:
+              - name: data
+                mountPath: /data
+                readOnly: true
+              - name: motor-config
+                mountPath: /mnt/configmap
+              - name: queue-schedule
+                mountPath: /var/queue_schedule
+              - name: dshm
+                mountPath: /dev/shm
+              - name: coredump
+                mountPath: /var/coredump
+              - name: mnt
+                mountPath: /mnt
+              - name: hccn-tool
+                mountPath: /usr/local/Ascend/driver/tools/hccn_tool
+              - name: hccn-conf
+                mountPath: /etc/hccn.conf
+              - name: weight-mount
+                mountPath: /mnt/weight
+              - name: plog-path
+                mountPath: /root/ascend/log
+            volumes:
+            - name: data
+              hostPath:
+                path: /data
+            - name: motor-config
+              configMap:
+                name: motor-config
+                defaultMode: 360
+            - name: queue-schedule
+              hostPath:
+                path: /var/queue_schedule
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 4Gi
+            - name: coredump
+              hostPath:
+                path: /var/coredump
+                type: DirectoryOrCreate
+            - name: mnt
+              hostPath:
+                path: /mnt
+            - name: hccn-tool
+              hostPath:
+                path: /usr/local/Ascend/driver/tools/hccn_tool
+            - name: hccn-conf
+              hostPath:
+                path: /etc/hccn.conf
+            - name: weight-mount
+              hostPath:
+                path: /mnt/weight
+            - name: plog-path
+              hostPath:
+                path: /root/ascend/log
+                type: DirectoryOrCreate
+
+    - name: decode
+      replicas: 4
+      workload:
+        apiVersion: apps/v1
+        kind: StatefulSet
+      spec:
+        replicas: 2
+        selector:
+          matchLabels:
+            app: mindie-server
+        template:
+          metadata:
+            labels:
+              fault-scheduling: grace
+              fault-retry-times: "10000"
+              app: mindie-server
+              ring-controller.atlas: ascend-910b
+          spec:
+            schedulerName: volcano
+            nodeSelector:
+              accelerator: huawei-Ascend910
+              accelerator-type: module-910b-8
+            terminationGracePeriodSeconds: 10
+            automountServiceAccountToken: false
+            securityContext:
+              fsGroup: 1001
+            containers:
+            - image: mindie:1.0.0-aarch64-800I-A2
+              imagePullPolicy: IfNotPresent
+              name: mindie-server
+              env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HOST_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.hostIP
+              - name: CONFIGMAP_PATH
+                value: /mnt/configmap
+              - name: CONFIG_PATH
+                value: /usr/local/Ascend/pyMotor/conf
+              command: ["/bin/bash", "-c", "source /mnt/configmap/boot.sh;"]
+              resources:
+                requests:
+                  memory: "64Gi"
+                  cpu: "16"
+                  huawei.com/Ascend910: 1
+                limits:
+                  memory: "256Gi"
+                  cpu: "64"
+                  huawei.com/Ascend910: 1
+              volumeMounts:
+              - name: data
+                mountPath: /data
+                readOnly: true
+              - name: motor-config
+                mountPath: /mnt/configmap
+              - name: queue-schedule
+                mountPath: /var/queue_schedule
+              - name: dshm
+                mountPath: /dev/shm
+              - name: coredump
+                mountPath: /var/coredump
+              - name: mnt
+                mountPath: /mnt
+              - name: hccn-tool
+                mountPath: /usr/local/Ascend/driver/tools/hccn_tool
+              - name: hccn-conf
+                mountPath: /etc/hccn.conf
+              - name: weight-mount
+                mountPath: /mnt/weight
+              - name: plog-path
+                mountPath: /root/ascend/log
+            volumes:
+            - name: data
+              hostPath:
+                path: /data
+            - name: motor-config
+              configMap:
+                name: motor-config
+                defaultMode: 360
+            - name: queue-schedule
+              hostPath:
+                path: /var/queue_schedule
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 4Gi
+            - name: coredump
+              hostPath:
+                path: /var/coredump
+                type: DirectoryOrCreate
+            - name: mnt
+              hostPath:
+                path: /mnt
+            - name: hccn-tool
+              hostPath:
+                path: /usr/local/Ascend/driver/tools/hccn_tool
+            - name: hccn-conf
+              hostPath:
+                path: /etc/hccn.conf
+            - name: weight-mount
+              hostPath:
+                path: /mnt/weight
+            - name: plog-path
+              hostPath:
+                path: /root/ascend/log
+                type: DirectoryOrCreate

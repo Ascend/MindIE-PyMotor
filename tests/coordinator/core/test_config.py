@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+# MindIE is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#         http://license.coscl.org.cn/MulanPSL2
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+
+import os
+import json
+import pytest
+import tempfile
+
+from motor.config.coordinator import CoordinatorConfig
+
+
+@pytest.fixture
+def temp_json_file():
+    """Fixture for temporary JSON file that gets cleaned up."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_path = f.name
+
+    yield temp_path
+
+    # Cleanup
+    try:
+        os.unlink(temp_path)
+    except FileNotFoundError:
+        pass
+
+
+@pytest.fixture
+def sample_config_data():
+    """Sample configuration data for testing"""
+    return {
+        "logging_config": {
+            "log_level": "DEBUG",
+            "log_max_line_length": 4096
+        },
+        "exception_config": {
+            "max_retry": 10
+        },
+        "scheduler_config": {
+            "deploy_mode": "single_node"
+        },
+        "api_key_config": {
+            "enable_api_key": True
+        }
+    }
+
+
+# Complete configuration template for testing
+COMPLETE_CONFIG = {
+    "logging_config": {
+        "log_level": "DEBUG",
+        "log_max_line_length": 4096,
+        "log_file": "/tmp/test.log",
+        "log_format": "%(levelname)s [%(filename)s:%(lineno)d] %(message)s",
+        "log_date_format": "%Y-%m-%d %H:%M:%S"
+    },
+    "prometheus_metrics_config": {
+        "reuse_time": 3
+    },
+    "exception_config": {
+        "max_retry": 5,
+        "retry_delay": 0.2,
+        "first_token_timeout": 600,
+        "infer_timeout": 3600,
+    },
+    "tls_config": {
+    },
+    "scheduler_config": {
+        "deploy_mode": "single_node",
+        "scheduler_type": "load_balance"
+    },
+    "timeout_config": {
+        "request_timeout": 30,
+        "connection_timeout": 10,
+        "read_timeout": 15,
+        "write_timeout": 15,
+        "keep_alive_timeout": 60
+    },
+    "api_key_config": {
+        "enable_api_key": True,
+        "valid_keys": ["key1", "key2"],
+        "header_name": "X-API-Key",
+        "key_prefix": "Bearer ",
+        "skip_paths": ["/liveness", "/metrics"]
+    },
+    "rate_limit_config": {
+        "enable_rate_limit": True,
+        "max_requests": 100,
+        "window_size": 60,
+        "scope": "global",
+        "skip_paths": ["/liveness"],
+        "error_message": "Rate limit exceeded",
+        "error_status_code": 429
+    },
+    "standby_config": {
+        "enable_master_standby": True,
+        "master_standby_check_interval": 5,
+        "master_lock_ttl": 60,
+        "master_lock_retry_interval": 5,
+        "master_lock_max_failures": 3,
+        "master_lock_key": "/master/lock"
+    },
+    "etcd_config": {
+        "etcd_host": "localhost",
+        "etcd_port": 2379,
+        "etcd_timeout": 5,
+        "enable_etcd_persistence": True
+    },
+    "http_config": {
+        "combined_mode": False,
+        "coordinator_api_host": "127.0.0.1",
+        "coordinator_api_infer_port": 1026,
+        "coordinator_api_mgmt_port": 1025
+    }
+}
+
+
+def test_default_config_initialization():
+    """Test default configuration initialization"""
+    config = CoordinatorConfig()
+
+    # Verify default values
+    assert config.logging_config.log_level == "INFO"
+    assert config.logging_config.log_max_line_length == 8192
+    assert config.prometheus_metrics_config.reuse_time == 3
+    assert config.exception_config.max_retry == 5
+    assert config.exception_config.first_token_timeout == 600
+    assert config.scheduler_config.deploy_mode.value == "pd_separate"
+    assert config.scheduler_config.scheduler_type.value == "load_balance"
+    assert config.timeout_config.request_timeout == 30
+    assert config.api_key_config.enable_api_key is False
+    assert config.rate_limit_config.enable_rate_limit is False
+    assert config.http_config.coordinator_api_infer_port == 1025
+    assert config.http_config.coordinator_api_mgmt_port == 1026
+
+
+def test_from_json_success(temp_json_file):
+    """Test loading configuration from valid JSON file"""
+    test_config = {
+        "logging_config": {
+            "log_level": "DEBUG",
+            "log_max_line_length": 4096
+        },
+        "exception_config": {
+            "max_retry": 10
+        },
+        "scheduler_config": {
+            "deploy_mode": "single_node"
+        },
+        "api_key_config": {
+            "enable_api_key": True,
+            "valid_keys": ["test-key"],
+            "header_name": "X-API-Key",
+            "key_prefix": "Bearer "
+        },
+        "rate_limit_config": {
+            "enable_rate_limit": True,
+            "max_requests": 100,
+            "window_size": 60,
+            "error_status_code": 429
+        }
+    }
+
+    with open(temp_json_file, 'w') as f:
+        json.dump(test_config, f)
+
+    config = CoordinatorConfig.from_json(temp_json_file)
+    assert config.logging_config.log_level == "DEBUG"
+    assert config.logging_config.log_max_line_length == 4096
+    assert config.exception_config.max_retry == 10
+    assert config.scheduler_config.deploy_mode.value == "single_node"
+    assert config.api_key_config.enable_api_key is True
+    assert config.rate_limit_config.enable_rate_limit is True
+    assert config.config_path == temp_json_file
+
+
+def test_from_json_with_invalid_json(temp_json_file):
+    """Test loading configuration from invalid JSON file"""
+    with open(temp_json_file, 'w') as f:
+        f.write("invalid json content")
+
+    # Should use default configuration instead of raising exception
+    config = CoordinatorConfig.from_json(temp_json_file)
+    assert config is not None
+    assert config.http_config.coordinator_api_infer_port == 1025  # default value
+
+
+def test_from_json_file_not_found():
+    """Test loading configuration from non-existent file"""
+    # Should use default configuration instead of raising exception
+    config = CoordinatorConfig.from_json("/non/existent/file.json")
+    assert config is not None
+    assert config.http_config.coordinator_api_infer_port == 1025  # default value
+
+
+def test_config_validation_success():
+    """Test successful configuration validation"""
+    config = CoordinatorConfig()
+    # Should not raise any exception
+    config.validate_config()
+
+
+@pytest.mark.parametrize("param,value,expected_error", [
+    ("log_max_line_length", -1, "log_max_line_length must be greater than 0"),
+    ("max_retry", -1, "max_retry cannot be negative"),
+    ("retry_delay", -0.1, "retry_delay must be greater than 0"),
+    ("first_token_timeout", -1, "first_token_timeout must be greater than 0"),
+    ("infer_timeout", 0, "infer_timeout must be greater than 0"),
+    ("request_timeout", -1, "request_timeout must be greater than 0"),
+    ("connection_timeout", 0, "connection_timeout must be greater than 0"),
+    ("read_timeout", -1, "read_timeout must be greater than 0"),
+    ("write_timeout", 0, "write_timeout must be greater than 0"),
+    ("keep_alive_timeout", -1, "keep_alive_timeout must be greater than 0"),
+    ("coordinator_api_infer_port", 0, "coordinator_api_infer_port must be in range 1-65535"),
+    ("coordinator_api_mgmt_port", 65536, "coordinator_api_mgmt_port must be in range 1-65535"),
+    ("max_requests", -1, "max_requests must be greater than 0"),
+    ("window_size", 0, "window_size must be greater than 0"),
+    ("error_status_code", 99, "error_status_code must be in range 100-599"),
+    ("error_status_code", 600, "error_status_code must be in range 100-599"),
+    ("reuse_time", 0, "reuse_time must be greater than 0"),
+    ("master_standby_check_interval", -1, "master_standby_check_interval must be greater than 0"),
+    ("etcd_port", 0, "etcd_port must be in range 1-65535"),
+    ("etcd_timeout", 0, "etcd_timeout must be greater than 0"),
+])
+def test_config_validation_errors(param, value, expected_error):
+    """Test various configuration validation errors"""
+    with pytest.raises(ValueError, match=expected_error):
+        config = CoordinatorConfig()
+        if param in ["log_max_line_length"]:
+            setattr(config.logging_config, param, value)
+        elif param in ["max_retry", "retry_delay", "first_token_timeout", "infer_timeout"]:
+            setattr(config.exception_config, param, value)
+        elif param in ["request_timeout", "connection_timeout", "read_timeout", "write_timeout", "keep_alive_timeout"]:
+            setattr(config.timeout_config, param, value)
+        elif param in ["coordinator_api_infer_port", "coordinator_api_mgmt_port"]:
+            setattr(config.http_config, param, value)
+        elif param in ["max_requests", "window_size", "error_status_code"]:
+            setattr(config.rate_limit_config, param, value)
+        elif param in ["reuse_time"]:
+            setattr(config.prometheus_metrics_config, param, value)
+        elif param in ["master_standby_check_interval"]:
+            setattr(config.standby_config, param, value)
+        elif param in ["etcd_port", "etcd_timeout"]:
+            setattr(config.etcd_config, param, value)
+        config.validate_config()
+
+
+def test_config_validation_multiple_errors():
+    """Test multiple configuration errors"""
+    with pytest.raises(ValueError) as exc_info:
+        config = CoordinatorConfig()
+        config.exception_config.max_retry = -1
+        config.rate_limit_config.max_requests = -1
+        config.validate_config()
+    error_msg = str(exc_info.value)
+    assert "max_retry cannot be negative" in error_msg
+    assert "max_requests must be greater than 0" in error_msg
+
+
+def test_to_dict():
+    """Test configuration serialization to dict"""
+    config = CoordinatorConfig()
+    config_dict = config.to_dict()
+
+    # Check that all config sections are present
+    expected_keys = [
+        'logging_config', 'prometheus_metrics_config', 'exception_config',
+        'scheduler_config', 'inference_workers_config', 'infer_tls_config', 'mgmt_tls_config', 'etcd_tls_config',
+        'timeout_config', 'api_key_config', 'rate_limit_config', 'standby_config',
+        'etcd_config', 'http_config', 'aigw_model', 'api_config'
+    ]
+
+    for key in expected_keys:
+        assert key in config_dict
+
+    # Check that internal fields are not present
+    assert 'config_path' not in config_dict
+    assert 'last_modified' not in config_dict
+
+    # Check enum serialization
+    assert config_dict['scheduler_config']['deploy_mode'] == 'pd_separate'
+    assert config_dict['scheduler_config']['scheduler_type'] == 'load_balance'
+
+
+def test_save_to_json(temp_json_file):
+    """Test saving configuration to JSON file"""
+    config = CoordinatorConfig()
+    config.logging_config.log_level = "DEBUG"
+    config.exception_config.max_retry = 10
+
+    success = config.save_to_json(temp_json_file)
+    assert success is True
+
+    # Verify saved content
+    with open(temp_json_file, 'r') as f:
+        saved_data = json.load(f)
+
+    assert saved_data['logging_config']['log_level'] == 'DEBUG'
+    assert saved_data['exception_config']['max_retry'] == 10
+    assert saved_data['scheduler_config']['deploy_mode'] == 'pd_separate'
+
+
+def test_save_to_json_invalid_path():
+    """Test saving configuration to invalid path"""
+    config = CoordinatorConfig()
+    success = config.save_to_json("/invalid/path/config.json")
+    assert success is False
+
+
+def test_config_summary():
+    """Test configuration summary generation."""
+    config = CoordinatorConfig()
+    summary = config.get_config_summary()
+
+    assert "Coordinator Configuration Summary" in summary
+    assert "Log Level" in summary
+    assert "Log Max Line Length" in summary
+    assert "HTTP Pod IP" in summary
+    assert "Inference Port" in summary
+    assert "Management Port" in summary
+    assert "Combined Mode" in summary
+    assert "Deploy Mode" in summary
+    assert "Scheduler Type" in summary
+    assert "API Key Auth" in summary
+    assert "Rate Limiting" in summary
+    assert "Master/Standby" in summary
+    assert "Config Path" in summary
+
+
+def test_multiple_instances():
+    """Test that multiple instances can be created independently"""
+    config1 = CoordinatorConfig()
+    config2 = CoordinatorConfig()
+    assert config1 is not config2
+
+    # Modify one instance and verify the other is not affected
+    original_value = config1.exception_config.max_retry
+    config1.exception_config.max_retry = 999
+    assert config2.exception_config.max_retry == original_value
+
+
+def test_reload_config(temp_json_file):
+    """Test configuration reload functionality"""
+    # Create initial config
+    initial_config = {
+        "exception_config": {"max_retry": 5}
+    }
+    with open(temp_json_file, 'w') as f:
+        json.dump(initial_config, f)
+
+    config = CoordinatorConfig.from_json(temp_json_file)
+    assert config.exception_config.max_retry == 5
+
+    # Modify config file
+    updated_config = {
+        "exception_config": {"max_retry": 10}
+    }
+    with open(temp_json_file, 'w') as f:
+        json.dump(updated_config, f)
+
+    # Force update file modification time
+    import os
+    import time
+    current_time = time.time()
+    os.utime(temp_json_file, (current_time, current_time))
+
+    # Reload config
+    success = config.reload()
+    assert success is True
+    assert config.exception_config.max_retry == 10
+
+
+def test_reload_config_file_not_modified(temp_json_file):
+    """Test reload when config file is not modified"""
+    initial_config = {
+        "exception_config": {"max_retry": 5}
+    }
+    with open(temp_json_file, 'w') as f:
+        json.dump(initial_config, f)
+
+    config = CoordinatorConfig.from_json(temp_json_file)
+
+    # Reload without modifying file
+    success = config.reload()
+    assert success is True  # Should return True because no change needed
+
+
+def test_reload_config_file_not_found():
+    """Test reload when config file doesn't exist"""
+    config = CoordinatorConfig()
+    config.config_path = "/non/existent/file.json"
+    success = config.reload()
+    assert success is False
