@@ -7,16 +7,16 @@
 目标：
 - 支持通过 **InferServiceSet CRD**（`mindcluster.huawei.com/v1`）统一拉起 controller、coordinator、prefill、decode 等角色对应的 pod。
 - 使用 `infer_service_init.yaml` 作为 init 模板，经 deploy.py 根据 `user_config.json` 实例化后输出可用的 `infer_service.yaml`。
-- 默认采用 InferServiceSet 方式部署；在 `user_config.json` 的 `motor_deploy_config.deployment_backend` 中配置为 `multi_deployment` 可切换回传统的多 yaml Deployment 方式。扩缩容与 CM 刷新时从集群 ConfigMap 读取当前部署方式。
+- 默认采用 InferServiceSet 方式部署；在 `user_config.json` 的 `motor_deploy_config.deploy_mode` 中配置为 `multi_deployment` 可切换回传统的多 yaml Deployment 方式。扩缩容与 CM 刷新时从集群 ConfigMap 读取当前部署方式。
 - CRD 方式下，扩缩容通过重新生成并 apply InferServiceSet 实现，由 CRD controller 负责 pod 的创建与更新。
 
 ## 设计概述
 
 ### 部署模式
 
-部署模式由 `user_config.json` 中 `motor_deploy_config.deployment_backend` 决定（不配置时默认为 `infer_service_set`）。扩缩容（`--update_instance_num`）与刷新 ConfigMap（`--update_config`）时，均以集群 ConfigMap 的 baseline 中的 `deployment_backend` 为准；若 user_config 中修改了该字段、与 baseline 不一致则报错，不允许在该场景下切换部署方式。
+部署模式由 `user_config.json` 中 `motor_deploy_config.deploy_mode` 决定（不配置时默认为 `infer_service_set`）。扩缩容（`--update_instance_num`）与刷新 ConfigMap（`--update_config`）时，均以集群 ConfigMap 的 baseline 中的 `deploy_mode` 为准；若 user_config 中修改了该字段、与 baseline 不一致则报错，不允许在该场景下切换部署方式。
 
-| 模式 | motor_deploy_config.deployment_backend | 说明 |
+| 模式 | motor_deploy_config.deploy_mode | 说明 |
 |------|--------------------------------------|------|
 | infer_service_set | `infer_service_set`（默认，可省略） | 仅生成并 apply `infer_service.yaml`，内含 RBAC + InferServiceSet；由 CRD controller 拉起 pod |
 | multi_deployment | `multi_deployment` | 生成 controller、coordinator、engine_*、kv_pool 等多个独立 yaml，分别 apply |
@@ -95,11 +95,11 @@ flowchart TD
 
 ### 3. 部署模式与 CM 校验
 
-- 首次部署时从 `user_config.json` 的 `motor_deploy_config.deployment_backend` 读取模式（缺省为 `infer_service_set`）。
-- 扩缩容时从集群 ConfigMap 的 baseline 读取当前 `deployment_backend`，按该模式执行扩缩，无需用户再次指定。
-- **禁止在 update 场景下修改 deployment_backend**：
-  - `--update_config`：显式校验；若 `user_config.json` 中的 `deployment_backend` 与集群 baseline 不一致则报错，禁止通过仅刷新 CM 切换部署方式。
-  - `--update_instance_num`：通过 `validate_only_instance_changed` 校验；仅允许修改 `p_instances_num`、`d_instances_num`，修改 `deployment_backend` 会导致 config 与 baseline 差异，报错退出。
+- 首次部署时从 `user_config.json` 的 `motor_deploy_config.deploy_mode` 读取模式（缺省为 `infer_service_set`）。
+- 扩缩容时从集群 ConfigMap 的 baseline 读取当前 `deploy_mode`，按该模式执行扩缩，无需用户再次指定。
+- **禁止在 update 场景下修改 deploy_mode**：
+  - `--update_config`：显式校验；若 `user_config.json` 中的 `deploy_mode` 与集群 baseline 不一致则报错，禁止通过仅刷新 CM 切换部署方式。
+  - `--update_instance_num`：通过 `validate_only_instance_changed` 校验；仅允许修改 `p_instances_num`、`d_instances_num`，修改 `deploy_mode` 会导致 config 与 baseline 差异，报错退出。
 
 ## 场景介绍
 
@@ -107,19 +107,19 @@ flowchart TD
 
 - 准备可用的 `user_config.json`（含合法 `p_instances_num`、`d_instances_num` 等）。
 - 确保集群已安装 MindCluster infer-operator。
-- `deployment/infer_service_init.yaml` 存在且格式正确。
+- `examples/deployer/yaml_template/` 下 infer_service 相关模板存在且格式正确。
 
 ### 应用场景
 
 | 场景 | 步骤 | 预期 |
 |------|------|------|
-| 首次部署（infer_service_set） | `motor_deploy_config` 中不配置或配置 `"deployment_backend": "infer_service_set"`，执行 `python3 deploy.py` | 成功；生成 `output/deployment/infer_service.yaml`；RBAC 与 InferServiceSet 被 apply；ConfigMap motor-config 存在；CRD controller 拉起 controller/coordinator/prefill/decode pod；服务能正常推理 |
-| 首次部署（multi_deployment） | `motor_deploy_config` 中配置 `"deployment_backend": "multi_deployment"`，执行 `python3 deploy.py` | 成功；生成 controller、coordinator、engine_*、kv_pool 等多个 yaml；分别 apply；各 Deployment 拉起对应 pod；服务可以正常推理 |
+| 首次部署（infer_service_set） | `motor_deploy_config` 中不配置或配置 `"deploy_mode": "infer_service_set"`，执行 `python3 deploy.py` | 成功；生成 `output/deployment/infer_service.yaml`；RBAC 与 InferServiceSet 被 apply；ConfigMap motor-config 存在；CRD controller 拉起 controller/coordinator/prefill/decode pod；服务能正常推理 |
+| 首次部署（multi_deployment） | `motor_deploy_config` 中配置 `"deploy_mode": "multi_deployment"`，执行 `python3 deploy.py` | 成功；生成 controller、coordinator、engine_*、kv_pool 等多个 yaml；分别 apply；各 Deployment 拉起对应 pod；服务可以正常推理 |
 | infer_service_set 扩容 | 调大 `p_instances_num` 或 `d_instances_num`，执行 `python3 deploy.py --update_instance_num` | 成功；重新生成 infer_service.yaml；apply 后 CRD controller 扩展 prefill/decode pod |
 | infer_service_set 缩容 | 调小实例数，执行 `python3 deploy.py --update_instance_num` | 成功；InferServiceSet 中 replicas 减小；apply 后 CRD controller 回收多余 pod |
 | 无 infer_service_init | 删除或移走 infer_service_init.yaml，执行 infer_service_set 模式部署 | 报错：InferServiceSet init yaml not found |
-| 修改 deployment_backend 后仅刷新 CM | 首次 infer_service_set 部署后，将 user_config 中 `deployment_backend` 改为 `multi_deployment` 并执行 `--update_config` | 报错：deployment_backend 不能通过刷新 ConfigMap 修改，需重新部署 |
-| 修改 deployment_backend 后扩缩容 | 首次 infer_service_set 部署后，将 user_config 中 `deployment_backend` 改为 `multi_deployment` 并执行 `--update_instance_num` | 报错：仅允许修改 p_instances_num/d_instances_num，deployment_backend 变更视为非法 |
+| 修改 deploy_mode 后仅刷新 CM | 首次 infer_service_set 部署后，将 user_config 中 `deploy_mode` 改为 `multi_deployment` 并执行 `--update_config` | 报错：deploy_mode 不能通过刷新 ConfigMap 修改，需重新部署 |
+| 修改 deploy_mode 后扩缩容 | 首次 infer_service_set 部署后，将 user_config 中 `deploy_mode` 改为 `multi_deployment` 并执行 `--update_instance_num` | 报错：仅允许修改 p_instances_num/d_instances_num，deploy_mode 变更视为非法 |
 
 ## 与 multi_deployment 模式对比
 

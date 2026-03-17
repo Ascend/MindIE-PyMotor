@@ -142,10 +142,15 @@ pyMotor开启tracing能力需修改env.json配置文件和user_config.json配置
 
 ### 2.3 部署服务
 
-通过deploy.py脚本部署服务。
+在 `examples/deployer` 目录下通过 deploy.py 脚本部署服务。支持指定配置目录或单独指定配置文件：
 
 ```bash
-python deploy.py
+cd examples/deployer
+# 方式一：指定配置目录（推荐）
+python deploy.py --config_dir ../infer_engines/vllm
+
+# 方式二：单独指定配置文件
+python deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
 ```
 
 ### 2.4 部署jaeger

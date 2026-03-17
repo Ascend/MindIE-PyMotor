@@ -47,7 +47,7 @@
 - 原因分析
 	<br>硬件故障和相关环境变量设置出错均有可能导致该问题。
 - 解决方案
-    - 确保启动脚本文件夹下的deployer/env.json文件中HCCL_CONNECT_TIMEOUT环境变量取值在[120,7200]的范围内，随后登录到报错服务器上执行npu-smi set -t reset -i id -c chip_id [-m 1]对npu执行复位操作。
+    - 确保启动脚本文件夹下的`examples/infer_engines/vllm/env.json` 等（以实际使用的配置为准，如 `examples/infer_engines/vllm/models/deepseek/v3_1/env_v3_1_A2_EP32.json`）文件中HCCL_CONNECT_TIMEOUT环境变量取值在[120,7200]的范围内，随后登录到报错服务器上执行npu-smi set -t reset -i id -c chip_id [-m 1]对npu执行复位操作。
       ```
       设备id。通过npu-smi info -l命令查出的NPU ID即为设备id。
       chip_id:芯片id。通过npu-smi info -m命令查出的Chip ID即为芯片id。

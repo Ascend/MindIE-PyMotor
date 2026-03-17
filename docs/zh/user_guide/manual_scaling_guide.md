@@ -17,9 +17,15 @@
 ## 操作步骤
 
 ### 1. 首次部署
-执行全量部署：
+在 `examples/deployer` 目录下执行全量部署：
+
 ```bash
-python3 deploy.py
+cd examples/deployer
+# 方式一：指定配置目录（推荐）
+python3 deploy.py --config_dir ../infer_engines/vllm
+
+# 方式二：单独指定配置文件
+python3 deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
 ```
 完成后：
 - 集群中会创建/更新 ConfigMap `motor-config`（内容来自当前输入的 `user_config.json`），作为后续扩缩容与刷新的基线。
@@ -29,10 +35,14 @@ python3 deploy.py
 1. 修改 `user_config.json` 中的实例数：
    - `p_instances_num`
    - `d_instances_num`
-2. 执行扩缩容命令：
+2. 在 `examples/deployer` 目录下执行扩缩容命令：
+
 ```bash
-python3 deploy.py --update_instance_num
+cd examples/deployer
+python3 deploy.py --config_dir ../infer_engines/vllm --update_instance_num
 ```
+
+若使用单独指定配置文件方式部署，扩缩容时需同样指定 `--user_config_path` 和 `--env_config_path`。
 
 说明：
 - 基线来自集群 ConfigMap（motor-config），与当前输入对比，仅允许实例数变化。
@@ -43,9 +53,10 @@ python3 deploy.py --update_instance_num
 ## 常见问题
 
 ### 1) 报错：ConfigMap motor-config not found or has no user_config in cluster
-表示尚未进行过全量部署，或对应 namespace 下没有 motor-config。请先执行：
+表示尚未进行过全量部署，或对应 namespace 下没有 motor-config。请先在 `examples/deployer` 目录下执行全量部署，例如：
 ```bash
-python3 deploy.py
+cd examples/deployer
+python3 deploy.py --config_dir ../infer_engines/vllm
 ```
 
 ### 2) 报错：user_config changes detected beyond instance numbers

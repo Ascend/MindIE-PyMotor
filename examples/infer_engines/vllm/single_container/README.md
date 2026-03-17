@@ -76,9 +76,13 @@ ii. kv_port需确保每个dp组不重叠，实际部署时会自动按照先P后
 
 ### 2.2 部署服务
 
-当前目录提供了user_config模板——`user_config.json`，仅需在deployer目录下执行以下命令即可完成服务部署：
+当前目录提供了 user_config 模板——`user_config.json`，在 `examples/deployer` 目录下执行以下命令即可完成服务部署：
 
-```python
-# cd to deployer directory and run deploy.py
-python deploy.py --dir ../infer_engines/vllm/single_container/
+```bash
+cd examples/deployer
+# 方式一：指定配置目录（推荐）
+python deploy.py --config_dir ../infer_engines/vllm/single_container
+
+# 方式二：单独指定配置文件
+python deploy.py --user_config_path ../infer_engines/vllm/single_container/user_config.json --env_config_path ../infer_engines/vllm/single_container/env.json
 ```

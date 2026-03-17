@@ -155,10 +155,15 @@ ETCD服务端仅需部署一套，请参考[ETCD部署](#32-部署etcd服务端)
     > ```
 
 ### 1.2.5 启动MindIE
-1. 执行以下命令启动。
+1. 在 `examples/deployer` 目录下执行以下命令启动。支持指定配置目录或单独指定配置文件：
 
     ```bash
-    python deploy.py
+    cd examples/deployer
+    # 方式一：指定配置目录（推荐）
+    python deploy.py --config_dir ../infer_engines/vllm
+
+    # 方式二：单独指定配置文件
+    python deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
     ```
 
     >[!NOTE]说明
@@ -169,7 +174,7 @@ ETCD服务端仅需部署一套，请参考[ETCD部署](#32-部署etcd服务端)
 
     有以下两种方式发送请求：
     -  Coordinator主节点的虚拟IP和端口号：`http://PodIP:1025`。（其中仅有READY为1/1的才可执行推理请求）
-    -  K8s集群内任意物理机IP:31015（端口号需与coordinator_init.yaml中mindie-motor-coordinator-infer的nodePort端口保持一致）。
+    -  K8s集群内任意物理机IP:31015（端口号需与 `examples/deployer/yaml_template/coordinator_template.yaml`（multi_deployment 场景）或 `examples/deployer/yaml_template/infer_service_template.yaml`（CRD 场景）中 mindie-motor-coordinator-infer 的 nodePort 端口保持一致）。
 
     使用物理机IP和端口号方式样例：
     ```
@@ -280,7 +285,7 @@ ETCD服务端部署请参考[ETCD部署](#32-部署etcd服务端)。
 1. 配置coordinator侧证书挂载。
 
     <b>如果不开启CA证书，请跳过此步骤。</b><br>
-    如果需要开启证书CA认证。根据[3.1](#31-生成etcd安全证书可选)生成的证书文件，将证书文件的生成路径挂载至Coordinator容器内。在deployment/coordinator_init.yaml文件中的volumeMounts和volumes中添加如下内容（coordinator-ca为挂载的证书目录）：
+    如果需要开启证书CA认证。根据[3.1](#31-生成etcd安全证书可选)生成的证书文件，将证书文件的生成路径挂载至Coordinator容器内。在 `examples/deployer/yaml_template/coordinator_template.yaml` 文件中的 volumeMounts 和 volumes 中添加如下内容（coordinator-ca 为挂载的证书目录）：
 
     ```
     ...
@@ -364,10 +369,15 @@ ETCD服务端部署请参考[ETCD部署](#32-部署etcd服务端)。
     > ```
 
 ### 2.2.5 启动MindIE
-1. 执行以下命令启动。
+1. 在 `examples/deployer` 目录下执行以下命令启动。支持指定配置目录或单独指定配置文件：
 
     ```bash
-    python deploy.py
+    cd examples/deployer
+    # 方式一：指定配置目录（推荐）
+    python deploy.py --config_dir ../infer_engines/vllm
+
+    # 方式二：单独指定配置文件
+    python deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
     ```
 
     >[!NOTE]说明
@@ -378,7 +388,7 @@ ETCD服务端部署请参考[ETCD部署](#32-部署etcd服务端)。
 
     有以下两种方式发送请求：
     -  Coordinator主节点的虚拟IP和端口号：`http://PodIP:1025`。（其中仅有READY为1/1的才可执行推理请求）
-    -  K8s集群内任意物理机IP:31015（端口号需与coordinator_init.yaml中mindie-motor-coordinator-infer的nodePort端口保持一致）。
+    -  K8s集群内任意物理机IP:31015（端口号需与 `examples/deployer/yaml_template/coordinator_template.yaml`（multi_deployment 场景）或 `examples/deployer/yaml_template/infer_service_template.yaml`（CRD 场景）中 mindie-motor-coordinator-infer 的 nodePort 端口保持一致）。
 
     该样例使用物理机IP和端口号方式：
     ```

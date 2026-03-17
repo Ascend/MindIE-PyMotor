@@ -76,16 +76,19 @@
 
 ### 3.2 PD分离部署
 
-> [!NOTE]部署后端说明
-> 当前默认采用 **CRD 方式**（基于 MindCluster 的 PD 分离 CRD 与 Operator）进行部署。该方式尚未完成 RAS 能力与池化能力的适配验证。若您需要 RAS（可靠性、可用性、可服务性）或 KV 池化能力，可在 `user_config.json` 中增加相应配置，切换为原有的多 YAML Deployment 方式（由 `deploy.py` 生成并 apply 多个 Deployment YAML）。完整部署说明请参考 [PD 分离服务部署](./service_deployment/pd_disaggregation_deployment.md)。
+> [!NOTE]部署方式说明
+> 当前默认采用 **CRD 方式**（基于 MindCluster 的 PD 分离 CRD 与 Operator）进行部署。该方式尚未完成 RAS 能力与池化能力的适配验证。若您需要 RAS（可靠性、可用性、可服务性）或 KV 池化能力，可在 `user_config.json` 的 `motor_deploy_config.deploy_mode` 中配置为 `multi_deployment`，切换为原有的多 YAML Deployment 方式。完整部署说明请参考 [PD 分离服务部署](./service_deployment/pd_disaggregation_deployment.md)。
 
-1. **将本代码仓的deployer目录上传至K8s集群的master服务器上**
+1. **将本代码仓的 examples 目录上传至 K8s 集群的 master 服务器上**
+
+   拉起服务使用 `examples/deployer` 作为部署入口，配置文件位于 `examples/infer_engines/` 下（如 `examples/infer_engines/vllm/user_config.json`），以实际使用的为准。
+
 2. **配置服务化参数**
 
-   - 打开`user_config.json`文件
+   - 打开 `examples/infer_engines/vllm/user_config.json` 文件（或 `examples/infer_engines/vllm/models/` 下对应模型配置，如 `examples/infer_engines/vllm/models/deepseek/v3_1/user_config.json`，以实际使用的为准）
 
      ```bash
-     cd deployer
+     cd examples/infer_engines/vllm
      vim user_config.json
      ```
 
@@ -190,18 +193,18 @@
 
 
 
-   - 配置k8s的namespace，配置namespace值为`user_config.json`中的`job_id`。
+   - 配置 k8s 的 namespace，配置 namespace 值为 `user_config.json` 中的 `job_id`。
 
      ```bash
      kubectl create ns mindie-motor
      ```
 
-1. **配置环境变量配置**
+3. **配置环境变量**
 
-   - 打开`env.json`文件
+   - 打开 `examples/infer_engines/vllm/env.json` 文件
 
      ```bash
-     cd deployer/conf
+     cd examples/infer_engines/vllm
      vim env.json
      ```
 
@@ -220,16 +223,27 @@
      }
      ```
 
-2. **启动服务**
+4. **启动服务**
   
-   执行以下命令：
+   在 `examples/deployer` 目录下执行，支持两种指定配置的方式：
+
+   **方式一：指定配置目录（推荐）**，目录下需包含 `user_config.json` 和 `env.json`：
 
    ```bash
-   cd deployer
-   python3 deploy.py
+   cd examples/deployer
+   python3 deploy.py --config_dir ../infer_engines/vllm
    ```
 
-3. **发送请求**
+   **方式二：单独指定配置文件路径**，`--user_config_path` 与 `--env_config_path` 必须同时指定：
+
+   ```bash
+   cd examples/deployer
+   python3 deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
+   ```
+
+   也可使用简写 `--config` 和 `--env`。
+
+5. **发送请求**
   
    执行以下命令：
 

@@ -1,6 +1,6 @@
 # user_config 全量参数说明
 
-本文档对 `user_config.json` 中 deployer、Controller、Coordinator、NodeManager 等组件的**全量可配置项**进行说明，与 `deployer/conf/config_sample.json` 结构一一对应。部署时会将 `user_config.json` 中对应模块合并到组件运行时配置：先采用组件内置默认值，再按用户配置覆盖。支持在运行时通过修改组件所监控的配置文件实现动态生效。
+本文档对 `user_config.json` 中 Controller、Coordinator、NodeManager 等组件的**全量可配置项**进行说明，与 `examples/features/config_sample.json` 结构一一对应。部署时会将 `user_config.json` 中对应模块合并到组件运行时配置：先采用代码默认值，再按用户配置覆盖。支持在运行时通过修改组件所监控的配置文件实现动态生效。配置文件位于 `examples/infer_engines/` 目录下（如 `examples/infer_engines/vllm/user_config.json`），根据引擎类型和模型选择对应配置，以实际使用的为准。
 
 ## 1. motor_deploy_config（部署与资源）
 
@@ -20,7 +20,7 @@
   "job_id": "mindie-motor",
   "hardware_type": "800I_A3",
   "weight_mount_path": "/mnt/weight/",
-  "deployment_backend": "infer_service_set",
+  "deploy_mode": "infer_service_set",
   "tls_config": { ... },
 }
 ```
@@ -37,14 +37,14 @@
 | job_id | string | 部署任务名，同时作为 K8s 命名空间使用，如 `mindie-motor` |
 | hardware_type | string | 硬件类型：`800I_A2` 或 `800I_A3` |
 | weight_mount_path | string | 宿主机上模型权重挂载路径，容器内 model_path 需与此挂载路径一致，如 `"/mnt/weight/"` |
-| deployment_backend | string | 部署后端方式。可选：`infer_service_set`（默认，基于 InferServiceSet CRD，生成单个 infer_service.yaml 由 CRD controller 拉起各 pod）、`multi_deployment`（传统方式，生成 controller、coordinator、engine_*、kv_pool 等多个独立 YAML 分别 apply）。不配置时默认为 `infer_service_set`。CRD 方式尚未完成 RAS 能力与池化能力的适配验证；若需 RAS（可靠性、可用性、可服务性）或 KV 池化能力，请设置为 `multi_deployment` |
+| deploy_mode | string | 部署方式。可选：`infer_service_set`（默认，基于 InferServiceSet CRD，生成单个 infer_service.yaml 由 CRD controller 拉起各 pod）、`multi_deployment`（传统方式，生成 controller、coordinator、engine_*、kv_pool 等多个独立 YAML 分别 apply）、`single_container`（单容器方式，P/D 合并运行）。不配置时默认为 `infer_service_set`。CRD 方式尚未完成 RAS 能力与池化能力的适配验证；若需 RAS（可靠性、可用性、可服务性）或 KV 池化能力，请设置为 `multi_deployment` |
 | tls_config | object | 可选；TLS 相关配置，含 infer_tls_config、mgmt_tls_config、etcd_tls_config、grpc_tls_config 四类，结构见 [PD 分离服务部署](./pd_disaggregation_deployment.md#46-tls_config可选) |
 
 ---
 
 ## 2. motor_controller_config
 
-`motor_controller_config` 在 `deployer/conf/config_sample.json` 中的配置如下：
+`motor_controller_config` 在 `examples/features/config_sample.json` 中的配置如下：
 
 ```json
 "motor_controller_config": {
@@ -174,7 +174,7 @@
 
 ## 3. motor_coordinator_config
 
-`motor_coordinator_config` 在 `deployer/conf/config_sample.json` 中的配置如下：
+`motor_coordinator_config` 在 `examples/features/config_sample.json` 中的配置如下：
 
 ```json
 "motor_coordinator_config": {
@@ -346,7 +346,7 @@
 
 ## 4. motor_nodemanger_config
 
-`motor_nodemanger_config` 在 `deployer/conf/config_sample.json` 中的配置如下：
+`motor_nodemanger_config` 在 `examples/features/config_sample.json` 中的配置如下：
 
 ```json
 "motor_nodemanger_config": {
