@@ -259,6 +259,7 @@ class SeparateCDPRouter(BaseRouter):
         req_data = self.req_info.req_data.copy()
         req_data["stream"] = False
         req_data["max_tokens"] = 1
+        req_data["min_tokens"] = 1
         req_data["kv_transfer_params"] = kv_transfer_params
 
         if "stream_options" in req_data:
