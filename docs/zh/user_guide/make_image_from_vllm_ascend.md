@@ -32,6 +32,8 @@ docker run -d --name docker-vllm-ascend -v /mnt/:/mnt/ <镜像名称>
 ```
 docker exec -it docker-vllm-ascend bash
 
+apt-get update && apt-get install pciutils -y
+
 cd /mnt/MindIE-pyMotor
 
 pip install -r requirements.txt
