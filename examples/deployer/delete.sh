@@ -9,8 +9,6 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-set -e
-
 if [ -z "$1" ]; then
     echo "Usage: $0 <namespace>"
     echo "Example: $0 mindie-motor"
@@ -46,7 +44,5 @@ sed -i '/^function set_decode_env()/,/^}/d' ./startup/roles/all_combine_in_singl
 sed -i '/^function set_kv_pool_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_kv_conductor_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/./,$!d' ./startup/common.sh
-
-rm -rf $YAML_DIR
 
 echo "Delete completed."
