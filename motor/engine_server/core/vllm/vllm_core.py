@@ -98,9 +98,6 @@ class VLLMServerCore(BaseServerCore):
         self.client_config = None
         try:
             from vllm.v1.engine.utils import get_engine_zmq_addresses, launch_core_engines
-            if get_engine_zmq_addresses is None:
-                raise AttributeError("get_engine_zmq_addresses is not available")
-
             addresses = get_engine_zmq_addresses(vllm_server_config)
             launch_context = launch_core_engines(
                 vllm_server_config,
@@ -108,8 +105,9 @@ class VLLMServerCore(BaseServerCore):
                 enable_statistics,
                 addresses,
             )
-        except (TypeError, AttributeError):
-            logger.info("[VLLMServerCore] Fallback to legacy launch_core_engines signature")
+        except Exception as e:
+            logger.warning(f"Failed to launch vLLM with new signature, error: {e}")
+            logger.warning("[VLLMServerCore] Fallback to legacy launch_core_engines signature")
             from vllm.v1.engine.utils import launch_core_engines
             launch_context = launch_core_engines(
                 vllm_server_config,
