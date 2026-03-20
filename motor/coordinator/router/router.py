@@ -37,6 +37,7 @@ from motor.common.resources.instance import PDRole
 from motor.coordinator.router.pd_hybrid_router import PDHybridRouter
 from motor.coordinator.router.separate_pd_router import SeparatePDRouter
 from motor.coordinator.router.separate_cdp_router import SeparateCDPRouter
+from motor.coordinator.router.separate_pd_dual_dispatch_router import SeparatePDDualDispatchRouter
 from motor.common.utils.security_utils import (
     sanitize_error_message,
     filter_sensitive_headers,
@@ -53,6 +54,7 @@ _ROUTER_MAP: dict[DeployMode, type['BaseRouter']] = {
     DeployMode.CPCD_SEPARATE: SeparatePDRouter,
     DeployMode.SINGLE_NODE: PDHybridRouter,
     DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER: SeparateCDPRouter,
+    DeployMode.PD_DUAL_DISPATCH: SeparatePDDualDispatchRouter,
 }
 
 

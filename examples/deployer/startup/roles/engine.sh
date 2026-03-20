@@ -21,6 +21,8 @@ gen_kv_pool_config
 
 set_cann_env
 
+set_mf_store_env
+
 # CRD scenario: refresh JOB_NAME with INFER_SERVICE_INDEX and INSTANCE_INDEX injected by CRD
 # Final format: {namespace}-{InferServiceSet_name}-{INFER_SERVICE_INDEX}-p/d{INSTANCE_INDEX}
 if [ -n "$INFER_SERVICE_INDEX" ] && [ -n "$INSTANCE_INDEX" ]; then

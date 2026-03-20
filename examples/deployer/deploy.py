@@ -16,7 +16,8 @@ from lib.generator import k8s_utils
 from lib.generator.k8s_utils import (
     get_baseline_config_from_configmap, exec_all_kubectl_multi, exec_all_kubectl_singer,
     create_motor_config_configmap, init_service_domain_name, get_deploy_mode_from_config,
-    update_kv_pool_enabled_flag, update_kv_conductor_enabled_flag, set_user_config_path
+    update_kv_pool_enabled_flag, update_kv_conductor_enabled_flag, update_engine_type_flag,
+    set_user_config_path
 )
 from lib.generator.controller import generate_yaml_controller
 from lib.generator.coordinator import generate_yaml_coordinator
@@ -27,6 +28,7 @@ from lib.generator.single_container import generate_yaml_single_container
 from lib.generator.infer_service import (
     generate_yaml_infer_service_set, init_infer_service_domain_name, update_infer_service_replicas_only
 )
+from lib.generator.mf_store import generate_yaml_mf_store
 from lib.config_validator import (
     validate_deploy_mode_consistency, validate_deploy_mode_value,
     validate_only_instance_changed, resolve_config_paths
@@ -76,13 +78,7 @@ def handle_update_instance_num(user_config):
         if os.path.exists(infer_output):
             update_infer_service_replicas_only(infer_output, deploy_config)
         else:
-            init_service_domain_name(
-                paths["controller_input_yaml"],
-                paths["coordinator_input_yaml"],
-                paths["kv_pool_input_yaml"],
-                paths["kv_conductor_input_yaml"],
-                deploy_config
-            )
+            init_service_domain_name(paths, deploy_config)
             if not os.path.exists(infer_input):
                 raise FileNotFoundError(f"InferServiceSet template yaml not found: {infer_input}.")
             init_infer_service_domain_name(infer_input, deploy_config)
@@ -96,10 +92,7 @@ def handle_update_instance_num(user_config):
 
 def deploy_services_multi_yaml(paths, user_config):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
-    init_service_domain_name(
-        paths["controller_input_yaml"], paths["coordinator_input_yaml"],
-        paths["kv_pool_input_yaml"], paths["kv_conductor_input_yaml"], deploy_config
-    )
+    init_service_domain_name(paths, deploy_config)
     generate_yaml_controller(
         paths["controller_input_yaml"], paths["controller_output_yaml"], user_config
     )
@@ -118,15 +111,16 @@ def deploy_services_multi_yaml(paths, user_config):
             paths["kv_conductor_input_yaml"], paths["kv_conductor_output_yaml"],
             user_config, kv_conductor_config
         )
+    if k8s_utils.g_mf_store_enabled:
+        generate_yaml_mf_store(
+            paths["mf_store_input_yaml"], paths["mf_store_output_yaml"], user_config
+        )
     exec_all_kubectl_multi(deploy_config, None, C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML)
 
 
 def deploy_services_infer_service_set(paths, user_config):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
-    init_service_domain_name(
-        paths["controller_input_yaml"], paths["coordinator_input_yaml"],
-        paths["kv_pool_input_yaml"], paths["kv_conductor_input_yaml"], deploy_config
-    )
+    init_service_domain_name(paths, deploy_config)
     infer_input = paths["infer_service_input_yaml"]
     if not os.path.exists(infer_input):
         raise FileNotFoundError(
@@ -153,6 +147,8 @@ def deploy_services(user_config, env_config_path):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     update_kv_pool_enabled_flag(user_config)
     update_kv_conductor_enabled_flag(user_config)
+    update_engine_type_flag(user_config)
+
     update_engine_base_name(user_config)
 
     deploy_mode_arg = get_deploy_mode_from_config(deploy_config)

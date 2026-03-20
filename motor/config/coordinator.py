@@ -98,6 +98,7 @@ class DeployMode(Enum):
     PD_SEPARATE = "pd_separate"
     CDP_SEPARATE = "cdp_separate"
     CPCD_SEPARATE = "cpcd_separate"
+    PD_DUAL_DISPATCH = "pd_dual_dispatch"
     PD_DISAGGREGATION_SINGLE_CONTAINER = "pd_disaggregation_single_container"
 
     @classmethod

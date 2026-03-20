@@ -36,6 +36,24 @@ def build_engine_env_items(role, job_name, include_kv_pool=False):
     ]
     if include_kv_pool and k8s_utils.g_kv_pool_enabled:
         env_items.append({C.NAME: C.ENV_KVP_MASTER_SERVICE, C.VALUE: k8s_utils.g_kv_pool_service})
+    if k8s_utils.g_mf_store_enabled:
+        deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
+        ascend_mf_store_url = f"tcp://{k8s_utils.g_mf_store_service}:{C.DEFAULT_MF_STORE_PORT}"
+        hardware_type = deploy_config.get(C.HARDWARE_TYPE, C.HARDWARE_TYPE_800I_A2)
+        ascend_mf_transfer_protocol = "device_rdma" if hardware_type == C.HARDWARE_TYPE_800I_A2 else "sdma"
+        env_items.extend([
+            {C.NAME: C.ENV_ASCEND_MF_STORE_URL, C.VALUE: ascend_mf_store_url},
+            {C.NAME: C.ENV_ASCEND_MF_TRANSFER_PROTOCOL, C.VALUE: ascend_mf_transfer_protocol}
+        ])
+    if k8s_utils.g_engine_type == C.ENGINE_TYPE_SGLANG:
+        env_items.append({
+            C.NAME: C.ENV_SGLANG_HOST_IP,
+            "valueFrom": {
+                "fieldRef": {
+                    "fieldPath": "status.podIP"
+                }
+            }
+        })
     return env_items
 
 
@@ -128,6 +146,12 @@ def set_engine_weight_mount(deployment_data, container, deploy_config):
 def modify_engine_yaml(deployment_data, user_config, index, node_type):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     container = deployment_data[C.SPEC][C.TEMPLATE][C.SPEC][C.CONTAINERS][0]
+
+    if k8s_utils.g_engine_type == C.ENGINE_TYPE_SGLANG:
+        if C.SECURITY_CONTEXT not in container:
+            container[C.SECURITY_CONTEXT] = {}
+        container[C.SECURITY_CONTEXT][C.PRIVILEGED] = True
+
     container[C.IMAGE] = deploy_config[C.IMAGE_NAME]
     job_name = f"{deploy_config[C.CONFIG_JOB_ID]}-{node_type}{index}-{generate_unique_id()}"
     set_engine_metadata(deployment_data, deploy_config, index, node_type, job_name)

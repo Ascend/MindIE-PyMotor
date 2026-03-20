@@ -781,7 +781,7 @@ class AsyncSchedulerClient:
 
         def _status(p_list: list, d_list: list, u_list: list) -> InstanceReadiness:
             if mode in (DeployMode.CDP_SEPARATE, DeployMode.CPCD_SEPARATE, DeployMode.PD_SEPARATE, \
-                    DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER):
+                    DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER, DeployMode.PD_DUAL_DISPATCH):
                 has_p, has_d = len(p_list) > 0, len(d_list) > 0
                 if has_p and has_d:
                     return InstanceReadiness.REQUIRED_MET

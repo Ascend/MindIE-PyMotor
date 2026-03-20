@@ -55,6 +55,13 @@ def modify_coordinator_deployment(deployment_data, user_config):
         {C.NAME: C.ENV_COORDINATOR_SERVICE, C.VALUE: k8s_utils.g_coordinator_service}
     ])
 
+    disaggregation_bootstrap_port = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG, {}).get(C.ENGINE_CONFIG, {}) \
+                                        .get("disaggregation_bootstrap_port", "")
+    if disaggregation_bootstrap_port:
+        container[C.ENV].append(
+            {C.NAME: C.ENV_DISAGGREGATION_BOOTSTRAP_PORT, C.VALUE: str(disaggregation_bootstrap_port)}
+        )
+
     modify_coordinator_replicas(deployment_data, user_config)
     modify_log_mount(deployment_data, user_config, "mindie-motor-coordinator")
 

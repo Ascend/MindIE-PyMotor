@@ -132,3 +132,47 @@ gen_kv_pool_config() {
         python3 "$CONFIGMAP_PATH/mooncake_config.py" pool "$MOONCAKE_CONFIG_PATH" "$USER_CONFIG_PATH"
     fi
 }
+
+set_mf_store_env() {
+    #  convert ASCEND_MF_STORE_URL to IP
+    if [ -n "$ASCEND_MF_STORE_URL" ]; then
+        if [[ "$ASCEND_MF_STORE_URL" =~ ^(tcp://)?([^:/]+)(:([0-9]+))?$ ]]; then
+            PROTO="${BASH_REMATCH[1]}"
+            HOST="${BASH_REMATCH[2]}"
+            PORT="${BASH_REMATCH[4]}"
+
+            if [[ ! "$HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                MAX_RETRY=5
+                RETRY_INTERVAL=10
+                RETRY_COUNT=0
+                MF_STORE_POD_IP=""
+                while [ $RETRY_COUNT -lt $MAX_RETRY ]; do
+                    MF_STORE_POD_IP=$(getent hosts "$HOST" | awk '{print $1}' | head -n1)
+
+                    if [ -n "$MF_STORE_POD_IP" ]; then
+                        break
+                    fi
+
+                    RETRY_COUNT=$((RETRY_COUNT+1))
+                    echo "resolve $HOST failed, retry $RETRY_COUNT/$MAX_RETRY ..."
+                    sleep $RETRY_INTERVAL
+                done
+
+                if [ -z "$MF_STORE_POD_IP" ]; then
+                    echo "get pod ip error: $HOST"
+                    exit 1
+                else
+                    echo "$HOST pod ip: $MF_STORE_POD_IP"
+                    export ASCEND_MF_STORE_URL="${PROTO}${MF_STORE_POD_IP}:${PORT}"
+                fi
+            else
+                echo "HOST is already IP: $HOST"
+            fi
+        else
+            echo "ASCEND_MF_STORE_URL format invalid: $ASCEND_MF_STORE_URL"
+            exit 1
+        fi
+
+        echo "ASCEND_MF_STORE_URL: $ASCEND_MF_STORE_URL"
+    fi
+}

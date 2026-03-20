@@ -10,7 +10,6 @@
 # See the Mulan PSL v2 for more details.
 
 import asyncio
-import contextlib
 import time
 from typing import AsyncGenerator, Any
 
@@ -27,19 +26,6 @@ from motor.coordinator.tracer.tracing import TracerManager
 
 
 class SeparateCDPRouter(BaseRouter):
-
-    @contextlib.asynccontextmanager
-    async def _manage_request_context(self):
-        """
-        Lifecycle management for request in the RequestManager.
-        Ensures request info is added and cleaned up.
-        """
-        await self._request_manager.add_req_info(self.req_info)
-        try:
-            yield
-        finally:
-            await self._request_manager.del_req_info(self.req_info.req_id)
-            self._log_request_details()
 
     async def handle_request(self) -> StreamingResponse | JSONResponse:
 

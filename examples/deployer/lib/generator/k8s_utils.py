@@ -23,6 +23,9 @@ g_kv_conductor_enabled = False
 g_engine_base_name = "mindie-server"
 g_generate_yaml_list = []
 g_user_config_path = None
+g_mf_store_service = "mf_store"
+g_mf_store_enabled = False
+g_engine_type = "vllm"
 
 
 def set_user_config_path(path):
@@ -48,6 +51,11 @@ def set_kv_pool_service(service_name):
 def set_kv_conductor_service(service_name):
     global g_kv_conductor_service
     g_kv_conductor_service = service_name
+
+
+def set_mf_store_service(service_name):
+    global g_mf_store_service
+    g_mf_store_service = service_name
 
 
 def set_engine_base_name(engine_name):
@@ -77,6 +85,16 @@ def update_kv_conductor_enabled_flag(user_config):
         g_kv_conductor_enabled = True
 
 
+def update_engine_type_flag(user_config):
+    global g_engine_type
+    global g_mf_store_enabled
+    g_mf_store_enabled = False
+
+    g_engine_type = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG, {}).get("engine_type", "")
+    if g_engine_type == C.ENGINE_TYPE_SGLANG:
+        g_mf_store_enabled = True
+
+
 def get_deploy_mode_from_config(deploy_config):
     """Read deploy_mode from motor_deploy_config; default infer_service_set; validate value."""
     mode = deploy_config.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_INFER_SERVICE_SET)
@@ -88,12 +106,12 @@ def get_deploy_mode_from_config(deploy_config):
     return mode
 
 
-def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_pool_input_yaml,
-                             kv_conductor_input_yaml, deploy_config):
-    controller_data = load_yaml(controller_input_yaml, False)
-    coordinator_data = load_yaml(coordinator_input_yaml, False)
-    kv_pool_data = load_yaml(kv_pool_input_yaml, False)
-    kv_conductor_data = load_yaml(kv_conductor_input_yaml, False)
+def init_service_domain_name(paths, deploy_config):
+    controller_data = load_yaml(paths["controller_input_yaml"], False)
+    coordinator_data = load_yaml(paths["coordinator_input_yaml"], False)
+    kv_pool_data = load_yaml(paths["kv_pool_input_yaml"], False)
+    kv_conductor_data = load_yaml(paths["kv_conductor_input_yaml"], False)
+    mf_store_data = load_yaml(paths["mf_store_input_yaml"], False)
 
     controller_service_data = None
     for doc in controller_data:
@@ -119,6 +137,12 @@ def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_p
             kv_conductor_service_data = doc
             break
 
+    mf_store_service_data = None
+    for doc in mf_store_data:
+        if doc.get(C.KIND) == C.SERVICE:
+            mf_store_service_data = doc
+            break
+
     controller_name = controller_service_data[C.METADATA][C.NAME]
     set_controller_service(f"{controller_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
     coordinator_name = coordinator_service_data[C.METADATA][C.NAME]
@@ -127,6 +151,8 @@ def init_service_domain_name(controller_input_yaml, coordinator_input_yaml, kv_p
     set_kv_pool_service(f"{kv_pool_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
     kv_conductor_name = kv_conductor_service_data[C.METADATA][C.NAME]
     set_kv_conductor_service(f"{kv_conductor_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
+    mf_store_name = mf_store_service_data[C.METADATA][C.NAME]
+    set_mf_store_service(f"{mf_store_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
 
 
 def run_cmd_get_output(args):
@@ -241,6 +267,7 @@ def create_motor_config_configmap(job_id):
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/engine.sh "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/kv_pool.sh "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/kv_conductor.sh "
+        f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/mf_store.sh "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/all_combine_in_single_container.sh "
         "--from-file=./probe/probe.sh "
         "--from-file=./probe/probe.py "

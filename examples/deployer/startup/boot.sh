@@ -31,6 +31,9 @@ case "$ROLE" in
     "kv_conductor")
         source "$SCRIPT_DIR/kv_conductor.sh"
         ;;
+    "mf_store")
+        source "$SCRIPT_DIR/mf_store.sh"
+        ;;
     *)
         echo "Error: Unknown ROLE=$ROLE"
         echo "Valid roles: SINGLE_CONTAINER, prefill, decode, controller, coordinator, kv_pool, kv_conductor"

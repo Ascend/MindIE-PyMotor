@@ -85,6 +85,12 @@ spec:
             mountPath: /mnt/weight
           - name: plog-path
             mountPath: /root/ascend/log
+          - name: ascend-driver
+            mountPath: /usr/local/Ascend/driver
+          - name: rdma
+            mountPath: /dev/infiniband
+          - name: hisi-hdc
+            mountPath: /dev/hisi_hdc
       volumes:
       - name: data
         hostPath:
@@ -120,3 +126,12 @@ spec:
         hostPath:
           path: /root/ascend/log
           type: DirectoryOrCreate
+      - name: ascend-driver
+        hostPath:
+          path: /usr/local/Ascend/driver
+      - name: rdma
+        hostPath:
+          path: /dev/infiniband
+      - name: hisi-hdc
+        hostPath:
+          path: /dev/hisi_hdc

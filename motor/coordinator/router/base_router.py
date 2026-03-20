@@ -118,6 +118,19 @@ class BaseRouter(ABC):
         pass
 
     @contextlib.asynccontextmanager
+    async def _manage_request_context(self):
+        """
+        Lifecycle management for request in the RequestManager.
+        Ensures request info is added and cleaned up.
+        """
+        await self._request_manager.add_req_info(self.req_info)
+        try:
+            yield
+        finally:
+            await self._request_manager.del_req_info(self.req_info.req_id)
+            self._log_request_details()
+
+    @contextlib.asynccontextmanager
     async def _manage_client_context(self, resource: ScheduledResource):
         endpoint = resource.endpoint
         t0_client = time.perf_counter()
