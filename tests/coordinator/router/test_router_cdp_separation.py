@@ -16,6 +16,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 import asyncio
 import httpx
+import logging
 import pytest
 
 from motor.config.coordinator import DeployMode, CoordinatorConfig, SchedulerType
@@ -33,6 +34,29 @@ from tests.coordinator.router.mock_openai_request import MockStreamResponse, cre
 import motor.coordinator.router.router as router
 
 TracerManager()
+
+
+def _assert_decode_retry_logs_deduped_for_label(
+    caplog: pytest.LogCaptureFixture, decode_label: str, max_retry: int
+) -> None:
+    """Same str(e) on each retry: one ERROR (traceback), remaining attempts WARNING dedup."""
+    errors = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.ERROR
+        and decode_label in r.getMessage()
+        and "same error as previous attempt" not in r.getMessage()
+    ]
+    dedup_warnings = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING
+        and "same error as previous attempt" in r.getMessage()
+        and decode_label in r.getMessage()
+    ]
+    assert len(errors) == 1
+    assert len(dedup_warnings) == max_retry - 1
+
 
 app = FastAPI()
 _config = CoordinatorConfig()
@@ -363,20 +387,18 @@ class TestRouterCDPSeparation:
         assert release_p_tokens == 0
         
     @pytest.mark.asyncio
-    async def test_engine_server_decode_continuous_5xx_status_code(self, client, monkeypatch: MonkeyPatch, setup_cdp_separation):
-        """Test scenario: EngineServer Prefill request continuously returns 5XX status code
-        Expected behavior:
-        1) Check request status is Exception
-        2) Trigger request retry
-        3) Request retry fails: return error message
-        """
-        # Mock the HTTP forwarding function to return a 4XX error
+    async def test_engine_server_decode_continuous_5xx_status_code(
+        self, client, monkeypatch: MonkeyPatch, setup_cdp_separation, caplog: pytest.LogCaptureFixture
+    ):
+        """Decode keeps getting 5XX with the same message: retries exhaust, error chunk returned;
+        identical-error logs: one ERROR + (max_retry-1) WARNING dedup lines."""
         error_message = "Test Internal Server Error"
+        max_retry = CoordinatorConfig().exception_config.max_retry
         mock_async_client = MockAsyncClient(stream_exc=httpx.HTTPStatusError(
             message=error_message,
             request=None,
             response=httpx.Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, text=error_message)
-        ), stream_fail_times=CoordinatorConfig().exception_config.max_retry)
+        ), stream_fail_times=max_retry)
         req_info = await create_mock_request_info()
         
         exec_release = 0
@@ -386,25 +408,25 @@ class TestRouterCDPSeparation:
             return True
         monkeypatch.setattr(BaseRouter, "_update_workload", mock_update_workload)
 
-        with patch('motor.coordinator.router.base_router.httpx.AsyncClient', return_value=mock_async_client):
-            cdp_router = SeparateCDPRouter(
-                req_info, CoordinatorConfig(),
-                scheduler=Scheduler(instance_provider=InstanceManager(CoordinatorConfig()), config=CoordinatorConfig()),
-                request_manager=_request_manager
-            )
-            response = await cdp_router.handle_request()
-            chunks = []
-            async for chunk in response.body_iterator:
-                chunks.append(chunk)
-            chunk_str = "".join(chunks)
+        with caplog.at_level(logging.WARNING, logger="motor.coordinator.router.base_router"):
+            with patch('motor.coordinator.router.base_router.httpx.AsyncClient', return_value=mock_async_client):
+                cdp_router = SeparateCDPRouter(
+                    req_info, CoordinatorConfig(),
+                    scheduler=Scheduler(instance_provider=InstanceManager(CoordinatorConfig()), config=CoordinatorConfig()),
+                    request_manager=_request_manager
+                )
+                response = await cdp_router.handle_request()
+                chunks = []
+                async for chunk in response.body_iterator:
+                    chunks.append(chunk)
+                chunk_str = "".join(chunks)
             
         assert req_info.state == ReqState.EXCEPTION
         assert error_message in chunk_str
-        # Should get a 500 error after max retries
         assert str(status.HTTP_500_INTERNAL_SERVER_ERROR) in chunk_str
-        # Should retry exactly max_retry times
-        assert mock_async_client.stream_count == CoordinatorConfig().exception_config.max_retry
+        assert mock_async_client.stream_count == max_retry
         assert exec_release >= 1
+        _assert_decode_retry_logs_deduped_for_label(caplog, "streaming Decode", max_retry)
         
     @pytest.mark.asyncio
     async def test_engine_server_decode_once_5xx_status_code(
@@ -478,6 +500,46 @@ class TestRouterCDPSeparation:
         assert mock_async_client.stream_count == CoordinatorConfig().exception_config.max_retry
         assert mock_async_client.stream_fail_count == CoordinatorConfig().exception_config.max_retry
         assert req_info.state == ReqState.EXCEPTION
+
+    @pytest.mark.asyncio
+    async def test_cdp_decode_non_stream_retry_dedupes_identical_error_logs(
+        self, client, monkeypatch: MonkeyPatch, setup_cdp_separation, caplog: pytest.LogCaptureFixture
+    ):
+        """Non-streaming decode: same dedup rule as streaming."""
+        error_message = "Same post Decode error every retry"
+        max_retry = CoordinatorConfig().exception_config.max_retry
+        mock_async_client = MockAsyncClient(
+            post_exc=httpx.HTTPStatusError(
+                message=error_message,
+                request=None,
+                response=httpx.Response(
+                    status_code=status.HTTP_502_BAD_GATEWAY, text=error_message
+                ),
+            ),
+            post_fail_times=max_retry,
+        )
+        req_info = await create_mock_request_info(stream=False)
+
+        async def mock_update_workload(self, resource: ScheduledResource, action: WorkloadAction):
+            return True
+
+        monkeypatch.setattr(BaseRouter, "_update_workload", mock_update_workload)
+
+        with caplog.at_level(logging.WARNING, logger="motor.coordinator.router.base_router"):
+            with patch("motor.coordinator.router.base_router.httpx.AsyncClient", return_value=mock_async_client):
+                cdp_router = SeparateCDPRouter(
+                    req_info,
+                    CoordinatorConfig(),
+                    scheduler=Scheduler(
+                        instance_provider=InstanceManager(CoordinatorConfig()),
+                        config=CoordinatorConfig(),
+                    ),
+                    request_manager=_request_manager,
+                )
+                with pytest.raises(httpx.HTTPStatusError):
+                    await cdp_router.handle_request()
+
+        _assert_decode_retry_logs_deduped_for_label(caplog, "post Decode", max_retry)
     
     @pytest.mark.asyncio
     async def test_engine_server_prefill_network_exception(self, client, monkeypatch: MonkeyPatch, setup_cdp_separation):

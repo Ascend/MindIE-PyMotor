@@ -110,6 +110,7 @@ class SeparateCDPRouter(BaseRouter):
             trace_obj.set_trace_attribute("stream", True)
             self.logger.debug("Handling streaming Decode request")
             max_retry = self.config.exception_config.max_retry
+            last_error_str: str | None = None
             for attempt in range(max_retry):
                 try:
                     # Use context managers to ensure resource locking and client cleanup
@@ -136,9 +137,8 @@ class SeparateCDPRouter(BaseRouter):
                     self.req_info.cancel_scope()
                     raise
                 except Exception as e:
-                    self.logger.error(
-                        "Error in streaming Decode (attempt %d/%d): %s",
-                        attempt + 1, max_retry, str(e), exc_info=True
+                    last_error_str = self._log_cdp_decode_retry_error(
+                        "streaming Decode", attempt, max_retry, e, last_error_str
                     )
                     self.req_info.cancel_scope()
 
@@ -169,6 +169,7 @@ class SeparateCDPRouter(BaseRouter):
             trace_obj.set_trace_attribute("stream", False)
             self.logger.debug("Handling non-streaming Decode request")
             max_retries = self.config.exception_config.max_retry
+            last_error_str: str | None = None
             for attempt in range(max_retries):
                 try:
                     async with self._manage_request_context(), \
@@ -192,9 +193,8 @@ class SeparateCDPRouter(BaseRouter):
                     self.req_info.cancel_scope()
                     raise
                 except Exception as e:
-                    self.logger.error(
-                        "Error in post Decode (attempt %d/%d): %s",
-                        attempt + 1, max_retries, str(e)
+                    last_error_str = self._log_cdp_decode_retry_error(
+                        "post Decode", attempt, max_retries, e, last_error_str
                     )
                     self.req_info.cancel_scope()
                     trace_obj.set_trace_exception(e)
@@ -205,9 +205,24 @@ class SeparateCDPRouter(BaseRouter):
                         await asyncio.sleep(wait_time)
                         continue
 
-                    self.logger.error("All retries failed for non-streaming decode request.")
                     self.req_info.update_state(ReqState.EXCEPTION)
                     raise e
+
+    def _log_cdp_decode_retry_error(
+        self, label: str, attempt: int, max_attempts: int, err: Exception, last_error_str: str | None) -> str:
+        """Log one decode retry failure: full traceback on first attempt or when the message changes."""
+        err_str = str(err)
+        if attempt == 0 or err_str != last_error_str:
+            self.logger.error(
+                "Error in %s (attempt %d/%d): %s",
+                label, attempt + 1, max_attempts, err_str, exc_info=True
+            )
+        else:
+            self.logger.warning(
+                "Error in %s (attempt %d/%d): same error as previous attempt: %s",
+                label, attempt + 1, max_attempts, err_str
+            )
+        return err_str
 
     def _gen_d_request(self) -> dict:
         """Generate D request parameters.
