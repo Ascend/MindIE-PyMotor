@@ -6,6 +6,7 @@ import logging
 import logging.handlers
 import os
 import subprocess
+import sys
 import threading
 import time
 
@@ -16,7 +17,7 @@ STOP_FILE = "stop_log"
 # The log file size is configured in bytes.
 # For ease of reading, you are advised to set the log file size to no more than 100 MB 
 # and the number of backup log files to no more than 1000.
-g_name_space = "mindie-motor"
+g_name_space = ""
 g_target_log = "./log/"
 g_max_log_size = 10000000 
 g_backup_count = 10
@@ -37,6 +38,10 @@ def log_i(msg: str) -> None:
     logger_monitor.info(msg)
 
 
+def log_w(msg: str) -> None:
+    logger_monitor.warning(msg)
+
+
 def log_e(msg: str) -> None:
     logger_monitor.error(msg)
 
@@ -45,12 +50,12 @@ class LogMonitor:
     def __init__(self):
         self.encode_type = "utf-8"
         self.cmd_kubectl = "/usr/bin/kubectl"
-        self.cmd_grep = "/usr/bin/grep"
         self.cmd_awk = "/usr/bin/awk"
         self.thread_name = "thread-log-"
 
         self.threads = []
         self.exit_flag = threading.Event()
+        self._logged_save_paths = set()
 
     def setup_rotating_logger(self, pod_name: str, log_file: str) -> Optional[logging.Logger]:
         """
@@ -66,7 +71,7 @@ class LogMonitor:
             try:
                 os.makedirs(log_dir, exist_ok=True)
             except OSError as e:
-                log_i(f"Unable to create log directory {log_dir}: {e}")
+                log_e(f"Unable to create log directory {log_dir}: {e}")
                 return None
         
         # Creating a Logger
@@ -97,32 +102,21 @@ class LogMonitor:
         :param pod_name: Name of the pod to check
         """
         kubectl_cmd = subprocess.Popen(
-            [self.cmd_kubectl, 'get', 'pods', '-A', '-o', 'wide'],
-            stdout=subprocess.PIPE
+            [
+                self.cmd_kubectl,
+                'get', 'pod', pod_name,
+                '-n', g_name_space,
+                '-o', 'jsonpath={.status.phase}'
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
         )
-        grep_namespace_cmd = subprocess.Popen(
-            [self.cmd_grep, g_name_space],
-            stdin=kubectl_cmd.stdout,
-            stdout=subprocess.PIPE
-        )
-        grep_name_cmd = subprocess.Popen(
-            [self.cmd_grep, pod_name],
-            stdin=grep_namespace_cmd.stdout,
-            stdout=subprocess.PIPE
-        )
-        awk_cmd = subprocess.Popen(
-            [self.cmd_awk, '{print $4}'],
-            stdin=grep_name_cmd.stdout,
-            stdout=subprocess.PIPE
-        )
-        output, _ = awk_cmd.communicate()
-        lines = output.decode(self.encode_type).strip().splitlines()
-        if len(lines) == 0:
-            raise Exception("Pod not found Exception")
-        if len(lines) == 1:
-            if lines[0] == "Running":
-                return True
-        return False
+        output, err = kubectl_cmd.communicate()
+        if kubectl_cmd.returncode != 0:
+            err_msg = err.decode(self.encode_type, errors="ignore").strip()
+            raise Exception(f"Pod not found Exception: {err_msg}")
+        status = output.decode(self.encode_type).strip()
+        return status == "Running"
 
     def shell_get_pod(self) -> Optional[List[str]]:
         """
@@ -132,17 +126,12 @@ class LogMonitor:
         """
         try:
             kubectl_cmd = subprocess.Popen(
-                [self.cmd_kubectl, 'get', 'pods', '-A', '-o', 'wide'],
-                stdout=subprocess.PIPE
-            )
-            grep_cmd = subprocess.Popen(
-                [self.cmd_grep, g_name_space],
-                stdin=kubectl_cmd.stdout,
+                [self.cmd_kubectl, 'get', 'pods', '-n', g_name_space, '-o', 'wide'],
                 stdout=subprocess.PIPE
             )
             awk_cmd = subprocess.Popen(
-                [self.cmd_awk, '{print $2}'],
-                stdin=grep_cmd.stdout,
+                [self.cmd_awk, 'NR>1 {print $1}'],
+                stdin=kubectl_cmd.stdout,
                 stdout=subprocess.PIPE
             )
             output, _ = awk_cmd.communicate()
@@ -156,8 +145,9 @@ class LogMonitor:
         Execute the kubectl command to obtain the log.
         """
         b_write_flag = False
+        abs_path = os.path.abspath(os.path.normpath(file_path))
 
-        logger = self.setup_rotating_logger(pod_name, file_path)
+        logger = self.setup_rotating_logger(pod_name, abs_path)
         if logger is None:
             return b_write_flag
 
@@ -173,7 +163,12 @@ class LogMonitor:
             )
             
             size = g_max_log_size / 1024 / 1024
-            log_i(f"{pod_name} :logs save to: {file_path} (max {size:.1f}MB, Keep {g_backup_count} backups)")
+            if abs_path not in self._logged_save_paths:
+                self._logged_save_paths.add(abs_path)
+                log_i(
+                    f"{pod_name}: logs save to: {abs_path} "
+                    f"(max {size:.1f}MB, keep {g_backup_count} backups)"
+                )
             
             # Reads the output in real time and writes it to the log file.
             while not self.exit_flag.is_set():
@@ -207,7 +202,7 @@ class LogMonitor:
         try:
             while not self.exit_flag.is_set():
                 if not self.check_pod_is_running(pod_name):
-                    log_i(f"{pod_name} :The pod is not in the 'Running' state, waiting...")
+                    log_w(f"{pod_name} :The pod is not in the 'Running' state, waiting...")
                     time.sleep(interval)
                     continue
                 file_path = os.path.join(g_target_log, f"{pod_name}_{index}.log")
@@ -235,7 +230,7 @@ class LogMonitor:
                     flag = True
                     break
             if not flag:
-                log_i("All thread have terminated abnormally, so the program will exit.")
+                log_e("All thread have terminated abnormally, so the program will exit.")
                 self.exit_flag.set()
                 break
         
@@ -244,8 +239,14 @@ class LogMonitor:
     def start_log_thread(self) -> bool:
         # 1、Get pod information.
         list_line = self.shell_get_pod()
+        if list_line is None:
+            log_e("Exiting: failed to get pod list from kubectl.")
+            return False
         if not list_line:
-            log_i("No pod information available, exiting program.")
+            log_w(
+                f"No pods in namespace '{g_name_space}'. "
+                "No per-pod log files or output subdirectory will be created. Exiting monitor."
+            )
             return False
 
         # 2、Get newly created pods.
@@ -309,29 +310,63 @@ def read_config(config_file: str) -> None:
     :param config_file: Path to the configuration file
     """
     global g_name_space, g_target_log, g_max_log_size, g_backup_count
-    
-    config = configparser.ConfigParser()
-    if not config.read(config_file):
-        log_i(f"The configuration file {config_file} does not exist or cannot be read.")
-        return
-    
-    section = 'LogSetting'
 
-    for section in config.sections():
-        log_i(f"[{section}]")
-        for key, value in config[section].items():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cfg_path = os.path.normpath(
+        config_file if os.path.isabs(config_file)
+        else os.path.join(script_dir, config_file)
+    )
+
+    config = configparser.ConfigParser()
+    if not config.read(cfg_path):
+        log_e(f"The configuration file {cfg_path} does not exist or cannot be read.")
+        sys.exit(1)
+
+    log_section = "LogSetting"
+
+    for sec_name in config.sections():
+        log_i(f"[{sec_name}]")
+        for key, value in config[sec_name].items():
             log_i(f"{key} = {value}")
 
-    if section in config:
-        g_name_space = config[section].get('name_space', g_name_space)
-        g_target_log = config[section].get('out_path', g_target_log)
-        g_max_log_size = config[section].getint('max_log_size', g_max_log_size)
-        g_backup_count = config[section].getint('backup_count', g_backup_count)
+    if log_section not in config:
+        log_e(
+            f"The [{log_section}] section is missing in {cfg_path}; "
+            "add it and required keys (see the template in the same directory)."
+        )
+        sys.exit(1)
 
-        g_target_log = os.path.join(g_target_log, datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S'))
-        log_i(f"Read configuration: [{section}] succeeded. output : {g_target_log}")
+    try:
+        g_max_log_size = config[log_section].getint("max_log_size", g_max_log_size)
+        g_backup_count = config[log_section].getint("backup_count", g_backup_count)
+    except ValueError as e:
+        log_e(f"Invalid integer in [{log_section}] (max_log_size or backup_count): {e}")
+        sys.exit(1)
+
+    g_name_space = (config[log_section].get("name_space", g_name_space) or "").strip()
+    out_raw = (
+        (config[log_section].get("out_path", g_target_log) or "").strip() or g_target_log
+    )
+    if os.path.isabs(out_raw):
+        out_base = os.path.normpath(out_raw)
     else:
-        log_e(f"The [{section}] part is missing in the configuration file; default settings will be used.")
+        out_base = os.path.normpath(os.path.join(script_dir, out_raw))
+
+    if g_max_log_size <= 0:
+        log_e(f"max_log_size must be positive, got {g_max_log_size}.")
+        sys.exit(1)
+    if g_backup_count < 0:
+        log_e(f"backup_count must be non-negative, got {g_backup_count}.")
+        sys.exit(1)
+
+    session_dir = os.path.join(
+        out_base, datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')
+    )
+    g_target_log = os.path.abspath(session_dir)
+    log_i(
+        f"Read configuration: [{log_section}] succeeded. "
+        f"Pod logs directory (absolute): {g_target_log}"
+    )
 
 
 if __name__ == "__main__":
