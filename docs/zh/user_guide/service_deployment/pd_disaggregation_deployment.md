@@ -614,19 +614,40 @@ kubectl get pods -n <job_id>
 
 Pod 状态为 Running 仅表示已成功调度并启动，是否业务就绪仍需结合日志进一步确认。
 
-**查看日志（推荐 `show_log.sh`）**：
+**查看日志与排查问题**：
 
-- **配置 `log_config.ini`（必做）**：`show_log.sh` 会在 `log_collect` 目录下启动 `log_monitor.py`，该脚本从同目录的 `examples/deployer/log_collect/log_config.ini` 读取 `[LogSetting]` 配置。仓库中 **`name_space` 默认为空**，运行前**必须**将其填写为与实际部署 workload 所在的 **Kubernetes 命名空间** 一致（须与本文中查看 Pod、执行 `kubectl` 时使用的 **`<job_id>`** 相同）。若未填写，`show_log.sh` 会在**当前终端**（stderr）输出英文错误并**立即退出**，不会启动 `log_monitor.py`（详见《常见问题》第 6 节）。若已填写但与真实命名空间不一致，`kubectl get pods` / `kubectl logs` 会指向错误命名空间，导致采集不到目标 Pod 日志或内容为空。同文件中还可按需调整日志输出目录 `out_path`、单文件上限 `max_log_size`、轮转备份数 `backup_count`（单位与含义以脚本为准）。
+可以通过以下三种方式查看集群日志或进行排查：
 
-- 在 `examples/deployer` 目录下执行 `show_log.sh` 获取/查看日志（启动后具体输出与行为以脚本及 `log_monitor.py` 实现为准）：
+**方式一：推荐使用 `show_log.sh` 工具进行统一采集**
 
-  ```bash
-  cd examples/deployer
-  bash show_log.sh
-  ```
+1. **配置 `log_config.ini`（必做）**：`show_log.sh` 会在 `log_collect` 目录下启动 `log_monitor.py`，该脚本从同目录的 `examples/deployer/log_collect/log_config.ini` 读取 `[LogSetting]` 配置。仓库中 **`name_space` 默认为空**，运行前**必须**将其填写为与实际部署 workload 所在的 **Kubernetes 命名空间** 一致（须与本文中查看 Pod、执行 `kubectl` 时使用的 **`<job_id>`** 相同）。若未填写，`show_log.sh` 会在**当前终端**（stderr）输出英文错误并**立即退出**，不会启动 `log_monitor.py`（详见《常见问题》第 6 节）。若已填写但与真实命名空间不一致，`kubectl get pods` / `kubectl logs` 会指向错误命名空间，导致采集不到目标 Pod 日志或内容为空。同文件中还可按需调整日志输出目录 `out_path`、单文件上限 `max_log_size`、轮转备份数 `backup_count`（单位与含义以脚本为准）。
 
-- 兜底方式：查看某 Pod 的标准输出：`kubectl logs <pod_name> -n <job_id>`，例如 `kubectl logs mindie-server-p0-xxx -n mindie-motor`
-- 需进入容器排查时，可执行：`kubectl exec -it <pod_name> -n <job_id> -- bash`
+2. **执行采集脚本**：在 `examples/deployer` 目录下执行 `show_log.sh` 获取/查看日志：
+
+   ```bash
+   cd examples/deployer
+   bash show_log.sh
+   ```
+
+3. **关于采集的日志文件**：
+   - **存储目录**：日志会收集在 `log_config.ini` 配置的 `out_path` 下，以**当前系统本地时间**生成时间戳文件夹（例如 `20260328_102430`）。
+   - **文件命名规则**：单个 Pod 的日志文件命名格式为 `<pod_name>_<node_name>_<retry_count>.log`，直接体现了该 Pod 所在的 Kubernetes 节点名称（例如 `vllm-0-controller-0-xxxx_node01_0.log`），方便跨节点问题排查。
+   - **日志轮转（自动拆分）机制**：当采集日志大小超过 `log_config.ini` 中配置的 `max_log_size`（默认 10MB）时，触发轮转机制，将旧文件重命名并追加 `.1`、`.2` 等后缀（例如 `xxx_0.log.1`、`xxx_0.log.2` 代表更早的日志段），并生成一个新的 `.log` 继续记录。它们均属于同一个 Pod 单次生命周期的日志流。轮转保存的备份数受 `backup_count` 限制。
+
+**方式二：兜底方案（查看单 Pod 日志）**
+
+如果您只想快速查看某个特定 Pod 的标准输出，可以直接使用 kubectl 命令：
+```bash
+kubectl logs <pod_name> -n <job_id>
+```
+*例如：`kubectl logs mindie-server-p0-xxx -n mindie-motor`*
+
+**方式三：进入容器内部排查**
+
+如果需要进入容器内部查看内部状态或执行调试命令，可执行：
+```bash
+kubectl exec -it <pod_name> -n <job_id> -- bash
+```
 
 **确认 P/D 与 Pod 的对应关系**：
 

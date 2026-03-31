@@ -12,6 +12,7 @@ import time
 
 
 STOP_FILE = "stop_log"
+UNKNOWN_NODE_NAME = "unknown"
 
 # Configuration parameters, Configured in the 'log_config.ini' file
 # The log file size is configured in bytes.
@@ -95,6 +96,32 @@ class LogMonitor:
         logger.addHandler(handler)
         
         return logger
+
+    def shell_get_pod_node(self, pod_name: str) -> str:
+        """
+        Get the K8s node name where the specified pod is running.
+        :param pod_name: Name of the pod
+        :return: Node name, or "unknown" if it cannot be determined
+        """
+        try:
+            kubectl_cmd = subprocess.Popen(
+                [
+                    self.cmd_kubectl,
+                    'get', 'pod', pod_name,
+                    '-n', g_name_space,
+                    '-o', 'jsonpath={.spec.nodeName}'
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            output, _ = kubectl_cmd.communicate()
+            if kubectl_cmd.returncode != 0:
+                return UNKNOWN_NODE_NAME
+            node_name = output.decode(self.encode_type).strip()
+            return node_name if node_name else UNKNOWN_NODE_NAME
+        except Exception as e:
+            log_e(f"shell_get_pod_node Exception for {pod_name}: {e}")
+            return UNKNOWN_NODE_NAME
 
     def check_pod_is_running(self, pod_name: str) -> bool:
         """
@@ -199,13 +226,14 @@ class LogMonitor:
         :param pod_name: Name of the pod to collect logs from
         """
         index = 0
+        node_name = self.shell_get_pod_node(pod_name)
         try:
             while not self.exit_flag.is_set():
                 if not self.check_pod_is_running(pod_name):
                     log_w(f"{pod_name} :The pod is not in the 'Running' state, waiting...")
                     time.sleep(interval)
                     continue
-                file_path = os.path.join(g_target_log, f"{pod_name}_{index}.log")
+                file_path = os.path.join(g_target_log, f"{pod_name}_{node_name}_{index}.log")
                 if self.shell_pull_log(pod_name, file_path):
                     index += 1
         except Exception as e:
@@ -360,7 +388,7 @@ def read_config(config_file: str) -> None:
         sys.exit(1)
 
     session_dir = os.path.join(
-        out_base, datetime.now(tz=timezone.utc).strftime('%Y%m%d_%H%M%S')
+        out_base, datetime.now(timezone.utc).astimezone().strftime('%Y%m%d_%H%M%S')
     )
     g_target_log = os.path.abspath(session_dir)
     log_i(
