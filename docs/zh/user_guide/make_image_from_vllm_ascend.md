@@ -9,7 +9,7 @@
 docker pull quay.io/ascend/vllm-ascend:v0.13.0
 ```
 
-> 为提高下载速度，可讲quay.io替换为quay.nju.edu.cn
+> 为提高下载速度，可将`quay.io`替换为`quay.nju.edu.cn`
 
 ## 2、在镜像中安装PyMotor
 

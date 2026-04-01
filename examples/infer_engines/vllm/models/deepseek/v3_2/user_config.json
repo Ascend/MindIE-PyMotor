@@ -12,7 +12,7 @@
     "hardware_type": "800I_A2",
     "env_path": "./conf/env.json",
     "weight_mount_path": "/data01/models/",
-    "deployment_backend": "multi_deployment"
+    "deploy_mode": "multi_deployment"
   },
   "motor_controller_config": {},
   "motor_coordinator_config": {

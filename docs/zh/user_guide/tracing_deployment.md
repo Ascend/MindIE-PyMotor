@@ -166,6 +166,10 @@ python deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env
 
 运行后通过浏览器打开对应IP的16686端口网页，效果如下：
 
-![image](https://wiki.huawei.com/vision-file-storage/api/file/download/upload-v2/WIKI202601279947491/38000567/21400ffd3db84ab4b40f3915b1a98cac.png)
+![Snipaste_2026-03-31_20-59-16.jpg](https://raw.gitcode.com/user-images/assets/9428015/e2338b5c-646f-4349-b62b-1dae9c95b217/Snipaste_2026-03-31_20-59-16.jpg 'Snipaste_2026-03-31_20-59-16.jpg')
 
-![image](https://wiki.huawei.com/vision-file-storage/api/file/download/upload-v2/WIKI202601279947491/38000605/6bde5a10511747458275a36edbcdb3d4.png)
+---
+
+![Snipaste_2026-03-31_20-59-24.jpg](https://raw.gitcode.com/user-images/assets/9428015/85f73899-a6cd-4667-837d-300b432d2e2a/Snipaste_2026-03-31_20-59-24.jpg 'Snipaste_2026-03-31_20-59-24.jpg')
+
+---
