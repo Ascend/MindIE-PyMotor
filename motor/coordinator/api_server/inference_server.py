@@ -85,7 +85,7 @@ def _validate_openai_request(body_json: dict[str, Any], request_type: RequestTyp
                     f"{OpenAIField.ROLE} or {OpenAIField.CONTENT}"
                 ),
             )
-        if message[OpenAIField.ROLE] not in ["system", "user", "assistant"]:
+        if message[OpenAIField.ROLE] not in ["system", "user", "assistant", "tool"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
