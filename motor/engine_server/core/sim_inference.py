@@ -57,7 +57,7 @@ class SimInference:
         
         # add _max_failure_count to measure consecutive failure times
         self._failure_count = 0
-        self._max_failure_count = 3
+        self._max_failure_count = 6
         
         # Condition variable to control aicore usage check execution
         self._aicore_check_condition = threading.Condition()
