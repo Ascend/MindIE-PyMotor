@@ -236,6 +236,14 @@ class LogMonitor:
                 file_path = os.path.join(g_target_log, f"{pod_name}_{node_name}_{index}.log")
                 if self.shell_pull_log(pod_name, file_path):
                     index += 1
+                    log_i(f"{pod_name} :Log stream ended, waiting for pod to leave Running state...")
+                    while not self.exit_flag.is_set():
+                        try:
+                            if not self.check_pod_is_running(pod_name):
+                                break
+                        except Exception:
+                            break
+                        time.sleep(interval)
         except Exception as e:
             log_e(f"{pod_name} :Exception: {e}")
 
