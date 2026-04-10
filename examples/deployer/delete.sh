@@ -30,6 +30,18 @@ for yaml_file in "$YAML_DIR"/*.yaml; do
     fi
 done
 
+# keep the same with yaml_template/engine_template.yaml terminationGracePeriodSeconds: 10
+for ((i=10; i>=1; i--)); do
+    echo "Waiting for pods to terminate gracefully... ${i}s remaining"
+    sleep 1
+done
+
+# Terminating is not a status.phase value; stuck terminating pods have metadata.deletionTimestamp set.
+kubectl get pods -n "$NAMESPACE" -o jsonpath='{range .items[?(@.metadata.deletionTimestamp)]}{.metadata.name}{"\n"}{end}' | while read -r pod; do
+    [ -z "$pod" ] && continue
+    kubectl delete pod "$pod" -n "$NAMESPACE" --force --grace-period=0
+done
+
 sed -i '/^function set_controller_env()/,/^}/d' ./startup/roles/controller.sh
 sed -i '/^function set_coordinator_env()/,/^}/d' ./startup/roles/coordinator.sh
 sed -i '/^function set_prefill_env()/,/^}/d' ./startup/roles/engine.sh

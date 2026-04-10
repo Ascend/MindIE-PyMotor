@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from lib.utils import logger
 
 UPDATE_CONFIG_WHITELIST = {
-    "motor_deployer_config": {
+    "motor_deploy_config": {
         "tls_config": {
             "north_tls_config": [
                 "enable_tls", 
