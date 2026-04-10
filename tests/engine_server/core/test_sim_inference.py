@@ -43,7 +43,7 @@ def sim_inference(mock_args, mock_tls_config):
     """Create SimInference instance with health check enabled"""
     # Create a mock health_check_config with enable_virtual_inference=True
     mock_health_config = mock.MagicMock()
-    mock_health_config.npu_usage_threshold = 10
+    mock_health_config.npu_usage_threshold = 3
     mock_health_config.enable_virtual_inference = True
     return SimInference(mock_args, mock_tls_config, mock_health_config)
 
@@ -285,7 +285,7 @@ async def test_health_check_loop_abnormal(mock_sleep, mock_send_request, mock_th
     
     # Mock low AICore usage
     with sim_inference._shared_data_lock:
-        sim_inference._max_aicore_usage = 5  # < 10%
+        sim_inference._max_aicore_usage = 2  # < 10%
     
     # Mock sleep to raise exception to end loop
     mock_sleep.side_effect = asyncio.CancelledError

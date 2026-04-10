@@ -77,7 +77,8 @@
     },
     "health_check_config": {
       "enable_virtual_inference": false,
-      "npu_usage_threshold": 10
+      "npu_usage_threshold": 3,
+      "max_failure_count": 6
     }
   },
   "motor_engine_decode_config": {
@@ -141,7 +142,8 @@
     },
     "health_check_config": {
       "enable_virtual_inference": false,
-      "npu_usage_threshold": 10
+      "npu_usage_threshold": 3,
+      "max_failure_count": 6
     }
   },
   "kv_cache_pool_config": {

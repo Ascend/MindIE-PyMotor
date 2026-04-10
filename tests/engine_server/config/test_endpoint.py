@@ -123,7 +123,7 @@ def test_health_check_config_defaults():
     """Test HealthCheckConfig default values"""
     config = HealthCheckConfig()
     assert config.health_collector_timeout == 2
-    assert config.npu_usage_threshold == 10
+    assert config.npu_usage_threshold == 3
     assert config.enable_virtual_inference is False
 
 

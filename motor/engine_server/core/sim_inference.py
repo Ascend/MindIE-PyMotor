@@ -44,11 +44,13 @@ class SimInference:
         self.health_check_config = health_check_config or None
         # Get npu_usage_threshold with default value
         if self.health_check_config:
-            self.npu_usage_threshold = getattr(self.health_check_config, 'npu_usage_threshold', 10)
+            self.npu_usage_threshold = getattr(self.health_check_config, 'npu_usage_threshold', 3)
             self.enable_virtual_inference = getattr(self.health_check_config, 'enable_virtual_inference', False)
+            self._max_failure_count = getattr(self.health_check_config, 'max_failure_count', 6)
         else:
-            self.npu_usage_threshold = 10
+            self.npu_usage_threshold = 3
             self.enable_virtual_inference = False
+            self._max_failure_count = 6
         
         self._shared_data_lock = threading.Lock()
         self._max_aicore_usage = 0
@@ -57,7 +59,6 @@ class SimInference:
         
         # add _max_failure_count to measure consecutive failure times
         self._failure_count = 0
-        self._max_failure_count = 6
         self.sim_sleep = 5
         
         # Condition variable to control aicore usage check execution
