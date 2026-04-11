@@ -150,6 +150,35 @@ def deploy_services_single_container(paths, user_config, dry_run=False):
         exec_all_kubectl_singer(deploy_config, paths["single_container_output_yaml"])
 
 
+def update_shell_add_kv_patch():
+    """ patch for vllm 0.18.0 """
+
+    start_str = "# patch_begin"
+    end_str = "# patch_end"
+    multi_connector_path = "/usr/local/python3.11.10/lib/python3.11/site-packages\
+/vllm/distributed/kv_transfer/kv_connector/v1/multi_connector.py"
+    patch_path = "/tmp/motor/examples/deployer/patch/kv_vllm_multi_connector.patch"
+
+    with open(C.BOOT_SHELL_PATH, 'r') as f:
+        lines = f.readlines()
+    if lines:
+        if lines[0].startswith(start_str):
+            return
+
+    new_patch_lines = [
+        f"{start_str}\n"
+        f"md5sum {multi_connector_path}\n",
+        f"patch -p0 {multi_connector_path}  < {patch_path}\n",
+        f"md5sum {multi_connector_path}\n",
+        f"{end_str}\n"
+    ]
+
+    new_lines = new_patch_lines + lines
+
+    with open(C.BOOT_SHELL_PATH, 'w') as f:
+        f.writelines(new_lines)
+
+
 def deploy_services(user_config, env_config_path, dry_run=False):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     update_kv_pool_enabled_flag(user_config)
@@ -163,6 +192,9 @@ def deploy_services(user_config, env_config_path, dry_run=False):
         set_env_to_shell(user_config, env_config_path, deploy_mode_arg)
     else:
         logger.info("dry-run: skip set_env_to_shell")
+
+    if k8s_utils.g_kv_pool_enabled and k8s_utils.g_kv_conductor_enabled:
+        update_shell_add_kv_patch()
 
     k8s_utils.g_generate_yaml_list = []
     paths = get_deploy_paths()

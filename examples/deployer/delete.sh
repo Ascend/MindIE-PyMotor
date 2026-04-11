@@ -42,6 +42,7 @@ kubectl get pods -n "$NAMESPACE" -o jsonpath='{range .items[?(@.metadata.deletio
     kubectl delete pod "$pod" -n "$NAMESPACE" --force --grace-period=0
 done
 
+sed -i '/^# patch_begin/,/^# patch_end/d' ./startup/boot.sh
 sed -i '/^function set_controller_env()/,/^}/d' ./startup/roles/controller.sh
 sed -i '/^function set_coordinator_env()/,/^}/d' ./startup/roles/coordinator.sh
 sed -i '/^function set_prefill_env()/,/^}/d' ./startup/roles/engine.sh
