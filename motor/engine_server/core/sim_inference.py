@@ -59,6 +59,8 @@ class SimInference:
         
         # add _max_failure_count to measure consecutive failure times
         self._failure_count = 0
+        # add flag to control failure counting, initially false
+        self._count_failure_flag = False
         self.sim_sleep = 5
         
         # Condition variable to control aicore usage check execution
@@ -254,12 +256,17 @@ class SimInference:
                         f"AICore usage ({max_usage}%) < threshold ({self.npu_usage_threshold}%) "
                         f"and virtual request failed"
                     )
-                    self._failure_count += 1
-                    logger.warning(f"Current failure count: {self._failure_count}/{self._max_failure_count}")
-                    if self._failure_count >= self._max_failure_count:
-                        logger.warning(f"Reach maximum failure count ({self._max_failure_count}), set abnormal status")
-                        self.set_abnormal_status()
+                    # Only increase failure count when count_failure_flag is true
+                    if self._count_failure_flag:
+                        self._failure_count += 1
+                        logger.warning(f"Current failure count: {self._failure_count}/{self._max_failure_count}")
+                        if self._failure_count >= self._max_failure_count:
+                            logger.warning(f"Reach maximum failure count, set abnormal status")
+                            self.set_abnormal_status()
                 else:
+                    # Set count_failure_flag to true when virtual inference succeeds or AICore usage reaches threshold
+                    self._count_failure_flag = True
+                    logger.debug("count_failure_flag set to True")
                     if self._failure_count > 0:
                         logger.info(f"Resetting failure count from {self._failure_count} to 0")
                         self._failure_count = 0

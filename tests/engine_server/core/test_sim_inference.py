@@ -274,6 +274,8 @@ async def test_health_check_loop_abnormal(mock_sleep, mock_send_request, mock_th
     
     # Set max_failure_count to 1 for this test to avoid infinite loop
     sim_inference._max_failure_count = 1
+
+    sim_inference._count_failure_flag = True
     
     # Mock thread creation and join
     mock_thread_instance = mock.MagicMock()
