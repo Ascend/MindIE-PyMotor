@@ -20,6 +20,10 @@ class LogDataProcessor:
         self.watch_files: dict[str, LogFile] = dict()
         self.modified_log_files = ThreadSafeFactory.make_threadsafe_instance(set)
 
+    @staticmethod
+    def _log_file_matches_component(logfile, component_type):
+        return component_type.lower() in (logfile.log_type or "").lower()
+
     def get_log_data(self, component_type=CLIENT_COMPONENT_TYPE[0]):
         if component_type not in CLIENT_COMPONENT_TYPE:
             raise ValueError(
@@ -32,7 +36,7 @@ class LogDataProcessor:
             self.modified_log_files.clear()
         for filename in modified_log:
             logfile = self.watch_files.get(filename, None)
-            if logfile is None:
+            if logfile is None or not self._log_file_matches_component(logfile, component_type):
                 continue
             metadata_list.append(logfile.get_meta_data())
         if not metadata_list:

@@ -80,7 +80,12 @@ class PathCheckBase(object):
         cur_user_id = os.getuid()
         cur_group_id = os.getgid()
 
-        file_info = os.stat(path)
+        try:
+            file_info = os.stat(path)
+        except FileNotFoundError:
+            error_message = f"[OM Adapter] The path {path} does not exist"
+            cls.log_error(error_message)
+            return False
         file_user_id = file_info.st_uid
         file_group_id = file_info.st_gid
 
