@@ -273,6 +273,68 @@ class TestRouterPDSeparation:
         monkeypatch.setattr(
             CoordinatorConfig, "__new__", lambda cls: _PD_SEPARATION_CONFIG
         )
+
+    @pytest.fixture
+    def mock_raw_request(self):
+        mock_req = MagicMock(spec=Request)
+        mock_req.body = AsyncMock(return_value=b'{"model": "test-model", "messages": [{"role": "user", "content": "Hi"}]}')
+        mock_req.json = AsyncMock(
+            return_value={"model": "test-model", "messages": [{"role": "user", "content": "Hi"}]}
+        )
+        mock_req.headers = {}
+        mock_req.url.path = "/v1/chat/completions"
+        return mock_req
+
+    @pytest.mark.asyncio
+    async def test_cpcd_degrades_to_single_node_when_only_prefill(
+        self, monkeypatch: MonkeyPatch, mock_raw_request
+    ):
+        """CPCD_SEPARATE with only prefill instances uses PDHybridRouter (same as PD/CDP fallback)."""
+        mock_raw_request.receive = AsyncMock(return_value={"type": "http.disconnect"})
+
+        host = "127.0.0.1"
+        mock_instance_p = self.create_mock_instance(0, PDRole.ROLE_P)
+        mock_endpoint_p = Endpoint(id=0, ip=host, business_port="8000", mgmt_port="8000")
+        mock_instance_p.endpoints = {host: {0: mock_endpoint_p}}
+
+        def mock_get_available_instances(self, role):
+            if role == PDRole.ROLE_U:
+                return {}
+            if role == PDRole.ROLE_P:
+                return {mock_instance_p.id: mock_instance_p}
+            if role == PDRole.ROLE_D:
+                return {}
+            return {}
+
+        def mock_get_required_instances_status(self, deploy_mode=None):
+            return InstanceReadiness.ONLY_PREFILL
+
+        monkeypatch.setattr(InstanceManager, "get_available_instances", mock_get_available_instances)
+        monkeypatch.setattr(InstanceManager, "get_required_instances_status", mock_get_required_instances_status)
+
+        async def mock_select_instance_and_endpoint(self, role):
+            if role == PDRole.ROLE_P:
+                return mock_instance_p, mock_endpoint_p
+            if role == PDRole.ROLE_D:
+                return None, None
+            return None, None
+
+        monkeypatch.setattr(Scheduler, "select_instance_and_endpoint", mock_select_instance_and_endpoint)
+
+        mock_response = "mock_hybrid_response"
+        with patch(
+            "motor.coordinator.router.dispatch.PDHybridRouter.handle_request",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ) as mock_handle_request:
+            response = await router.handle_request(
+                mock_raw_request,
+                _PD_SEPARATION_CONFIG,
+                scheduler=_scheduler,
+                request_manager=_request_manager,
+            )
+        mock_handle_request.assert_called_once()
+        assert response == mock_response
     
     @pytest.fixture
     def setup_forward_request(self, monkeypatch: MonkeyPatch):

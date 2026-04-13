@@ -144,8 +144,12 @@ async def handle_request(
     config_mode = config.scheduler_config.deploy_mode
     readiness = await scheduler.has_required_instances()
     if (
-        config_mode in (DeployMode.PD_SEPARATE, DeployMode.CDP_SEPARATE, \
-                DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER)
+        config_mode in (
+            DeployMode.PD_SEPARATE,
+            DeployMode.CDP_SEPARATE,
+            DeployMode.CPCD_SEPARATE,
+            DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER,
+        )
         and readiness == InstanceReadiness.ONLY_PREFILL
     ):
         deploy_mode = DeployMode.SINGLE_NODE  # fallback only when has P but no D
