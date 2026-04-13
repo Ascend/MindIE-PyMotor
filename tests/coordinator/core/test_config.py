@@ -114,8 +114,7 @@ COMPLETE_CONFIG = {
         "etcd_timeout": 5,
         "enable_etcd_persistence": True
     },
-    "http_config": {
-        "combined_mode": False,
+    "api_config": {
         "coordinator_api_host": "127.0.0.1",
         "coordinator_api_infer_port": 1026,
         "coordinator_api_mgmt_port": 1025
@@ -138,8 +137,8 @@ def test_default_config_initialization():
     assert config.timeout_config.request_timeout == 30
     assert config.api_key_config.enable_api_key is False
     assert config.rate_limit_config.enable_rate_limit is False
-    assert config.http_config.coordinator_api_infer_port == 1025
-    assert config.http_config.coordinator_api_mgmt_port == 1026
+    assert config.api_config.coordinator_api_infer_port == 1025
+    assert config.api_config.coordinator_api_mgmt_port == 1026
 
 
 def test_from_json_success(temp_json_file):
@@ -190,7 +189,7 @@ def test_from_json_with_invalid_json(temp_json_file):
     # Should use default configuration instead of raising exception
     config = CoordinatorConfig.from_json(temp_json_file)
     assert config is not None
-    assert config.http_config.coordinator_api_infer_port == 1025  # default value
+    assert config.api_config.coordinator_api_infer_port == 1025  # default value
 
 
 def test_from_json_file_not_found():
@@ -198,7 +197,7 @@ def test_from_json_file_not_found():
     # Should use default configuration instead of raising exception
     config = CoordinatorConfig.from_json("/non/existent/file.json")
     assert config is not None
-    assert config.http_config.coordinator_api_infer_port == 1025  # default value
+    assert config.api_config.coordinator_api_infer_port == 1025  # default value
 
 
 def test_config_validation_success():
@@ -241,7 +240,7 @@ def test_config_validation_errors(param, value, expected_error):
         elif param in ["request_timeout", "connection_timeout", "read_timeout", "write_timeout", "keep_alive_timeout"]:
             setattr(config.timeout_config, param, value)
         elif param in ["coordinator_api_infer_port", "coordinator_api_mgmt_port"]:
-            setattr(config.http_config, param, value)
+            setattr(config.api_config, param, value)
         elif param in ["max_requests", "window_size", "error_status_code"]:
             setattr(config.rate_limit_config, param, value)
         elif param in ["reuse_time"]:
@@ -275,7 +274,7 @@ def test_to_dict():
         'logging_config', 'prometheus_metrics_config', 'exception_config',
         'scheduler_config', 'inference_workers_config', 'infer_tls_config', 'mgmt_tls_config', 'etcd_tls_config',
         'timeout_config', 'api_key_config', 'rate_limit_config', 'standby_config',
-        'etcd_config', 'http_config', 'aigw_model', 'api_config'
+        'etcd_config', 'aigw_model', 'api_config'
     ]
 
     for key in expected_keys:
@@ -324,9 +323,9 @@ def test_config_summary():
     assert "Log Level" in summary
     assert "Log Max Line Length" in summary
     assert "HTTP Pod IP" in summary
+    assert "HTTP Pod DNS" in summary
     assert "Inference Port" in summary
     assert "Management Port" in summary
-    assert "Combined Mode" in summary
     assert "Deploy Mode" in summary
     assert "Scheduler Type" in summary
     assert "API Key Auth" in summary

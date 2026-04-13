@@ -229,16 +229,6 @@ DEFAULT_SCHEDULER_PROCESS_CONFIG = SchedulerProcessConfig()
 
 
 @dataclass
-class HttpConfig:
-    """HTTP configuration class (host/ports, combined mode)."""
-
-    combined_mode: bool = False
-    coordinator_api_host: str = field(default_factory=lambda: Env.pod_ip or "127.0.0.1")
-    coordinator_api_infer_port: int = 1025
-    coordinator_api_mgmt_port: int = 1026
-
-
-@dataclass
 class RateLimitConfig:
     """Rate limiting configuration class"""
 
@@ -255,10 +245,11 @@ class RateLimitConfig:
 class ApiConfig:
     """API configuration class"""
 
-    # controller API configuration
+    # coordinator API configuration
     coordinator_api_host: str = field(default_factory=lambda: Env.pod_ip or '127.0.0.1')
     coordinator_api_dns: str = field(default_factory=lambda: Env.coordinator_service or '127.0.0.1')
-    coordinator_api_port: int = 1026
+    coordinator_api_infer_port: int = 1025
+    coordinator_api_mgmt_port: int = 1026
 
 
 @dataclass
@@ -314,7 +305,6 @@ class CoordinatorConfig:
     standby_config: StandbyConfig = field(default_factory=StandbyConfig)
 
     etcd_config: EtcdConfig = field(default_factory=EtcdConfig)
-    http_config: HttpConfig = field(default_factory=HttpConfig)
     aigw_model: dict[str, Any] | None = None
     api_config: ApiConfig = field(default_factory=ApiConfig)
     deploy_config: DeployConfig = field(default_factory=DeployConfig)
@@ -425,7 +415,6 @@ class CoordinatorConfig:
                 ('rate_limit_config', config.rate_limit_config, None),
                 ('standby_config', config.standby_config, None),
                 ('etcd_config', config.etcd_config, None),
-                ('http_config', config.http_config, None),
                 ('infer_tls_config', config.infer_tls_config, None),
                 ('mgmt_tls_config', config.mgmt_tls_config, None),
                 ('etcd_tls_config', config.etcd_tls_config, None),
@@ -512,8 +501,8 @@ class CoordinatorConfig:
         self._validate_positive_number(self.tracer_config.local_parent_not_sampled, "local_parent_not_sampled")
 
         # Validate HTTP configuration
-        self._validate_port_range(self.http_config.coordinator_api_infer_port, "coordinator_api_infer_port")
-        self._validate_port_range(self.http_config.coordinator_api_mgmt_port, "coordinator_api_mgmt_port")
+        self._validate_port_range(self.api_config.coordinator_api_infer_port, "coordinator_api_infer_port")
+        self._validate_port_range(self.api_config.coordinator_api_mgmt_port, "coordinator_api_mgmt_port")
         if self.inference_workers_config.worker_metaserver_base_port != 0:
             self._validate_port_range(
                 self.inference_workers_config.worker_metaserver_base_port,
@@ -535,7 +524,7 @@ class CoordinatorConfig:
                 )
 
         # Validate host address
-        self._validate_ip_or_hostname(self.http_config.coordinator_api_host, "coordinator_api_host")
+        self._validate_ip_or_hostname(self.api_config.coordinator_api_host, "coordinator_api_host")
 
         # Validate rate limit configuration
         self._validate_positive_number(self.rate_limit_config.max_requests, "max_requests")
@@ -691,10 +680,10 @@ class CoordinatorConfig:
             f"    └─ Log Max Line Length: {self.logging_config.log_max_line_length}\n"
             "\n"
             "  Network Configuration:\n"
-            f"    ├─ HTTP Pod IP:         {self.http_config.coordinator_api_host}\n"
-            f"    ├─ Inference Port:      {self.http_config.coordinator_api_infer_port}\n"
-            f"    ├─ Management Port:     {self.http_config.coordinator_api_mgmt_port}\n"
-            f"    └─ Combined Mode:       {'Enabled' if self.http_config.combined_mode else 'Disabled'}\n"
+            f"    ├─ HTTP Pod IP:         {self.api_config.coordinator_api_host}\n"
+            f"    ├─ HTTP Pod DNS:         {self.api_config.coordinator_api_dns}\n"
+            f"    ├─ Inference Port:      {self.api_config.coordinator_api_infer_port}\n"
+            f"    └─ Management Port:     {self.api_config.coordinator_api_mgmt_port}\n"
             "\n"
             "  Scheduler Configuration:\n"
             f"    ├─ Deploy Mode:               {self.scheduler_config.deploy_mode.value}\n"

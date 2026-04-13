@@ -160,8 +160,8 @@ class CoordinatorDaemon:
 
         self._process_managers[PROCESS_KEY_MGMT] = MgmtProcessManager(self.config)
 
-        host = self.config.http_config.coordinator_api_host
-        port = self.config.http_config.coordinator_api_infer_port
+        host = self.config.api_config.coordinator_api_host
+        port = self.config.api_config.coordinator_api_infer_port
         sock = create_shared_socket(host, port)
         if sock is not None:
             num_workers = self.config.inference_workers_config.num_workers

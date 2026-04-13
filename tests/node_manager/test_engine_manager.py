@@ -244,7 +244,7 @@ class TestEngineManager:
         engine_manager._config.endpoint_config.service_ports = ["8080"]
         engine_manager._config.api_config.node_manager_port = 8080
         engine_manager._config.api_config.coordinator_api_dns = "localhost"
-        engine_manager._config.api_config.coordinator_api_port = 8080
+        engine_manager._config.api_config.coordinator_api_mgmt_port = 8080
         engine_manager._config.basic_config.parallel_config = ParallelConfig(tp_size=2, pp_size=1)
         
         mock_register.return_value = True
@@ -264,7 +264,7 @@ class TestEngineManager:
         engine_manager._config.endpoint_config.service_ports = ["8080"]
         engine_manager._config.api_config.node_manager_port = 8080
         engine_manager._config.api_config.coordinator_api_dns = "localhost"
-        engine_manager._config.api_config.coordinator_api_port = 8080
+        engine_manager._config.api_config.coordinator_api_mgmt_port = 8080
         engine_manager._config.basic_config.parallel_config = ParallelConfig(tp_size=2, pp_size=1)
         
         mock_register.return_value = False

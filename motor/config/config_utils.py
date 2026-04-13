@@ -337,6 +337,6 @@ def generate_user_config_sample(output_path: str):
 if __name__ == "__main__":
     # Default output path
     project_root = Path(__file__).parent.parent.parent
-    output_path = project_root / "examples" / "user_config_sample.json"
+    output_path = project_root / "examples" / "features" / "config_sample.json"
 
     generate_user_config_sample(output_path)

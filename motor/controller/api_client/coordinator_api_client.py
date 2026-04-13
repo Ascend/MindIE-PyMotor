@@ -86,7 +86,7 @@ class CoordinatorApiClient:
     def _generate_client_args(cls) -> dict[str, str]:
         tls_config = cls.controller_config.mgmt_tls_config
         api_config = cls.coordinator_config.api_config
-        address = f"{api_config.coordinator_api_dns}:{api_config.coordinator_api_port}"
+        address = f"{api_config.coordinator_api_dns}:{api_config.coordinator_api_mgmt_port}"
         client_ars = {
             "address": f"{address}",
             "tls_config": tls_config,

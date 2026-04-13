@@ -59,7 +59,7 @@ def _make_pd_separation_test_coordinator_config():
     mock_config = MagicMock()
     mock_config.scheduler_config = mock_scheduler_config
     mock_config.exception_config = mock_exception_config
-    mock_config.http_config = mock_http_config
+    mock_config.api_config = mock_http_config
     mock_config.rate_limit_config = mock_rate_limit_config
     # Real tracer config: MagicMock endpoint is truthy and enables OTLP + breaks sampling rate compares.
     mock_config.tracer_config = TracerConfig()

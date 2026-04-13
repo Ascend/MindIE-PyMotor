@@ -30,8 +30,8 @@ def test_daemon_stop_all_processes_exclude_mgmt(mock_create_socket):
 
     mock_config = MagicMock()
     mock_config.standby_config.enable_master_standby = False
-    mock_config.http_config.coordinator_api_host = "0.0.0.0"
-    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.api_config.coordinator_api_host = "0.0.0.0"
+    mock_config.api_config.coordinator_api_infer_port = 8000
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()
@@ -59,8 +59,8 @@ def test_daemon_stop_all_processes_no_exclude(mock_create_socket):
 
     mock_config = MagicMock()
     mock_config.standby_config.enable_master_standby = False
-    mock_config.http_config.coordinator_api_host = "0.0.0.0"
-    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.api_config.coordinator_api_host = "0.0.0.0"
+    mock_config.api_config.coordinator_api_infer_port = 8000
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()
@@ -88,8 +88,8 @@ def test_stop_inference_only_stops_inference_only(mock_create_socket):
 
     mock_config = MagicMock()
     mock_config.standby_config.enable_master_standby = False
-    mock_config.http_config.coordinator_api_host = "0.0.0.0"
-    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.api_config.coordinator_api_host = "0.0.0.0"
+    mock_config.api_config.coordinator_api_infer_port = 8000
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()
@@ -117,8 +117,8 @@ def test_start_inference_only_starts_inference_only(mock_create_socket):
 
     mock_config = MagicMock()
     mock_config.standby_config.enable_master_standby = False
-    mock_config.http_config.coordinator_api_host = "0.0.0.0"
-    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.api_config.coordinator_api_host = "0.0.0.0"
+    mock_config.api_config.coordinator_api_infer_port = 8000
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()
@@ -147,8 +147,8 @@ def test_start_processes_scheduler_then_inference_order(mock_create_socket):
 
     mock_config = MagicMock()
     mock_config.standby_config.enable_master_standby = False
-    mock_config.http_config.coordinator_api_host = "0.0.0.0"
-    mock_config.http_config.coordinator_api_infer_port = 8000
+    mock_config.api_config.coordinator_api_host = "0.0.0.0"
+    mock_config.api_config.coordinator_api_infer_port = 8000
     mock_config.inference_workers_config.num_workers = 1
 
     mock_scheduler = MagicMock()

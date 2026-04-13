@@ -25,13 +25,12 @@ pyMotor修改user_config.json配置文件后，通过deploy.py脚本即可完成
       "enable_lingqu_network_recover": true
     },
     "api_config": {
-      "controller_api_port": 2026,
-      "coordinator_api_port": 1026
+      "controller_api_port": 2026
     }
   },
   "motor_coordinator_config": {
     ...
-    "http_config": {
+    "api_config": {
       "coordinator_api_infer_port": 1025,
       "coordinator_api_mgmt_port": 1026
     },
@@ -39,14 +38,13 @@ pyMotor修改user_config.json配置文件后，通过deploy.py脚本即可完成
       "deploy_mode": "pd_disaggregation_single_container"
     }
   },
-  "motor_nodemanger_config": {
-    "api_config": {
-      "node_manager_port": 3026,
-      "controller_api_port": 2026
-    }
-  }
   "motor_engine_prefill_config": {
     ...
+    "motor_nodemanger_config": {
+      "api_config": {
+        "node_manager_port": 3026
+      }
+    },
     "model_config": {
       ...
       "prefill_parallel_config": {

@@ -1900,7 +1900,6 @@ async def test_run_combined_mode(monkeypatch):
     monkeypatch.setattr("motor.coordinator.api_server.management_server.uvicorn.Server", lambda *a, **k: DummyServer())
 
     cfg = CoordinatorConfig()
-    cfg.http_config.combined_mode = True
     # Disable TLS for testing
     cfg.infer_tls_config.enable_tls = False
     cfg.mgmt_tls_config.enable_tls = False
@@ -1928,7 +1927,6 @@ async def test_run_split_mode(monkeypatch):
     monkeypatch.setattr("motor.coordinator.api_server.management_server.uvicorn.Server", lambda *a, **k: DummyServer())
 
     cfg = CoordinatorConfig()
-    cfg.http_config.combined_mode = False
     # Disable TLS for testing
     cfg.infer_tls_config.enable_tls = False
     cfg.mgmt_tls_config.enable_tls = False

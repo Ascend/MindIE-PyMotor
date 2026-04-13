@@ -337,7 +337,7 @@ class SeparateCDPRouter(BaseRouter):
         return err_str
 
     def _worker_metaserver_url(self) -> str:
-        host = self.config.http_config.coordinator_api_host
+        host = self.config.api_config.coordinator_api_host
         worker_port = getattr(self.config, "worker_metaserver_port", None)
         if worker_port is None:
             raise RuntimeError(

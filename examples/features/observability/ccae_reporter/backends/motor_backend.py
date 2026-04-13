@@ -12,6 +12,7 @@ import os
 import base64
 
 from ccae_reporter.common.logging import Log
+from ccae_reporter.config import ConfigUtil
 from motor.common.utils.http_client import SafeHTTPSClient
 from .base_backend import BaseBackend
 
@@ -21,8 +22,10 @@ class MotorBackend(BaseBackend):
         super().__init__(identity)
         self.logger = Log(__name__).getlog()
         pod_ip = os.getenv("POD_IP")
-        self.om_client = SafeHTTPSClient(address=f"{pod_ip}:1027")
-        self.probe_client = SafeHTTPSClient(address=f"{pod_ip}:1026")
+        obs_port = ConfigUtil.get_config('motor_controller_config.api_config.observability_api_port')
+        self.om_client = SafeHTTPSClient(address=f"{pod_ip}:{obs_port}")
+        probe_port = ConfigUtil.get_config('motor_controller_config.api_config.controller_api_port')
+        self.probe_client = SafeHTTPSClient(address=f"{pod_ip}:{probe_port}")
 
     def fetch_alarm_info(self) -> list:
         if not self.is_alive():

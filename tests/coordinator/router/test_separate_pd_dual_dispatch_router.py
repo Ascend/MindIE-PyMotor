@@ -191,7 +191,7 @@ class TestPDDualDispatchRouter:
         mock_config = MagicMock()
         mock_config.scheduler_config = mock_scheduler_config
         mock_config.exception_config = mock_exception_config
-        mock_config.http_config = mock_http_config
+        mock_config.api_config = mock_http_config
         mock_config.infer_tls_config = mock_tls_config
         mock_config.mgmt_tls_config = mock_tls_config
         # So _gen_d_request uses coordinator_api_mgmt_port; avoid MagicMock as parsed_url.port

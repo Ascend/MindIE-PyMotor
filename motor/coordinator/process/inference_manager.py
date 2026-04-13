@@ -113,8 +113,8 @@ def run_inference_worker_proc(
     app = inference_server.app
     config_kwargs = InferenceServer.create_base_uvicorn_config(
         app,
-        config.http_config.coordinator_api_host,
-        config.http_config.coordinator_api_infer_port,
+        config.api_config.coordinator_api_host,
+        config.api_config.coordinator_api_infer_port,
     )
     inference_server.apply_timeout_to_config(config_kwargs)
 
@@ -135,7 +135,7 @@ def run_inference_worker_proc(
         #minimal metaserver app (only POST /v1/metaserver) on dedicated port
         metaserver_app = FastAPI(title="Inference Worker Metaserver")
         metaserver_app.state.request_manager = request_manager
-        host_metaserver = config.http_config.coordinator_api_host  # so D (e.g. same pod) can reach this Worker
+        host_metaserver = config.api_config.coordinator_api_host  # so D (e.g. same pod) can reach this Worker
         port_metaserver = config.worker_metaserver_port
 
         @metaserver_app.post("/v1/metaserver")

@@ -57,9 +57,7 @@
   },
   "api_config": {
     "controller_api_host": "127.0.0.1",
-    "controller_api_port": 1026,
-    "coordinator_api_dns": "127.0.0.1",
-    "coordinator_api_port": 1026
+    "controller_api_port": 1026
   },
   "mgmt_tls_config": {
     "tls_enable": true,
@@ -99,12 +97,10 @@
 
 ### 2.2 api_config
 
-| 配置项 | 类型 | 说明 |
-|--------|------|------------------|
-| controller_api_host | string | Controller API 监听地址（IP 或主机名）。默认：`127.0.0.1`（或 Env.pod_ip） |
-| controller_api_port | int | Controller API 端口。默认：`1026` |
-| coordinator_api_dns | string | Coordinator API 域名或 IP。默认：`127.0.0.1`（或 Env.controller_service） |
-| coordinator_api_port | int | Coordinator API 端口。默认：`1026` |
+| 配置项                        | 类型 | 说明                                                              |
+|----------------------------|------|-----------------------------------------------------------------|
+| controller_api_host        | string | Controller API 监听地址（IP 或主机名）。默认：`127.0.0.1`（或 Env.pod_ip）       |
+| controller_api_port        | int | Controller API 端口。默认：`1026`                                     |
 
 ### 2.3 mgmt_tls_config / etcd_tls_config / grpc_tls_config
 
@@ -206,7 +202,7 @@
   "rate_limit_config": { ... },
   "standby_config": { ... },
   "etcd_config": { ... },
-  "http_config": { ... },
+  "api_config": { ... },
   "aigw_model": null
 }
 ```
@@ -311,14 +307,14 @@
 | enable_etcd_persistence | bool | 是否启用 etcd 持久化。可选：`true` / `false`。默认：`false` |
 | tls_config | object | etcd 客户端 TLS，可选。子字段：enable_tls（true/false）、ca_cert、tls_cert、tls_key、tls_passwd |
 
-### 3.11 http_config
+### 3.11 api_config
 
-| 配置项 | 类型 | 说明 |
-|--------|------|------------------|
-| combined_mode | bool | 推理与管控是否共用同一端口。可选：`true` / `false`。默认：`false` |
-| coordinator_api_host | string | Coordinator API 监听地址（IP 或主机名）。默认：`127.0.0.1`（或 Env.pod_ip） |
-| coordinator_api_infer_port | int | 推理面端口。默认：`1025` |
-| coordinator_api_mgmt_port | int | 管控面端口。默认：`1026` |
+| 配置项                        | 类型 | 说明                                                         |
+|----------------------------|------|------------------------------------------------------------|
+| coordinator_api_host       | string | Coordinator API 监听地址（IP 或主机名）。默认：`127.0.0.1`（或 Env.pod_ip） |
+| coordinator_api_dns        | string | 域名                                                         |
+| coordinator_api_infer_port | int | 推理面端口。默认：`1025`                                            |
+| coordinator_api_mgmt_port  | int | 管控面端口。默认：`1026`                                            |
 
 ### 3.12 request_limit（user_config 常用）
 

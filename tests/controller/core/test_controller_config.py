@@ -589,9 +589,7 @@ def create_test_config(config_path: str, log_level: str = "INFO"):
         },
         "api_config": {
             "controller_api_host": "127.0.0.1",
-            "controller_api_port": 8000,
-            "coordinator_api_dns": "127.0.0.1",
-            "coordinator_api_port": 9999
+            "controller_api_port": 8000
         },
         "event_config": {
             "event_consumer_sleep_interval": 1.0,

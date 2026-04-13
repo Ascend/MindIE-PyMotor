@@ -182,18 +182,18 @@ class NodeManagerConfig:
     single_container_config: SingleContainerNodemanagerConfig = field(default_factory=SingleContainerNodemanagerConfig)
 
     # Internal fields
-    config_path: str = field(init=False)
+    config_path: str | None = field(default=None, init=False)
     last_modified: float | None = field(default=None, init=False)
 
     def __post_init__(self):
         """Validate configuration after initialization"""
         # Set internal paths with defaults only if not already set (e.g., by from_json)
         if not hasattr(self, 'config_path') or self.config_path is None:
-            self.config_path = Env.user_config_path
+            self.config_path = Env.user_config_path or Env.config_path
 
         # Set last modified time if config file exists
         try:
-            if os.path.exists(self.config_path):
+            if self.config_path and os.path.exists(self.config_path):
                 self.last_modified = os.path.getmtime(self.config_path)
         except (OSError, IOError):
             # Ignore errors when checking file modification time
@@ -205,9 +205,9 @@ class NodeManagerConfig:
     def from_json(cls, config_path: str | None = None) -> 'NodeManagerConfig':
         """Load configuration from user_config.json"""
         if config_path is None:
-            config_path = Env.user_config_path
+            config_path = Env.user_config_path or Env.config_path
 
-        config_path_obj = Path(config_path)
+        config_path_obj = Path(config_path) if config_path else None
         logger.info("Loading configuration files: config=%s", config_path_obj)
 
         config = cls()
@@ -215,7 +215,7 @@ class NodeManagerConfig:
 
         config_data = {}
         raw = None
-        if os.path.exists(str(config_path_obj)):
+        if config_path_obj is not None and os.path.exists(str(config_path_obj)):
             with safe_open(str(config_path_obj), "r") as f:
                 raw = json.load(f)
             logger.info("Successfully loaded config file: %s", config_path_obj)
@@ -235,7 +235,7 @@ class NodeManagerConfig:
 
         config.validate_config()
 
-        if config_path_obj.exists():
+        if config_path_obj is not None and config_path_obj.exists():
             config.last_modified = config_path_obj.stat().st_mtime
 
         logger.info("Configuration loading completed")
@@ -254,8 +254,8 @@ class NodeManagerConfig:
             return user_cfg
         
         engine_config = user_cfg[engine_config_key]
-        if "node_manager_config" in engine_config:
-            config_data = engine_config.get("node_manager_config", {})
+        if "motor_nodemanger_config" in engine_config:
+            config_data = engine_config.get("motor_nodemanger_config", {})
         else:
             config_data = {}
         

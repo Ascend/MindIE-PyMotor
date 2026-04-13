@@ -157,8 +157,8 @@ class ManagementServer(BaseCoordinatorServer):
         """Run uvicorn on management port only; does not create or start inference Workers."""
         mgmt_config_kwargs = self.create_base_uvicorn_config(
             self.management_app,
-            self.coordinator_config.http_config.coordinator_api_host,
-            self.coordinator_config.http_config.coordinator_api_mgmt_port,
+            self.coordinator_config.api_config.coordinator_api_host,
+            self.coordinator_config.api_config.coordinator_api_mgmt_port,
         )
         self.apply_timeout_to_config(mgmt_config_kwargs)
         mgmt_config = uvicorn.Config(**mgmt_config_kwargs)

@@ -6,7 +6,6 @@
 
 - 推理端口：`http_config.coordinator_api_infer_port`（默认 1025）
 - 管理端口：`http_config.coordinator_api_mgmt_port`（默认 1026）
-- 合并端口模式：`http_config.combined_mode=true` 时，推理接口与管理接口共用管理端口
 - 安全协议：`infer_tls_config.tls_enable` / `mgmt_tls_config.tls_enable` 为 `true` 时使用 `https`
 
 ## 认证与限流

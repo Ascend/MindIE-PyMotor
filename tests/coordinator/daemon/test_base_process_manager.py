@@ -18,8 +18,8 @@ from motor.config.coordinator import CoordinatorConfig
 @pytest.fixture
 def mock_config():
     config = MagicMock(spec=CoordinatorConfig)
-    config.http_config.coordinator_api_host = "127.0.0.1"
-    config.http_config.coordinator_api_infer_port = 18000
+    config.api_config.coordinator_api_host = "127.0.0.1"
+    config.api_config.coordinator_api_infer_port = 18000
     config.inference_workers_config.num_workers = 1
     return config
 

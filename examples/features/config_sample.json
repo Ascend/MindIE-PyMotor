@@ -7,7 +7,7 @@
     "single_d_instance_pod_num": 1,
     "p_pod_npu_num": 16,
     "d_pod_npu_num": 16,
-    "image_name": "mindie-motor-vllm:dev-2.2.RC1.B153-800I-A3-py311-Ubuntu24.04-lts-aarch64",
+    "image_name": "",
     "job_id": "mindie-motor",
     "hardware_type": "800I_A3",
     "weight_mount_path": "/mnt/weight/",
@@ -43,6 +43,14 @@
         "key_file": "security/mgmt/keys/server.key",
         "passwd_file": "security/mgmt/keys/key_pwd.txt",
         "crl_file": ""
+      },
+      "observability_tls_config": {
+        "enable_tls": false,
+        "ca_file": "security/mgmt/cert/ca.crt",
+        "cert_file": "security/mgmt/cert/server.crt",
+        "key_file": "security/mgmt/keys/server.key",
+        "passwd_file": "security/mgmt/keys/key_pwd.txt",
+        "crl_file": ""
       }
     }
   },
@@ -52,17 +60,19 @@
       "log_max_line_length": 8192,
       "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
       "log_date_format": "%Y-%m-%d %H:%M:%S",
-       "host_log_dir": "/root/ascend/log",
-       "log_rotation_size": 10,
-       "log_rotation_count": 10,
-       "log_compress": true,
-       "log_compress_level": 6,
-       "log_max_total_size": 200
+      "host_log_dir": "/root/ascend/log",
+      "log_rotation_size": 20,
+      "log_rotation_count": 10,
+      "log_compress": false,
+      "log_compress_level": 6,
+      "log_max_total_size": 200,
+      "log_cleanup_interval": 1800
     },
     "api_config": {
       "controller_api_host": "127.0.0.1",
       "controller_api_dns": "mindie-motor-controller-service.mindie-motor.svc.cluster.local",
-      "controller_api_port": 1026
+      "controller_api_port": 1026,
+      "observability_api_port": 1027
     },
     "instance_config": {
       "instance_assemble_timeout": 600,
@@ -70,7 +80,7 @@
       "instance_assembler_cmd_send_interval": 1,
       "instance_manager_check_interval": 1,
       "instance_heartbeat_timeout": 5,
-      "instance_expired_timeout": 300,
+      "instance_expired_timeout": 1200,
       "send_cmd_retry_times": 3
     },
     "event_config": {
@@ -78,10 +88,17 @@
       "coordinator_heartbeat_interval": 5.0
     },
     "fault_tolerance_config": {
-      "enable_fault_tolerance": false,
+      "enable_fault_tolerance": true,
       "strategy_center_check_interval": 1,
-      "enable_scale_p2d": false,
-      "enable_lingqu_network_recover": false
+      "configmap_namespace": "kube-system",
+      "configmap_prefix": "mindx-dl-deviceinfo-",
+      "k8s_cert_path": "",
+      "enable_scale_p2d": true,
+      "enable_lingqu_network_recover": true
+    },
+    "observability_config": {
+      "observability_enable": false,
+      "metrics_ttl": 5
     },
     "standby_config": {
       "enable_master_standby": false,
@@ -104,18 +121,22 @@
       "log_max_line_length": 8192,
       "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
       "log_date_format": "%Y-%m-%d %H:%M:%S",
-       "host_log_dir": "/root/ascend/log",
-       "log_rotation_size": 10,
-       "log_rotation_count": 10,
-       "log_compress": true,
-       "log_compress_level": 6,
-       "log_max_total_size": 200
+      "host_log_dir": "/root/ascend/log",
+      "log_rotation_size": 20,
+      "log_rotation_count": 10,
+      "log_compress": false,
+      "log_compress_level": 6,
+      "log_max_total_size": 200,
+      "log_cleanup_interval": 1800
     },
     "prometheus_metrics_config": {
       "reuse_time": 3
     },
     "exception_config": {
       "max_retry": 5,
+      "recompute_enabled": true,
+      "transport_max_retry": null,
+      "recompute_max_retry": null,
       "retry_delay": 0.2,
       "first_token_timeout": 600,
       "infer_timeout": 3600
@@ -123,6 +144,10 @@
     "scheduler_config": {
       "deploy_mode": "pd_separate",
       "scheduler_type": "load_balance"
+    },
+    "inference_workers_config": {
+      "num_workers": 4,
+      "worker_metaserver_base_port": 12000
     },
     "timeout_config": {
       "request_timeout": 30,
@@ -137,16 +162,16 @@
       "header_name": "Authorization",
       "key_prefix": "Bearer ",
       "skip_paths": [
-        "/",
-        "/openapi.json",
         "/docs",
         "/instances/refresh",
-        "/redoc",
-        "/liveness",
         "/favicon.ico",
-        "/startup",
+        "/openapi.json",
+        "/readiness",
+        "/liveness",
+        "/",
         "/metrics",
-        "/readiness"
+        "/startup",
+        "/redoc"
       ],
       "encryption_algorithm": "PBKDF2_SHA256"
     },
@@ -182,17 +207,12 @@
       "etcd_timeout": 5,
       "enable_etcd_persistence": false
     },
-    "http_config": {
-      "combined_mode": false,
-      "coordinator_api_host": "127.0.0.1",
-      "coordinator_api_infer_port": 1025,
-      "coordinator_api_mgmt_port": 1026
-    },
     "aigw_model": null,
     "api_config": {
       "coordinator_api_host": "127.0.0.1",
       "coordinator_api_dns": "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local",
-      "coordinator_api_port": 1026
+      "coordinator_api_infer_port": 1025,
+      "coordinator_api_mgmt_port": 1026
     },
     "tracer_config": {
       "endpoint": "",
@@ -201,48 +221,18 @@
       "remote_parent_not_sampled": 1.0,
       "local_parent_sampled": 1.0,
       "local_parent_not_sampled": 1.0
-    }
-  },
-  "motor_nodemanger_config": {
-    "api_config": {
-      "pod_ip": "127.0.0.1",
-      "host_ip": "127.0.0.1",
-      "node_manager_port": 1026
     },
-    "endpoint_config": {
-      "endpoint_num": 0,
-      "base_port": 10000,
-      "mgmt_ports": [],
-      "service_ports": []
+    "prefill_kv_event_config": {
+      "conductor_service": "",
+      "http_server_port": 13333,
+      "block_size": 128,
+      "endpoint": "",
+      "replay_endpoint": "",
+      "engine_type": "vLLM",
+      "model_path": ""
     },
-    "basic_config": {
-      "job_name": null,
-      "role": "both",
-      "model_name": "",
-      "hardware_type": "800I-A3",
-      "heartbeat_interval_seconds": 1,
-      "device_num": 0,
-      "parallel_config": {
-        "dp_size": 1,
-        "cp_size": 1,
-        "tp_size": 1,
-        "sp_size": 1,
-        "ep_size": 1,
-        "pp_size": 1,
-        "world_size": 1
-      }
-    },
-    "logging_config": {
-      "log_level": "INFO",
-      "log_max_line_length": 8192,
-      "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
-      "log_date_format": "%Y-%m-%d %H:%M:%S",
-       "host_log_dir": "/root/ascend/log",
-       "log_rotation_size": 10,
-       "log_rotation_count": 10,
-       "log_compress": true,
-       "log_compress_level": 6,
-       "log_max_total_size": 200
-    }
+    "_errors": [],
+    "worker_index": null,
+    "worker_metaserver_port": null
   }
 }

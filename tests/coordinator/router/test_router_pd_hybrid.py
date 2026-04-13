@@ -149,7 +149,7 @@ class TestRouterPDHybrid:
         mock_config = MagicMock()
         mock_config.scheduler_config = mock_scheduler_config
         mock_config.exception_config = mock_exception_config
-        mock_config.http_config = mock_http_config
+        mock_config.api_config = mock_http_config
 
         monkeypatch.setattr(CoordinatorConfig, "__new__", lambda cls: mock_config)
 
