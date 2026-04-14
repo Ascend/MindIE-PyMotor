@@ -13,6 +13,7 @@ import asyncio
 import threading
 import time
 import uuid
+import importlib
 from typing import Optional
 import httpx
 from motor.common.utils.http_client import AsyncSafeHTTPSClient
@@ -86,12 +87,70 @@ class SimInference:
     def set_status(self, status):
         self._status = status
 
+    def patch_vllm_metrics(self):
+        """
+        Patch vLLM's metrics logger to skip virtual inference requests when:
+        1. enable_virtual_inference is True
+        2. VLLM version is 0.18.0
+        """
+        if not self.enable_virtual_inference:
+            return
+        
+        try:
+            # Import the metrics logger module
+            metrics_loggers_module = importlib.import_module("vllm.v1.metrics.loggers")
+            
+            # Get the original record method
+            original_record = metrics_loggers_module.PrometheusStatLogger.record
+            
+            # Create a patched version of record method
+            def patched_record(self, scheduler_stats, iteration_stats, mm_cache_stats=None, engine_idx=0):
+                """Patched record method to skip virtual inference requests."""
+                if iteration_stats is None:
+                    return original_record(self, scheduler_stats, iteration_stats, mm_cache_stats, engine_idx)
+                
+                # Filter out virtual inference requests
+                original_finished_requests = iteration_stats.finished_requests
+                filtered_finished_requests = []
+                filtered_count = 0
+                
+                for finished_request in original_finished_requests:
+                    # Skip requests with num_prompt_tokens=1 and num_generation_tokens=1
+                    if (finished_request.num_prompt_tokens == 2 and 
+                        finished_request.num_generation_tokens == 1):
+                        filtered_count += 1
+                        continue
+                    filtered_finished_requests.append(finished_request)
+                
+                # Log the number of filtered virtual inference requests
+                if filtered_count > 0:
+                    logger.debug(f"Filtered out {filtered_count} virtual inference requests from metrics")
+                
+                # Replace finished_requests with filtered list
+                iteration_stats.finished_requests = filtered_finished_requests
+                
+                # Call original method with filtered requests
+                return original_record(self, scheduler_stats, iteration_stats, mm_cache_stats, engine_idx)
+            
+            # Apply the patch
+            metrics_loggers_module.PrometheusStatLogger.record = patched_record
+            logger.info("Successfully patched vLLM metrics logger to skip virtual inference requests")
+            
+        except ImportError as e:
+            logger.debug(f"Failed to import vLLM modules for patching: {e}")
+        except Exception as e:
+            logger.error(f"Failed to patch vLLM metrics logger: {e}")
+    
     def start_health_check(self):
+        
         # only start virtual inference when enable_virtual_inference is True and npu_usage_threshold is above 0
         if not self.enable_virtual_inference:
             logger.info("Health check is disabled")
             return
             
+        # Patch vLLM metrics if needed
+        self.patch_vllm_metrics()
+
         if self.npu_usage_threshold <= 0 or self.npu_usage_threshold > 100:
             logger.info(f"Health check is disabled because npu_usage_threshold {self.npu_usage_threshold} is abnormal")
             return
