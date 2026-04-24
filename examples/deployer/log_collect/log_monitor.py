@@ -57,6 +57,26 @@ class LogMonitor:
         self.threads = []
         self.exit_flag = threading.Event()
         self._logged_save_paths = set()
+        # Per pod name: cross-thread log suffix so a new collector after thread exit
+        # does not reuse _0 while an older "life" already used lower indices.
+        self._pod_log_next_slot: dict[str, int] = {}
+        # Incremented whenever a collector thread for this pod exits (any reason).
+        self._pod_log_collector_generation: dict[str, int] = {}
+
+    @staticmethod
+    def _allocate_unique_log_path(
+        pod_name: str, node_name: str, start_index: int
+    ) -> tuple[str, int]:
+        """Return path and index for the first unused ``{pod}_{node}_{n}.log`` under ``g_target_log``."""
+        candidate_log_index = start_index
+        while True:
+            file_path = os.path.join(
+                g_target_log, f"{pod_name}_{node_name}_{candidate_log_index}.log"
+            )
+            abs_path = os.path.abspath(os.path.normpath(file_path))
+            if not os.path.exists(abs_path):
+                return file_path, candidate_log_index
+            candidate_log_index += 1
 
     def setup_rotating_logger(self, pod_name: str, log_file: str) -> Optional[logging.Logger]:
         """
@@ -123,10 +143,12 @@ class LogMonitor:
             log_e(f"shell_get_pod_node Exception for {pod_name}: {e}")
             return UNKNOWN_NODE_NAME
 
-    def check_pod_is_running(self, pod_name: str) -> bool:
+    def check_pod_is_running(self, pod_name: str) -> Optional[bool]:
         """
-        Check if the specified pod is in the "Running" state.
-        :param pod_name: Name of the pod to check
+        Probe pod phase via kubectl.
+
+        :return: ``True`` if phase is Running; ``False`` if get succeeded but not Running;
+            ``None`` if ``kubectl get pod`` failed (caller should end this collector thread).
         """
         kubectl_cmd = subprocess.Popen(
             [
@@ -141,7 +163,12 @@ class LogMonitor:
         output, err = kubectl_cmd.communicate()
         if kubectl_cmd.returncode != 0:
             err_msg = err.decode(self.encode_type, errors="ignore").strip()
-            raise Exception(f"Pod not found Exception: {err_msg}")
+            log_w(
+                f"{pod_name}: kubectl get pod phase failed "
+                f"(exit={kubectl_cmd.returncode}): {err_msg}"
+            )
+            return None
+
         status = output.decode(self.encode_type).strip()
         return status == "Running"
 
@@ -225,27 +252,52 @@ class LogMonitor:
         Collect logs from a specified pod and save them to a file.
         :param pod_name: Name of the pod to collect logs from
         """
-        index = 0
+        generation_floor = self._pod_log_collector_generation.get(pod_name, 0)
+        next_slot = self._pod_log_next_slot.get(pod_name, 0)
+        index = max(generation_floor, next_slot)
         node_name = self.shell_get_pod_node(pod_name)
         try:
             while not self.exit_flag.is_set():
-                if not self.check_pod_is_running(pod_name):
+                pod_running_state = self.check_pod_is_running(pod_name)
+                if pod_running_state is None:
+                    log_w(f"{pod_name}: kubectl get pod failed, exiting collector thread.")
+                    return
+                if not pod_running_state:
                     log_w(f"{pod_name} :The pod is not in the 'Running' state, waiting...")
                     time.sleep(interval)
                     continue
-                file_path = os.path.join(g_target_log, f"{pod_name}_{node_name}_{index}.log")
+                fetched_node_name = self.shell_get_pod_node(pod_name)
+                if fetched_node_name != node_name:
+                    log_i(
+                        f"{pod_name}: node_name refresh {node_name!r} -> {fetched_node_name!r}"
+                    )
+                node_name = fetched_node_name
+                file_path, allocated_log_index = self._allocate_unique_log_path(
+                    pod_name, node_name, index
+                )
+                if allocated_log_index != index:
+                    log_i(
+                        f"{pod_name}: log file slot bumped {index} -> {allocated_log_index} "
+                        "(target path already exists)."
+                    )
                 if self.shell_pull_log(pod_name, file_path):
-                    index += 1
-                    log_i(f"{pod_name} :Log stream ended, waiting for pod to leave Running state...")
-                    while not self.exit_flag.is_set():
-                        try:
-                            if not self.check_pod_is_running(pod_name):
-                                break
-                        except Exception:
-                            break
-                        time.sleep(interval)
+                    next_after = allocated_log_index + 1
+                    self._pod_log_next_slot[pod_name] = max(
+                        self._pod_log_next_slot.get(pod_name, 0),
+                        next_after,
+                    )
+                    index = self._pod_log_next_slot[pod_name]
+                    log_i(
+                        f"{pod_name}: Log stream ended; pausing {interval}s before "
+                        "re-checking pod and reopening logs if still Running."
+                    )
+                    time.sleep(interval)
         except Exception as e:
             log_e(f"{pod_name} :Exception: {e}")
+        finally:
+            self._pod_log_collector_generation[pod_name] = (
+                self._pod_log_collector_generation.get(pod_name, 0) + 1
+            )
 
     def monitor_stop(self, file_path: str, interval: float = 1) -> None:
         """
@@ -269,7 +321,7 @@ class LogMonitor:
                 log_e("All thread have terminated abnormally, so the program will exit.")
                 self.exit_flag.set()
                 break
-        
+
             time.sleep(interval)
 
     def start_log_thread(self) -> bool:
@@ -284,6 +336,18 @@ class LogMonitor:
                 "No per-pod log files or output subdirectory will be created. Exiting monitor."
             )
             return False
+
+        dead_log_thread_names = [
+            t.name
+            for t in self.threads
+            if (not t.is_alive()) and t.name.startswith(self.thread_name)
+        ]
+        if dead_log_thread_names:
+            log_i(
+                f"Pruned {len(dead_log_thread_names)} finished log collector thread(s): "
+                f"{dead_log_thread_names}."
+            )
+        self.threads = [t for t in self.threads if t.is_alive()]
 
         # 2、Get newly created pods.
         thread_names = [
