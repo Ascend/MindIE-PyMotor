@@ -80,3 +80,4 @@ python3 deploy.py --config_dir ../infer_engines/vllm
 - 如需修改镜像、挂载路径等非实例数配置，请进行重新部署。
 - 缩容会从高 index 开始删除实例，并删除 output 下对应 YAML 文件。
 - 已部署配置的基线为集群内 ConfigMap（motor-config）中的 user_config。
+- Prefix Cache特性默认开启，该特性会复用已计算好的KV Cache，用于提高推理性能。新扩容的实例没有KV Cache缓存，因此该实例的推理性能可能出现小幅度劣化并在一段时间后恢复。

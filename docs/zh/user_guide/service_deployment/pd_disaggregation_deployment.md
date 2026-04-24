@@ -713,3 +713,4 @@ bash delete.sh <命名空间>
 - **部署失败**：若部署失败，可先按第 8 节卸载集群，排查并修改配置后重新部署。
 - **加载权重超时**：当前依赖`vllm v0.13.0`版本，该版本权重加载超时时间不能通过环境变量或者配置修改，导致加载权重超过10分钟会报`timeout`，并不影响程序运行，`vllm v0.14.0`版本会修复这个问题。
 - **实例重调度约束**：*实例重调度*能力依赖mindcluster，如果P/D实例有多个POD，直接删除其中一个POD，不会进入mindcluster的故障处理流程，所以不会触发*实例重调度*
+- **Prefix Cache特性（默认开启）对性能测试的影响**：Prefix Cache用于在多条请求存在相同prompt前缀时，复用已计算好的KV Cache，从而提升服务的推理性能。若期望获取推理服务的基线性能数据（非前缀缓存加速），应在配置中关闭Prefix Cache特性，可在user_config.json配置文件的"engine_config"中增加 "no-enable-prefix-caching": true（vLLM推理引擎） 或 "disable_radix_cache": true （SGLang推理引擎）字段。
