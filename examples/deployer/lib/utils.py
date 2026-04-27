@@ -77,7 +77,6 @@ def shell_escape(value):
     
     value = value.replace('\\', '\\\\')
     value = value.replace('"', '\\"')
-    value = value.replace('$', '\\$')
     value = value.replace('`', '\\`')
     value = value.replace('\n', '\\n')
     value = value.replace('\r', '\\r')

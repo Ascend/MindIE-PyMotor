@@ -333,6 +333,8 @@ class BaseRouter(ABC):
                     "Scheduling latency stage=forward_to_engine_connect elapsed_ms=%.2f api=%s",
                     elapsed_to_connect_ms, self.req_info.api
                 )
+            if not response.is_success:	 
+                await response.aread()
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as e:
