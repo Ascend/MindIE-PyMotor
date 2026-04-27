@@ -249,6 +249,13 @@ class SeparatePDRouter(BaseRouter):
                 client=prefill_client,
                 timeout=self.config.exception_config.infer_timeout)
             resp_json = response.json()
+            usage = resp_json.get("usage", {})
+            if usage:
+                if 'prompt_tokens_details' in usage:
+                    prompt_tokens_details = usage['prompt_tokens_details']
+                    if prompt_tokens_details is None:
+                        prompt_tokens_details = {"cached_tokens": 0}
+                    self.req_info.update_prompt_tokens_details(prompt_tokens_details)
             self.req_info.update_state(ReqState.PREFILL_END)
             await self.release_tokens(resource)
             return resp_json
@@ -342,6 +349,11 @@ class SeparatePDRouter(BaseRouter):
                         "_client_return_token_ids", False
                     ),
                 )
+                if self.req_info.prompt_tokens_details:
+                    if body.get("usage", {}):
+                        body['usage']['prompt_tokens_details'] = (
+                            self.req_info.prompt_tokens_details
+                        )
                 return body
         finally:
             released = await self.release_tokens(decode_resource)
@@ -386,6 +398,7 @@ class SeparatePDRouter(BaseRouter):
                     stream_adapter_state=stream_adapter_state,
                     req_id=self.req_info.req_id,
                     recompute_enabled=self.config.exception_config.recompute_enabled,
+                    prompt_tokens_details=self.req_info.prompt_tokens_details,
                 )
                 if processed_chunk is None:  # Recomputation or policy block
                     if request_info.get(recompute_common.RECOMPUTE_BLOCKED_BY_POLICY_KEY):

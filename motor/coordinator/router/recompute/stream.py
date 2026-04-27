@@ -253,6 +253,7 @@ def process_stream_chunk(
     stream_adapter_state: dict[str, Any] | None = None,
     req_id: str | None = None,
     recompute_enabled: bool = True,
+    prompt_tokens_details: dict | None = None
 ) -> bytes | None:
     """Process one decode stream chunk.
 
@@ -279,6 +280,10 @@ def process_stream_chunk(
         if logger is not None:
             logger.debug("Dropping non-JSON decode stream chunk (Coordinator safety)")
         return b""
+
+    if prompt_tokens_details:
+        if chunk_json.get(OpenAIField.USAGE, {}):
+            chunk_json[OpenAIField.USAGE]["prompt_tokens_details"] = prompt_tokens_details
 
     if recompute_enabled:
         update_token_id_cache(request_info, chunk_json)

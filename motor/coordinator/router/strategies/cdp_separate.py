@@ -92,6 +92,13 @@ class SeparateCDPRouter(BaseRouter):
                         resp_json = response.json()
 
                         self.logger.debug("Prefill response received: %s", resp_json)
+                        usage = resp_json.get("usage", {})
+                        if usage:
+                            if 'prompt_tokens_details' in usage:
+                                prompt_tokens_details = usage['prompt_tokens_details']
+                                if prompt_tokens_details is None:
+                                    prompt_tokens_details = {"cached_tokens": 0}
+                                self.req_info.update_prompt_tokens_details(prompt_tokens_details)
                         self.req_info.update_state(ReqState.PREFILL_END)
                         elapsed_ms = (time.perf_counter() - t0_metaserver) * 1000
                         self.logger.info(
@@ -159,6 +166,7 @@ class SeparateCDPRouter(BaseRouter):
                                         stream_adapter_state=stream_adapter_state,
                                         req_id=self.req_info.req_id,
                                         recompute_enabled=self.config.exception_config.recompute_enabled,
+                                        prompt_tokens_details=self.req_info.prompt_tokens_details,
                                     )
                                     if out is None:
                                         if request_info.get(
@@ -288,6 +296,11 @@ class SeparateCDPRouter(BaseRouter):
                                         "_client_return_token_ids", False
                                     ),
                                 )
+                                if self.req_info.prompt_tokens_details:
+                                    if body.get("usage", {}):
+                                        body['usage']['prompt_tokens_details'] = (
+                                            self.req_info.prompt_tokens_details
+                                        )
                                 return JSONResponse(content=body)
                             if not recompute_broke and self.req_info.is_cancelled:
                                 raise Exception("exception occurred in Prefill request")

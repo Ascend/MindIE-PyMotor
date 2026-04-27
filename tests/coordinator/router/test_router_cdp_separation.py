@@ -18,6 +18,7 @@ import asyncio
 import httpx
 import logging
 import pytest
+import json
 
 from motor.config.coordinator import DeployMode, CoordinatorConfig, ExceptionConfig, SchedulerType
 from motor.coordinator.domain.instance_manager import InstanceManager
@@ -753,3 +754,67 @@ class TestRouterCDPSeparation:
             mock_handle_request.assert_called_once()
             # Verify response
             assert response == mock_response
+
+    @pytest.mark.asyncio
+    async def test_prompt_tokens_details_propagation(self, client, monkeypatch: MonkeyPatch, setup_cdp_separation):
+        """Test case: prompt_tokens_details from P role is properly propagated to D role response
+        Expected behavior:
+        1) P role returns usage with prompt_tokens_details
+        2) D role includes prompt_tokens_details in final response
+        3) RequestInfo is updated with prompt_tokens_details
+        """
+        
+        # Mock response with prompt_tokens_details
+        prompt_tokens_details = {
+            "cached_tokens": 10
+        }
+
+        req_info = await create_mock_request_info()
+        
+        # Create a custom mock that returns complete response with usage field        
+        async def mock_post_with_prompt_tokens_details(self, url, json=None, headers=None, **kwargs):
+            # Create a complete response with usage field
+            self.req_data_from_metaserver = json
+            request = httpx.Request("POST", url, headers=headers or {}, json=json)
+            req_info_1 = await _request_manager.get_req_info(req_info.req_id)
+            req_info_1.update_prompt_tokens_details(prompt_tokens_details)
+            
+            # Return response with complete structure including usage and prompt_tokens_details
+            return httpx.Response(
+                status_code=status.HTTP_200_OK,
+                json={
+                    "choices": [{"delta": {"content": "prefill response"}, "index": 0}],
+                    "id": "chatcmpl-prefill-123",
+                    "usage": {
+                        "prompt_tokens": 15,
+                        "completion_tokens": 1,
+                        "total_tokens": 16
+                    }
+                },
+                request=request
+            )
+        
+        # Patch the post method to include prompt_tokens_details
+        monkeypatch.setattr(MockAsyncClient, "post", mock_post_with_prompt_tokens_details)
+        
+        with patch('motor.coordinator.router.strategies.base.httpx.AsyncClient', return_value=MockAsyncClient()):
+            cdp_router = SeparateCDPRouter(
+                req_info, CoordinatorConfig(),
+                scheduler=Scheduler(instance_provider=InstanceManager(CoordinatorConfig()), config=CoordinatorConfig()),
+                request_manager=_request_manager
+            )
+            
+            # Test non-streaming response
+            req_info.req_data["stream"] = False
+            response = await cdp_router.handle_request()
+            
+            # Verify response contains prompt_tokens_details
+            response_json = response.body.decode() if hasattr(response.body, 'decode') else response.body
+            response_data = json.loads(response_json)
+            
+            assert "usage" in response_data
+            assert "prompt_tokens_details" in response_data["usage"]
+            assert response_data["usage"]["prompt_tokens_details"] == prompt_tokens_details
+            
+            # Verify req_info was updated with prompt_tokens_details
+            assert req_info.prompt_tokens_details == prompt_tokens_details

@@ -65,6 +65,7 @@ class RequestInfo(BaseModel):
     trace_obj: TraceObj = Field(default_factory=TraceObj, description="Tracing object")
     _p_cancel_scope: anyio.CancelScope | None = PrivateAttr(default=None)
     _d_cancel_scope: anyio.CancelScope | None = PrivateAttr(default=None)
+    prompt_tokens_details: dict = Field(default={}, description="prefill prompt_tokens_details")
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -82,6 +83,9 @@ class RequestInfo(BaseModel):
     def update_state(self, new_state: ReqState):
         self.state = new_state
         self.status[new_state] = time.time()
+
+    def update_prompt_tokens_details(self, prompt_tokens_details: dict):
+        self.prompt_tokens_details = prompt_tokens_details
 
     def set_cancel_scope(self, cancel_scope: anyio.CancelScope, role: PDRole):
         if role == PDRole.ROLE_P:
