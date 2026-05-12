@@ -1,141 +1,131 @@
 {
-    "version": "v2.0",
-    "motor_deploy_config": {
-      "p_instances_num": 1,
-      "d_instances_num": 1,
-      "single_p_instance_pod_num": 1,
-      "single_d_instance_pod_num": 1,
-      "p_pod_npu_num": 16,
-      "d_pod_npu_num": 16,
-      "image_name": "vllm_motor:motor",
-      "job_id": "mindie-motor",
-      "hardware_type": "800I_A3",
-      "env_path": "./conf/env.json",
-      "weight_mount_path": "/mnt/share/v4_w8a8",
-      "deploy_mode": "multi_deployment"
-    },
-    "motor_controller_config": {},
-    "motor_coordinator_config": {
-      "scheduler_config": {
-        "deploy_mode": "cpcd_separate"
-      }
-    },
-    "motor_engine_prefill_config": {
-      "engine_type": "vllm",
-      "motor_nodemanger_config": {},
-      "model_config": {
-        "model_name": "dsv4",
-        "model_path": "/mnt/share/v4_w8a8",
-        "npu_mem_utils": 0.85,
-        "parallel_config": {
-          "dp_size": 16,
-          "tp_size": 1,
-          "pp_size": 1,
-          "dp_rpc_port": 9000
-        }
-      },
-      "engine_config": {
-        "enable-expert-parallel": true,
-        "enable-prefix-caching": true,
-        "seed": 1024,
-        "max-model-len": 13000,
-        "max-num-batched-tokens": 8192,
-        "max-num-seqs": 4,
-        "no_disable_hybrid_kv_cache_manager": true,
-        "safetensors-load-strategy": "prefetch",
-        "trust-remote-code": true,
-        "tokenizer-mode": "deepseek_v4",
-        "tool-call-parser": "deepseek_v4",
-        "enable-auto-tool-choice": true,
-        "reasoning-parser": "deepseek_v4",
-        "quantization": "ascend",
-        "profiler-config": {
-          "profiler": "torch",
-          "torch_profiler_dir": "./vllm_profile",
-          "torch_profiler_with_stack": false
-        },
-        "enforce-eager": true,
-        "additional-config": {
-          "enable_cpu_binding": true
-        },
-        "kv_transfer_config": {
-          "kv_connector": "MooncakeHybridConnector",
-          "kv_role": "kv_producer",
-          "kv_port": "30001",
-          "engine_id": "0"
-        }
-      }
-    },
-    "motor_engine_decode_config": {
-      "engine_type": "vllm",
-      "motor_nodemanger_config": {},
-      "model_config": {
-        "model_name": "auto",
-        "model_path": "/mnt/share/v4_w8a8",
-        "npu_mem_utils": 0.88,
-        "parallel_config": {
-          "dp_size": 16,
-          "tp_size": 1,
-          "pp_size": 1,
-          "dp_rpc_port": 9000
-        }
-      },
-      "engine_config": {
-        "enable-expert-parallel": true,
-        "enable-prefix-caching": true,
-        "seed": 1024,
-        "max-model-len": 13500,
-        "max-num-batched-tokens": 120,
-        "max-num-seqs": 60,
-        "async-scheduling": true,
-        "no_disable_hybrid_kv_cache_manager": true,
-        "safetensors-load-strategy": "prefetch",
-        "trust-remote-code": true,
-        "tokenizer-mode": "deepseek_v4",
-        "tool-call-parser": "deepseek_v4",
-        "enable-auto-tool-choice": true,
-        "reasoning-parser": "deepseek_v4",
-        "quantization": "ascend",
-        "profiler-config": {
-          "profiler": "torch",
-          "torch_profiler_dir": "./vllm_profile",
-          "torch_profiler_with_stack": false
-        },
-        "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
-        "compilation_config": {
-          "cudagraph_mode": "FULL_DECODE_ONLY"
-         },
-        "kv_transfer_config": {
-          "kv_connector": "MooncakeHybridConnector",
-          "kv_role": "kv_consumer",
-          "kv_port": "30001",
-          "engine_id": "0"
-        },
-        "additional-config": {
-          "ascend_compilation_config": {
-            "enable_npugraph_ex": true,
-            "enable_static_kernel": false
-          },
-          "eplb_config": {
-            "dynamic_eplb":true,
-            "expert_heat_collection_interval":600,
-            "algorithm_execution_interval":50,
-            "eplb_policy_type":2,
-            "num_redundant_experts":16
-          },
-          "enable_cpu_binding": true,
-          "multistream_dsa_preprocess": false,
-          "multistream_overlap_shared_expert":false,
-          "recompute_scheduler_enable":true
-        }
-      }
-    },
-    "kv_cache_pool_config": {
-      "metadata_server": "P2PHANDSHAKE",
-      "protocol": "ascend",
-      "device_name": "",
-      "global_segment_size": "1GB",
-      "eviction_high_watermark_ratio": 0.9,
-      "eviction_ratio": 0.1
+  "version": "v2.0",
+  "motor_deploy_config": {
+    "p_instances_num": 1,
+    "d_instances_num": 1,
+    "single_p_instance_pod_num": 1,
+    "single_d_instance_pod_num": 1,
+    "p_pod_npu_num": 16,
+    "d_pod_npu_num": 16,
+    "image_name": "vllm_motor:motor",
+    "job_id": "mindie-motor",
+    "hardware_type": "800I_A3",
+    "env_path": "./conf/env.json",
+    "weight_mount_path": "/mnt/share/v4_w8a8",
+    "deploy_mode": "multi_deployment"
+  },
+  "motor_controller_config": {},
+  "motor_coordinator_config": {
+    "scheduler_config": {
+      "deploy_mode": "cpcd_separate"
     }
+  },
+  "motor_engine_prefill_config": {
+    "engine_type": "vllm",
+    "motor_nodemanger_config": {},
+    "model_config": {
+      "model_name": "dsv4",
+      "model_path": "/mnt/share/v4_w8a8",
+      "npu_mem_utils": 0.85,
+      "parallel_config": {
+        "dp_size": 16,
+        "tp_size": 1,
+        "pp_size": 1,
+        "enable_ep": true,
+        "dp_rpc_port": 9000
+      }
+    },
+    "engine_config": {
+      "seed": 1024,
+      "max-model-len": 13000,
+      "max-num-batched-tokens": 8192,
+      "max-num-seqs": 4,
+      "no_disable_hybrid_kv_cache_manager": true,
+      "safetensors-load-strategy": "prefetch",
+      "trust-remote-code": true,
+      "tokenizer-mode": "deepseek_v4",
+      "tool-call-parser": "deepseek_v4",
+      "enable-auto-tool-choice": true,
+      "reasoning-parser": "deepseek_v4",
+      "quantization": "ascend",
+      "profiler-config": {
+        "profiler": "torch",
+        "torch_profiler_dir": "./vllm_profile",
+        "torch_profiler_with_stack": false
+      },
+      "enforce-eager": true,
+      "additional-config": {
+        "enable_cpu_binding": true
+      },
+      "kv_transfer_config": {
+        "kv_connector": "MooncakeHybridConnector",
+        "kv_role": "kv_producer",
+        "kv_port": "30001",
+        "engine_id": "0"
+      }
+    }
+  },
+  "motor_engine_decode_config": {
+    "engine_type": "vllm",
+    "motor_nodemanger_config": {},
+    "model_config": {
+      "model_name": "auto",
+      "model_path": "/mnt/share/v4_w8a8",
+      "npu_mem_utils": 0.88,
+      "parallel_config": {
+        "dp_size": 16,
+        "tp_size": 1,
+        "pp_size": 1,
+        "enable_ep": true,
+        "dp_rpc_port": 9000
+      }
+    },
+    "engine_config": {
+      "seed": 1024,
+      "max-model-len": 13500,
+      "max-num-batched-tokens": 120,
+      "max-num-seqs": 60,
+      "async-scheduling": true,
+      "no_disable_hybrid_kv_cache_manager": true,
+      "safetensors-load-strategy": "prefetch",
+      "trust-remote-code": true,
+      "tokenizer-mode": "deepseek_v4",
+      "tool-call-parser": "deepseek_v4",
+      "enable-auto-tool-choice": true,
+      "reasoning-parser": "deepseek_v4",
+      "quantization": "ascend",
+      "profiler-config": {
+        "profiler": "torch",
+        "torch_profiler_dir": "./vllm_profile",
+        "torch_profiler_with_stack": false
+      },
+      "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
+      "compilation_config": {
+        "cudagraph_mode": "FULL_DECODE_ONLY"
+        },
+      "kv_transfer_config": {
+        "kv_connector": "MooncakeHybridConnector",
+        "kv_role": "kv_consumer",
+        "kv_port": "30001",
+        "engine_id": "0"
+      },
+      "additional-config": {
+        "ascend_compilation_config": {
+          "enable_npugraph_ex": true,
+          "enable_static_kernel": false
+        },
+        "eplb_config": {
+          "dynamic_eplb":true,
+          "expert_heat_collection_interval":600,
+          "algorithm_execution_interval":50,
+          "eplb_policy_type":2,
+          "num_redundant_experts":16
+        },
+        "enable_cpu_binding": true,
+        "multistream_dsa_preprocess": false,
+        "multistream_overlap_shared_expert":false,
+        "recompute_scheduler_enable":true
+      }
+    }
+  }
 }
