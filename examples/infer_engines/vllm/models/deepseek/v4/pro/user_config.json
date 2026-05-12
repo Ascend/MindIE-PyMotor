@@ -3,15 +3,15 @@
   "motor_deploy_config": {
     "p_instances_num": 1,
     "d_instances_num": 1,
-    "single_p_instance_pod_num": 1,
-    "single_d_instance_pod_num": 1,
+    "single_p_instance_pod_num": 2,
+    "single_d_instance_pod_num": 2,
     "p_pod_npu_num": 16,
     "d_pod_npu_num": 16,
-    "image_name": "vllm_motor:motor",
+    "image_name": "mindie-motor-vllm:3.0.0b1-800I-A3-py3.11-Ubuntu24.04-lts-aarch64",
     "job_id": "mindie-motor",
     "hardware_type": "800I_A3",
     "env_path": "./conf/env.json",
-    "weight_mount_path": "/mnt/share/v4_w8a8",
+    "weight_mount_path": "/data1/DeepSeek-V4-Pro-w4a8-mtp",
     "deploy_mode": "multi_deployment"
   },
   "motor_controller_config": {},
@@ -24,12 +24,12 @@
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
     "model_config": {
-      "model_name": "dsv4",
-      "model_path": "/mnt/share/v4_w8a8",
-      "npu_mem_utils": 0.85,
+      "model_name": "auto",
+      "model_path": "/data1/DeepSeek-V4-Pro-w4a8-mtp",
+      "npu_mem_utils": 0.9,
       "parallel_config": {
-        "dp_size": 16,
-        "tp_size": 1,
+        "dp_size": 2,
+        "tp_size": 16,
         "pp_size": 1,
         "enable_ep": true,
         "dp_rpc_port": 9000
@@ -37,7 +37,7 @@
     },
     "engine_config": {
       "seed": 1024,
-      "max-model-len": 13000,
+      "max-model-len": 135000,
       "max-num-batched-tokens": 8192,
       "max-num-seqs": 4,
       "no_disable_hybrid_kv_cache_manager": true,
@@ -48,12 +48,14 @@
       "enable-auto-tool-choice": true,
       "reasoning-parser": "deepseek_v4",
       "quantization": "ascend",
+      "block-size": "128",
       "profiler-config": {
         "profiler": "torch",
         "torch_profiler_dir": "./vllm_profile",
         "torch_profiler_with_stack": false
       },
       "enforce-eager": true,
+      "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
       "additional-config": {
         "enable_cpu_binding": true
       },
@@ -70,11 +72,11 @@
     "motor_nodemanger_config": {},
     "model_config": {
       "model_name": "auto",
-      "model_path": "/mnt/share/v4_w8a8",
-      "npu_mem_utils": 0.88,
+      "model_path": "/data1/DeepSeek-V4-Pro-w4a8-mtp/",
+      "npu_mem_utils": 0.9,
       "parallel_config": {
         "dp_size": 16,
-        "tp_size": 1,
+        "tp_size": 2,
         "pp_size": 1,
         "enable_ep": true,
         "dp_rpc_port": 9000
@@ -82,10 +84,11 @@
     },
     "engine_config": {
       "seed": 1024,
-      "max-model-len": 13500,
+      "max-model-len": 135000,
       "max-num-batched-tokens": 120,
       "max-num-seqs": 60,
       "async-scheduling": true,
+      "block-size": "128",
       "no_disable_hybrid_kv_cache_manager": true,
       "safetensors-load-strategy": "prefetch",
       "trust-remote-code": true,
@@ -102,7 +105,7 @@
       "speculative-config": {"num_speculative_tokens": 1, "method":"deepseek_mtp"},
       "compilation_config": {
         "cudagraph_mode": "FULL_DECODE_ONLY"
-        },
+       },
       "kv_transfer_config": {
         "kv_connector": "MooncakeHybridConnector",
         "kv_role": "kv_consumer",
@@ -113,13 +116,6 @@
         "ascend_compilation_config": {
           "enable_npugraph_ex": true,
           "enable_static_kernel": false
-        },
-        "eplb_config": {
-          "dynamic_eplb":true,
-          "expert_heat_collection_interval":600,
-          "algorithm_execution_interval":50,
-          "eplb_policy_type":2,
-          "num_redundant_experts":16
         },
         "enable_cpu_binding": true,
         "multistream_dsa_preprocess": false,
