@@ -305,7 +305,7 @@ class _SchedulerRequestDispatcher:
                 request_id=request.request_id,
                 data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
             )
-        role = PDRole(role_str) if role_str in ("prefill", "decode", "both") else PDRole.ROLE_U
+        role = PDRole(role_str) if role_str in ("encode", "prefill", "decode", "both") else PDRole.ROLE_U
         params = UpdateWorkloadParams(
             instance_id=iid,
             endpoint_id=eid,
@@ -325,7 +325,7 @@ class _SchedulerRequestDispatcher:
             await self._workload_writer.write_single_entry(iid, eid)
         instance = None
         endpoint = None
-        for r in (PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
+        for r in (PDRole.ROLE_E, PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
             inst = self._instance_manager.get_available_instances(r).get(iid)
             if inst:
                 instance = inst

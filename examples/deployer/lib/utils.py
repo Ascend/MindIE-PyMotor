@@ -152,6 +152,16 @@ def obtain_engine_instance_total(deploy_config):
     return p_instances, d_instances
 
 
+def obtain_engine_e_instance_total(deploy_config):
+    if C.E_INSTANCES_NUM not in deploy_config:
+        return 0
+    try:
+        e_instances = int(deploy_config[C.E_INSTANCES_NUM])
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{C.E_INSTANCES_NUM} must be integers") from e
+    return e_instances
+
+
 def modify_log_mount(deployment_data, user_config, app_type):
     host_log_dir = "/root/ascend/log"
     temp_app_config = None
@@ -206,6 +216,7 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
     if deploy_mode == C.DEPLOY_MODE_SINGLE_CONTAINER:
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_controller_env", "set_controller_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_coordinator_env", "set_coordinator_env")
+        update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_decode_env", "set_decode_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")
@@ -216,6 +227,7 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
     else:
         update_shell_safely(C.CONTROLLER_SHELL_PATH, env_config, "motor_controller_env", "set_controller_env")
         update_shell_safely(C.COORDINATOR_SHELL_PATH, env_config, "motor_coordinator_env", "set_coordinator_env")
+        update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_decode_env", "set_decode_env")
         update_shell_safely(C.KV_POOL_SHELL_PATH, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")

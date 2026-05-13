@@ -154,7 +154,7 @@ async def handle_request(
             DeployMode.CPCD_SEPARATE,
             DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER,
         )
-        and readiness == InstanceReadiness.ONLY_PREFILL
+        and (readiness == InstanceReadiness.ONLY_PREFILL or readiness == InstanceReadiness.ENCODE_PREFILL)
     ):
         deploy_mode = DeployMode.SINGLE_NODE  # fallback only when has P but no D
     else:

@@ -22,12 +22,14 @@ from motor.engine_server.utils.ip import ip_valid_check, port_valid_check
 from motor.engine_server.utils.validators import FileValidator
 
 supported_engine = ["vllm", "sglang"]
-supported_role = ["prefill", "decode", "union"]
+supported_role = ["encode", "prefill", "decode", "union"]
 
+MOTOR_ENGINE_ENCODE_CONFIG_KEY = "motor_engine_encode_config"
 MOTOR_ENGINE_PREFILL_CONFIG_KEY = "motor_engine_prefill_config"
 MOTOR_ENGINE_DECODE_CONFIG_KEY = "motor_engine_decode_config"
 MODEL_CONFIG_KEY = "model_config"
 PARALLEL_CONFIG_KEY = "parallel_config"
+ENCODE_PARALLEL_CONFIG_KEY = "encode_parallel_config"
 PREFILL_PARALLEL_CONFIG_KEY = "prefill_parallel_config"
 DECODE_PARALLEL_CONFIG_KEY = "decode_parallel_config"
 
@@ -57,6 +59,7 @@ class ModelConfig:
     model_name: str
     model_path: str
     npu_mem_utils: float
+    encode_parallel_config: ParallelConfig
     prefill_parallel_config: ParallelConfig
     decode_parallel_config: ParallelConfig
 
@@ -66,6 +69,7 @@ class ModelConfig:
             model_name=data["model_name"],
             model_path=data["model_path"],
             npu_mem_utils=data["npu_mem_utils"],
+            encode_parallel_config=ParallelConfig.from_dict(data.get(ENCODE_PARALLEL_CONFIG_KEY, {})),
             prefill_parallel_config=ParallelConfig.from_dict(data[PREFILL_PARALLEL_CONFIG_KEY]),
             decode_parallel_config=ParallelConfig.from_dict(data[DECODE_PARALLEL_CONFIG_KEY])
         )
@@ -126,18 +130,21 @@ class DeployConfig:
                 MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
                 or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
         ):
-            key = (
-                MOTOR_ENGINE_DECODE_CONFIG_KEY
-                if role == "decode"
-                else MOTOR_ENGINE_PREFILL_CONFIG_KEY
-            )
-            data = raw_data.get(key, {})
+            key_map = {
+                "encode": MOTOR_ENGINE_ENCODE_CONFIG_KEY,
+                "prefill": MOTOR_ENGINE_PREFILL_CONFIG_KEY,
+                "decode": MOTOR_ENGINE_DECODE_CONFIG_KEY
+            }
+            data = raw_data.get(key_map.get(role, ""), {})
             _update_engine_server_tls_config(data, raw_data)
 
             model_cfg = data.get(MODEL_CONFIG_KEY, {})
+            encode_cfg = raw_data.get(MOTOR_ENGINE_ENCODE_CONFIG_KEY, {}).get(MODEL_CONFIG_KEY, {})
             prefill_cfg = raw_data.get(MOTOR_ENGINE_PREFILL_CONFIG_KEY, {}).get(MODEL_CONFIG_KEY, {})
             decode_cfg = raw_data.get(MOTOR_ENGINE_DECODE_CONFIG_KEY, {}).get(MODEL_CONFIG_KEY, {})
 
+            if ENCODE_PARALLEL_CONFIG_KEY not in model_cfg and PARALLEL_CONFIG_KEY in encode_cfg:
+                model_cfg[ENCODE_PARALLEL_CONFIG_KEY] = encode_cfg[PARALLEL_CONFIG_KEY]
             if PREFILL_PARALLEL_CONFIG_KEY not in model_cfg and PARALLEL_CONFIG_KEY in prefill_cfg:
                 model_cfg[PREFILL_PARALLEL_CONFIG_KEY] = prefill_cfg[PARALLEL_CONFIG_KEY]
             if DECODE_PARALLEL_CONFIG_KEY not in model_cfg and PARALLEL_CONFIG_KEY in decode_cfg:
@@ -168,8 +175,10 @@ class DeployConfig:
             return self.model_config.prefill_parallel_config
         elif role == "decode":
             return self.model_config.decode_parallel_config
+        elif role == "encode":
+            return self.model_config.encode_parallel_config
         else:
-            raise ValueError(f"Unsupported role: {role}. Allowed values: 'union', 'prefill', 'decode'")
+            raise ValueError(f"Unsupported role: {role}. Allowed values: 'union', 'prefill', 'decode', 'encode'")
 
 
 @dataclass
@@ -265,6 +274,8 @@ class EndpointConfig:
             else:
                 if self.kv_port is not None:
                     kv_config[constants.KV_PORT] = str(self.kv_port)
+        if self.role == "encode" and self.dp_rpc_port is not None:
+            self.deploy_config.model_config.encode_parallel_config.dp_rpc_port = self.dp_rpc_port
         if self.role == "prefill" and self.dp_rpc_port is not None:
             self.deploy_config.model_config.prefill_parallel_config.dp_rpc_port = self.dp_rpc_port
         if self.role == "decode" and self.dp_rpc_port is not None:

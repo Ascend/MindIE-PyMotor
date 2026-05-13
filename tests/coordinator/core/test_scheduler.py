@@ -9,7 +9,7 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 import httpx
@@ -152,7 +152,9 @@ async def test_request_processing_pd_separation_scenario(scheduler_setup):
     assert selected_prefill_instance.role == PDRole.ROLE_P
 
     # 2. allocate prefill workload
-    workload_p = calculate_demand_workload(PDRole.ROLE_P, request_length)
+    req_info = MagicMock()
+    req_info.req_len = request_length
+    workload_p = calculate_demand_workload(PDRole.ROLE_P, req_info)
     result = await load_balance_scheduler.update_workload(
         selected_prefill_instance.id, selected_prefill_endpoint.id, req_id,
         WorkloadAction.ALLOCATION, workload_p
@@ -181,7 +183,7 @@ async def test_request_processing_pd_separation_scenario(scheduler_setup):
     assert selected_decode_instance.role == PDRole.ROLE_D
 
     # 5. allocate decode workload
-    workload_d = calculate_demand_workload(PDRole.ROLE_D, request_length)
+    workload_d = calculate_demand_workload(PDRole.ROLE_D, req_info)
     result = await load_balance_scheduler.update_workload(
         selected_decode_instance.id, selected_decode_endpoint.id, req_id,
         WorkloadAction.ALLOCATION, workload_d
@@ -228,7 +230,9 @@ async def test_request_processing_mix_scenario(scheduler_setup):
 
     # 2. allocate mix workload
     load_balance_scheduler = scheduler.get_scheduling_policy()
-    workload_u = calculate_demand_workload(PDRole.ROLE_U, request_length)
+    req_info = MagicMock()
+    req_info.req_len = request_length
+    workload_u = calculate_demand_workload(PDRole.ROLE_U, req_info)
     result = await load_balance_scheduler.update_workload(
         selected_instance.id, selected_endpoint.id, req_id,
         WorkloadAction.ALLOCATION, workload_u
@@ -276,7 +280,9 @@ async def test_multiple_requests_load_balancing(scheduler_setup, request_length)
 
     # allocate workload
     load_balance_scheduler = scheduler.get_scheduling_policy()
-    workload = calculate_demand_workload(PDRole.ROLE_P, request_length)
+    req_info = MagicMock()
+    req_info.req_len = request_length
+    workload = calculate_demand_workload(PDRole.ROLE_P, req_info)
     result = await load_balance_scheduler.update_workload(
         selected_instance.id, selected_endpoint.id, req_id,
         WorkloadAction.ALLOCATION, workload
@@ -316,7 +322,9 @@ async def test_workload_calculation_accuracy(scheduler_setup):
     selected_instance, selected_endpoint = result
 
     # allocate prefill workload
-    workload = calculate_demand_workload(PDRole.ROLE_P, request_length)
+    req_info = MagicMock()
+    req_info.req_len = request_length
+    workload = calculate_demand_workload(PDRole.ROLE_P, req_info)
     result = await load_balance_scheduler.update_workload(
         selected_instance.id, selected_endpoint.id, req_id,
         WorkloadAction.ALLOCATION, workload

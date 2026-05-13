@@ -241,7 +241,9 @@ def modify_sp_block_num(data, pd_flag, config):
         if C.ANNOTATIONS in data[C.METADATA]:
             del data[C.METADATA][C.ANNOTATIONS]
         return
-    if pd_flag == C.NODE_TYPE_D:
+    if pd_flag == C.NODE_TYPE_E:
+        sp_block_num = int(config[C.SINGER_E_INSTANCES_NUM]) * int(config[C.E_POD_NPU_NUM])
+    elif pd_flag == C.NODE_TYPE_D:
         sp_block_num = int(config[C.SINGER_D_INSTANCES_NUM]) * int(config[C.D_POD_NPU_NUM])
     elif pd_flag == C.NODE_TYPE_P:
         sp_block_num = int(config[C.SINGER_P_INSTANCES_NUM]) * int(config[C.P_POD_NPU_NUM])

@@ -28,6 +28,7 @@ from motor.config.endpoint import (
     PARALLEL_CONFIG_KEY,
     PREFILL_PARALLEL_CONFIG_KEY,
     DECODE_PARALLEL_CONFIG_KEY,
+    ENCODE_PARALLEL_CONFIG_KEY
 )
 from motor.config.tls_config import TLSConfig
 from motor.engine_server.constants import constants
@@ -81,6 +82,7 @@ def test_model_config_from_dict():
         "npu_mem_utils": 0.9,
         PREFILL_PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 1},
         DECODE_PARALLEL_CONFIG_KEY: {"dp_size": 4, "tp_size": 2},
+        ENCODE_PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 1},
     }
     config = ModelConfig.from_dict(data)
     assert config.model_name == "test-model"
@@ -88,7 +90,7 @@ def test_model_config_from_dict():
     assert config.npu_mem_utils == 0.9
     assert config.prefill_parallel_config.dp_size == 2
     assert config.decode_parallel_config.dp_size == 4
-
+    assert config.encode_parallel_config.dp_size == 2
 
 # --- EngineConfig tests ---
 
@@ -154,6 +156,7 @@ def simple_engine_config_file():
             "npu_mem_utils": 0.9,
             PREFILL_PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 1},
             DECODE_PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 1},
+            ENCODE_PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 1},
         },
         "engine_config": {"max_model_len": 2048},
     }
@@ -556,10 +559,12 @@ def test_endpoint_config_update_engine_config():
     """Test update_engine_config modifies kv-events-config endpoint and replay_endpoint"""
     prefill = ParallelConfig(dp_size=1, tp_size=1)
     decode = ParallelConfig(dp_size=1, tp_size=1)
+    encode = ParallelConfig(dp_size=2, tp_size=1)
     model_config = ModelConfig(
         model_name="m",
         model_path="/p",
         npu_mem_utils=0.9,
+        encode_parallel_config=encode,
         prefill_parallel_config=prefill,
         decode_parallel_config=decode,
     )
@@ -595,6 +600,7 @@ def test_endpoint_config_update_engine_config_no_kv_events():
             model_name="m",
             model_path="/p",
             npu_mem_utils=0.9,
+            encode_parallel_config=ParallelConfig(),
             prefill_parallel_config=ParallelConfig(),
             decode_parallel_config=ParallelConfig(),
         ),
@@ -621,6 +627,7 @@ def test_endpoint_config_update_engine_config_invalid_endpoint_format():
             model_name="m",
             model_path="/p",
             npu_mem_utils=0.9,
+            encode_parallel_config=ParallelConfig(),
             prefill_parallel_config=ParallelConfig(),
             decode_parallel_config=ParallelConfig(),
         ),

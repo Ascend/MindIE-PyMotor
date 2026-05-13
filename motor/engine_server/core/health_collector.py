@@ -35,7 +35,7 @@ class HealthCollector:
                 response = await client.get("/health")
                 response.raise_for_status()
                 response_text = await response.aread()
-                health_status = response_text.decode('utf-8').lower() == 'true'
+                health_status = response_text.decode('utf-8').lower() != 'false'
                 self._has_connected = True
                 return health_status
         except Exception as e:

@@ -136,6 +136,7 @@ def set_env_docker(configmap_path):
     if deploy_mode == "single_container":
         update_shell_safely(single_container_shell_path, env_config, "motor_controller_env", "set_controller_env")
         update_shell_safely(single_container_shell_path, env_config, "motor_coordinator_env", "set_coordinator_env")
+        update_shell_safely(single_container_shell_path, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(single_container_shell_path, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(single_container_shell_path, env_config, "motor_engine_decode_env", "set_decode_env")
         update_shell_safely(single_container_shell_path, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")
@@ -145,6 +146,7 @@ def set_env_docker(configmap_path):
     else:
         update_shell_safely(controller_shell_path, env_config, "motor_controller_env", "set_controller_env")
         update_shell_safely(coordinator_shell_path, env_config, "motor_coordinator_env", "set_coordinator_env")
+        update_shell_safely(engine_shell_path, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(engine_shell_path, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(engine_shell_path, env_config, "motor_engine_decode_env", "set_decode_env")
         update_shell_safely(kv_pool_shell_path, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")

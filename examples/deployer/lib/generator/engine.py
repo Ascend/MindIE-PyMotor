@@ -13,7 +13,7 @@ import os
 import lib.constant as C
 from lib.utils import (
     generate_unique_id, load_yaml, write_yaml, safe_exec_cmd, logger,
-    modify_log_mount, obtain_engine_instance_total
+    modify_log_mount, obtain_engine_instance_total, obtain_engine_e_instance_total
 )
 from lib.generator import k8s_utils
 from lib.generator.k8s_utils import set_engine_base_name, modify_sp_block_num
@@ -67,7 +67,12 @@ def set_engine_metadata(deployment_data, deploy_config, index, node_type, job_na
 
 
 def set_engine_env(container, deploy_config, node_type, job_name):
-    role = C.ROLE_PREFILL if node_type == C.NODE_TYPE_P else C.ROLE_DECODE
+    role_map = {
+        C.NODE_TYPE_E: C.ROLE_ENCODE,
+        C.NODE_TYPE_P: C.ROLE_PREFILL,
+        C.NODE_TYPE_D: C.ROLE_DECODE
+    }
+    role = role_map.get(node_type)
     if C.ENV not in container:
         container[C.ENV] = []
     container[C.ENV].extend(build_engine_env_items(role, deploy_config, job_name, include_kv_pool=True))
@@ -87,7 +92,9 @@ def set_container_npu(container, npu_num):
 
 
 def set_engine_npu(container, deploy_config, node_type):
-    if node_type == C.NODE_TYPE_P and C.P_POD_NPU_NUM in deploy_config:
+    if node_type == C.NODE_TYPE_E and C.E_POD_NPU_NUM in deploy_config:
+        npu_num = int(deploy_config[C.E_POD_NPU_NUM])
+    elif node_type == C.NODE_TYPE_P and C.P_POD_NPU_NUM in deploy_config:
         npu_num = int(deploy_config[C.P_POD_NPU_NUM])
     elif node_type == C.NODE_TYPE_D and C.D_POD_NPU_NUM in deploy_config:
         npu_num = int(deploy_config[C.D_POD_NPU_NUM])
@@ -180,6 +187,16 @@ def validate_instance_nums(user_config):
 def generate_yaml_engine(input_yaml, output_file, user_config):
     logger.info(f"Generating YAML from {input_yaml} to {output_file}")
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
+    # generate yaml engine E
+    e_total = obtain_engine_e_instance_total(deploy_config)
+    for e_index in range(e_total):
+        data = load_yaml(input_yaml, True)
+        modify_engine_yaml(data, user_config, e_index, C.NODE_TYPE_E)
+        output_file_e = output_file + f"_{C.NODE_TYPE_E}{e_index}.yaml"
+        write_yaml(data, output_file_e, True)
+        k8s_utils.g_generate_yaml_list.append(output_file_e)
+  
+    # generate yaml engine P/D
     p_total, d_total = obtain_engine_instance_total(deploy_config)
     for p_index in range(p_total):
         data = load_yaml(input_yaml, True)

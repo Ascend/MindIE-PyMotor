@@ -21,6 +21,7 @@ from motor.common.logger import get_logger
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.coordinator.domain import ScheduledResource
 from motor.coordinator.domain.workload_calculator import calculate_demand_workload
+from motor.coordinator.models.request import RequestInfo
 
 logger = get_logger(__name__)
 
@@ -61,7 +62,7 @@ class WorkloadActionHandler:
         resource: ScheduledResource,
         req_id: str,
         action: WorkloadAction,
-        req_len: int,
+        req_info: RequestInfo,
     ) -> Tuple[Workload | None, PDRole | None]:
         """
         Get/compute workload_change from RequestManager by action, update RequestManager, return (change, role).
@@ -87,7 +88,7 @@ class WorkloadActionHandler:
         workload_change: Workload | None = None
 
         if action == WorkloadAction.ALLOCATION:
-            allocate_workload = calculate_demand_workload(role, req_len)
+            allocate_workload = calculate_demand_workload(role, req_info)
             if not await request_mgr.add_req_workload(req_id, role, allocate_workload):
                 logger.debug(
                     "Request %s already allocated for role %s, allocation ignored",

@@ -219,7 +219,7 @@ class ReadinessProbe:
             self._instance_manager.get_required_instances_status,
             self._deploy_mode,
         )
-        is_ready = readiness.is_ready() or readiness == InstanceReadiness.ONLY_PREFILL
+        is_run= readiness.is_run()
 
         r = self._daemon.read_role_and_heartbeat()
         if r.orphaned:
@@ -231,5 +231,5 @@ class ReadinessProbe:
         else:
             result = ReadinessResult.OK_STANDBY
         # Only report ready when result is OK_*; otherwise force False (orphaned/heartbeat_stale/not_master).
-        out_ready = (result in (ReadinessResult.OK_MASTER, ReadinessResult.OK_STANDBY)) and is_ready
+        out_ready = (result in (ReadinessResult.OK_MASTER, ReadinessResult.OK_STANDBY)) and is_run
         return ReadinessProbeOutput(result, out_ready, readiness)

@@ -26,7 +26,9 @@ class TestCalculateDemandWorkload:
 
     def test_prefill_role(self):
         """ROLE_P: active_kv_cache and active_tokens both set from prefill formula."""
-        w = calculate_demand_workload(PDRole.ROLE_P, 4)
+        req_info = MagicMock()
+        req_info.req_len = 4
+        w = calculate_demand_workload(PDRole.ROLE_P, req_info)
         assert isinstance(w, Workload)
         # request_length=4 -> length_score=1.0 -> score = 1.0*0.0345+120.0745 = 120.109
         assert w.active_kv_cache > 0
@@ -35,13 +37,17 @@ class TestCalculateDemandWorkload:
 
     def test_decode_role(self):
         """ROLE_D: only active_tokens set (request_length)."""
-        w = calculate_demand_workload(PDRole.ROLE_D, 10)
+        req_info = MagicMock()
+        req_info.req_len = 10
+        w = calculate_demand_workload(PDRole.ROLE_D, req_info)
         assert w.active_tokens == 10.0
         assert w.active_kv_cache == 0
 
     def test_hybrid_role(self):
         """ROLE_U: both set, average of prefill and decode scores."""
-        w = calculate_demand_workload(PDRole.ROLE_U, 4)
+        req_info = MagicMock()
+        req_info.req_len = 4
+        w = calculate_demand_workload(PDRole.ROLE_U, req_info)
         assert w.active_kv_cache > 0
         assert w.active_tokens > 0
 
@@ -55,7 +61,9 @@ class TestCalculateDemandWorkload:
         # the type checker. The implementation does "else: return Workload()" for
         # any other role. So we test that for a valid role we get non-empty, and
         # we skip testing invalid enum value from outside.
-        w = calculate_demand_workload(PDRole.ROLE_P, 0)
+        req_info = MagicMock()
+        req_info.req_len = 0
+        w = calculate_demand_workload(PDRole.ROLE_P, req_info)
         assert w.active_kv_cache >= 0
         assert w.active_tokens >= 0
 
@@ -96,8 +104,10 @@ class TestWorkloadActionHandler:
     async def test_compute_and_update_allocation_success(self, mock_request_manager, valid_resource):
         """ALLOCATION: add_req_workload called, returns (workload, role)."""
         handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+        req_info.req_len = 4
         workload_change, role = await handler.compute_and_update(
-            valid_resource, "req-1", WorkloadAction.ALLOCATION, req_len=4
+            valid_resource, "req-1", WorkloadAction.ALLOCATION, req_info=req_info
         )
         assert role == PDRole.ROLE_P
         assert workload_change is not None
@@ -112,8 +122,10 @@ class TestWorkloadActionHandler:
         """ALLOCATION when add_req_workload returns False -> (None, None)."""
         mock_request_manager.add_req_workload = AsyncMock(return_value=False)
         handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+        req_info.req_len = 4
         workload_change, role = await handler.compute_and_update(
-            valid_resource, "req-1", WorkloadAction.ALLOCATION, req_len=4
+            valid_resource, "req-1", WorkloadAction.ALLOCATION, req_info=req_info
         )
         assert workload_change is None
         assert role is None
@@ -124,8 +136,10 @@ class TestWorkloadActionHandler:
         current = Workload(active_kv_cache=100.0, active_tokens=50.0)
         mock_request_manager.get_req_workload = AsyncMock(return_value=current)
         handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+        req_info.req_len = 4
         workload_change, role = await handler.compute_and_update(
-            valid_resource, "req-1", WorkloadAction.RELEASE_KV, req_len=4
+            valid_resource, "req-1", WorkloadAction.RELEASE_KV, req_info=req_info
         )
         assert role == PDRole.ROLE_P
         assert workload_change is not None
@@ -139,8 +153,10 @@ class TestWorkloadActionHandler:
         """RELEASE_TOKENS when no workload record -> (None, None)."""
         mock_request_manager.get_req_workload = AsyncMock(return_value=None)
         handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+        req_info.req_len = 4
         workload_change, role = await handler.compute_and_update(
-            valid_resource, "req-1", WorkloadAction.RELEASE_TOKENS, req_len=4
+            valid_resource, "req-1", WorkloadAction.RELEASE_TOKENS, req_info=req_info
         )
         assert workload_change is None
         assert role is None
@@ -149,8 +165,10 @@ class TestWorkloadActionHandler:
     async def test_compute_and_update_invalid_resource_returns_none(self, mock_request_manager):
         """Empty or invalid resource -> (None, None)."""
         handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+        req_info.req_len = 4
         workload_change, role = await handler.compute_and_update(
-            None, "req-1", WorkloadAction.ALLOCATION, req_len=4
+            None, "req-1", WorkloadAction.ALLOCATION, req_info=req_info
         )
         assert workload_change is None
         assert role is None

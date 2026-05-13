@@ -16,33 +16,64 @@ from __future__ import annotations
 from motor.common.resources.endpoint import Workload
 from motor.common.resources.instance import PDRole
 from motor.common.logger import get_logger
+from motor.coordinator.models.request import RequestInfo
+from motor.common.utils.image_utils import get_mul_token
+
 
 logger = get_logger(__name__)
 
 
-def calculate_demand_workload(role: PDRole, request_length: int) -> Workload:
+def calculate_demand_workload(role: PDRole, req_info: RequestInfo) -> Workload:
     """
     Compute demand workload for this allocation from role and request length.
     Shared by BaseRouter.prepare_resource and WorkloadActionHandler ALLOCATION.
 
     Args:
-        role: PDRole enum (prefill/decode/both)
+        role: PDRole enum (encode/prefill/decode/both)
         request_length: Request length
 
     Returns:
         Workload: Load for ALLOCATION (used by select_and_allocate / add_req_workload)
     """
+
+    if role == PDRole.ROLE_E:
+        score = _calculate_encode_scores(req_info)
+        return Workload(active_kv_cache=score, active_tokens=score)
     if role == PDRole.ROLE_P:
-        score = _calculate_prefill_scores(request_length)
+        score = _calculate_prefill_scores(req_info.req_len)
         return Workload(active_kv_cache=score, active_tokens=score)
     if role == PDRole.ROLE_D:
-        score = _calculate_decode_scores(request_length)
+        score = _calculate_decode_scores(req_info.req_len)
         return Workload(active_tokens=score)
     if role == PDRole.ROLE_U:
-        score = _calculate_both_scores(request_length)
+        score = _calculate_both_scores(req_info.req_len)
         return Workload(active_kv_cache=score, active_tokens=score)
     logger.warning("Unknown role %s for workload calculation", role)
     return Workload()
+
+
+def _calculate_encode_scores(req_info: RequestInfo) -> float:
+    """Encode role workload score."""
+    messages = req_info.req_data.get("messages")
+    mul_token = 0
+    if not messages:
+        return mul_token
+
+    for msg in messages:
+        if not isinstance(msg.get("content"), list):
+            continue
+
+        for content_item in msg["content"]:
+            content_type = content_item.get("type")
+            if not content_type:
+                continue
+
+            if content_type == "image_url":
+                img_url = content_item.get("image_url", {}).get("url", "")
+                mul_token += get_mul_token(img_url)
+            elif content_type == "video_url":
+                mul_token += len(req_info.req_len) * 32
+    return mul_token
 
 
 def _calculate_prefill_scores(request_length: int) -> float:

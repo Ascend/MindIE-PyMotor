@@ -19,6 +19,7 @@ import motor.coordinator.router.recompute as recompute_common
 from motor.coordinator.router.adapters.completion_to_chat import adapt_completion_nonstream_to_chat
 from motor.config.coordinator import CoordinatorConfig
 from motor.common.resources.instance import PDRole
+from motor.coordinator.tracer.tracing import TracerManager
 
 
 class _DecodeTransportRetry(Exception):
@@ -48,30 +49,34 @@ class SeparatePDRouter(BaseRouter):
         self._stream_chunk_sent_to_client = False
 
     async def generate_stream(self):
-        tmax = self.config.exception_config.transport_retry_limit
-        for attempt in range(tmax):
-            self._recompute.wants_retry = True
-            while self._recompute.wants_retry:
-                self.first_chunk_sent = False
-                self._stream_chunk_sent_to_client = False
-                self._recompute.wants_retry = False
-                decode_wants_transport_retry = False
-                try:
-                    async for chunk in self.process_single_attempt(attempt):
-                        yield chunk
-                except _DecodeTransportRetry:
-                    decode_wants_transport_retry = True
-                if self._recompute.wants_retry:
-                    self._bump_req_id_after_recompute_workloads_released(
-                        self._recompute.retry_count
-                    )
-                if self.is_finished:
-                    return
-                if decode_wants_transport_retry:
-                    break
+        with self._trace_span("CPCP_Router_Stream", True):
+            await self.do_encode()
+
+            tmax = self.config.exception_config.transport_retry_limit
+            for attempt in range(tmax):
+                self._recompute.wants_retry = True
+                while self._recompute.wants_retry:
+                    self.first_chunk_sent = False
+                    self._stream_chunk_sent_to_client = False
+                    self._recompute.wants_retry = False
+                    decode_wants_transport_retry = False
+                    try:
+                        async for chunk in self.process_single_attempt(attempt):
+                            yield chunk
+                    except _DecodeTransportRetry:
+                        decode_wants_transport_retry = True
+                    if self._recompute.wants_retry:
+                        self._bump_req_id_after_recompute_workloads_released(
+                            self._recompute.retry_count
+                        )
+                    if self.is_finished:
+                        return
+                    if decode_wants_transport_retry:
+                        break
 
     async def handle_request(self) -> StreamingResponse | JSONResponse:
         """Handle request with separate P and D instances"""
+
         if self.req_info.req_data.get("stream", False):
             return StreamingResponse(
                 self.generate_stream(),
@@ -80,146 +85,162 @@ class SeparatePDRouter(BaseRouter):
         return await self._generate_nonstream_json()
 
     async def process_single_attempt(self, attempt):
-        tmax = self.config.exception_config.transport_retry_limit
-        prefill_resource: ScheduledResource = None
-        try:
-            # Schedule P instance
-            prefill_resource = await self.prepare_resource(PDRole.ROLE_P)
-            # Forward P request
-            p_resp_json = await self._forward_p_request(prefill_resource)
-            self.logger.debug("Prefill response received: %s", p_resp_json)
-        except Exception as e:
-            self.logger.error("Error occurred while forwarding P request: %s", e)
-            if attempt != tmax - 1:
-                self.is_finished = False
-                return
-            yield self._generate_streaming_error_chunk(e)
-            self.is_finished = True
-            return
-        finally:
-            if prefill_resource and self.req_info.state != ReqState.PREFILL_END:
-                if not await self.release_all(prefill_resource):
-                    self.logger.debug(
-                        "release_all(prefill) returned False instance_id=%s endpoint_id=%s state=%s",
-                        prefill_resource.instance.id, prefill_resource.endpoint.id, self.req_info.state)
+        trace_obj = self.req_info.trace_obj
+        headers = trace_obj.get_trace_headers_dict(is_meta=False)
+        trace_context = TracerManager().extract_trace_context(headers)
+        with TracerManager().tracer.start_as_current_span("CPCP_Prefill", context=trace_context) as span:
+            trace_obj.meta_span = span
+            trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
 
-        decode_resource: ScheduledResource = None
-        try:
-            # Schedule D instance
-            decode_resource = await self.prepare_resource(PDRole.ROLE_D)
-            # Forward D request
-            async for chunk in self._forward_d_request(p_resp_json, prefill_resource, decode_resource):
-                if chunk:
-                    self._stream_chunk_sent_to_client = True
-                yield chunk
-            if not self._recompute.wants_retry:
-                self.is_finished = True
-                return
-        except HTTPException as e:
-            self.logger.error("Error occurred while forwarding Decode request: %s", e)
-            await self._handle_stream_error(prefill_resource, e)
-            yield self._generate_streaming_error_chunk(e)
-            self.is_finished = True
-            return
-        except Exception as e:
-            self.logger.error("Error occurred while forwarding Decode request: %s", e)
-            await self._handle_stream_error(prefill_resource, e)
-            if self._stream_chunk_sent_to_client or attempt == tmax - 1:
+            tmax = self.config.exception_config.transport_retry_limit
+            try:
+                # Schedule P instance
+                async with self._manage_request_context(), \
+                    self._manage_resource_context(PDRole.ROLE_P, self.release_tokens) as prefill_resource:
+                    # Forward P request
+                    p_resp_json = await self._forward_p_request(prefill_resource)
+                    self.logger.debug("Prefill response received: %s", p_resp_json)
+            except Exception as e:
+                self.logger.error("Error occurred while forwarding P request: %s", e)
+                if attempt != tmax - 1:
+                    self.is_finished = False
+                    return
                 yield self._generate_streaming_error_chunk(e)
                 self.is_finished = True
-            else:
-                raise _DecodeTransportRetry() from e
-        finally:
-            if decode_resource:
-                released = await self.release_tokens(decode_resource)
-                if not released:
-                    self.logger.debug(
-                        "release_tokens(decode) returned False instance_id=%s endpoint_id=%s state=%s",
-                        decode_resource.instance.id, decode_resource.endpoint.id, self.req_info.state)
+                trace_obj.set_trace_exception(e)
+                return
+
+        with TracerManager().tracer.start_as_current_span("CPCP_Decode", context=trace_context) as span:
+            trace_obj.meta_span = span
+            trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
+
+            try:
+                # Schedule D instance
+                async with self._manage_request_context(), \
+                    self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as decode_resource:
+                    # Forward D request
+                    async for chunk in self._forward_d_request(p_resp_json, prefill_resource, decode_resource):
+                        if chunk:
+                            self._stream_chunk_sent_to_client = True
+                        yield chunk
+                    if not self._recompute.wants_retry:
+                        self.is_finished = True
+                        self.logger.info(trace_obj.set_end_and_ttft_tpot())
+                        return
+            except HTTPException as e:
+                trace_obj.set_trace_exception(e)
+                self.logger.error("Error occurred while forwarding Decode request: %s", e)
+                await self._handle_stream_error(prefill_resource, e)
+                yield self._generate_streaming_error_chunk(e)
+                self.is_finished = True
+                return
+            except Exception as e:
+                self.logger.error("Error occurred while forwarding Decode request: %s", e)
+                await self._handle_stream_error(prefill_resource, e)
+                if self._stream_chunk_sent_to_client or attempt == tmax - 1:
+                    yield self._generate_streaming_error_chunk(e)
+                    self.is_finished = True
+                    trace_obj.set_trace_exception(e)
+                else:
+                    raise _DecodeTransportRetry() from e
 
     async def _generate_nonstream_json(self) -> JSONResponse:
-        tmax = self.config.exception_config.transport_retry_limit
-        for attempt in range(tmax):
-            self._recompute.wants_retry = True
-            while self._recompute.wants_retry:
-                self.first_chunk_sent = False
-                self._recompute.wants_retry = False
-                resp = await self._nonstream_single_attempt(attempt)
-                if resp is not None:
-                    return resp
-                if self._recompute.wants_retry:
-                    self._bump_req_id_after_recompute_workloads_released(
-                        self._recompute.retry_count
-                    )
-                if self.is_finished:
-                    return JSONResponse(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        content=self.build_error_response(
-                            RuntimeError("Non-stream PD request ended without response")
-                        ).model_dump(),
-                    )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=self.build_error_response(
-                RuntimeError("All retries exhausted for non-stream PD request")
-            ).model_dump(),
-        )
+        with self._trace_span("CPCP_Router", False):
+            await self.do_encode()
+
+            tmax = self.config.exception_config.transport_retry_limit
+            for attempt in range(tmax):
+                self._recompute.wants_retry = True
+                while self._recompute.wants_retry:
+                    self.first_chunk_sent = False
+                    self._recompute.wants_retry = False
+                    resp = await self._nonstream_single_attempt(attempt)
+                    if resp is not None:
+                        return resp
+                    if self._recompute.wants_retry:
+                        self._bump_req_id_after_recompute_workloads_released(
+                            self._recompute.retry_count
+                        )
+                    if self.is_finished:
+                        return JSONResponse(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            content=self.build_error_response(
+                                RuntimeError("Non-stream PD request ended without response")
+                            ).model_dump(),
+                        )
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=self.build_error_response(
+                    RuntimeError("All retries exhausted for non-stream PD request")
+                ).model_dump(),
+            )
 
     def _nonstream_error_json_response(self, exc: Exception) -> JSONResponse:
         er = self.build_error_response(exc)
         return JSONResponse(status_code=er.code, content=er.model_dump())
 
     async def _nonstream_single_attempt(self, attempt: int) -> JSONResponse | None:
-        tmax = self.config.exception_config.transport_retry_limit
-        prefill_resource: ScheduledResource = None
-        try:
-            prefill_resource = await self.prepare_resource(PDRole.ROLE_P)
-            p_resp_json = await self._forward_p_request(prefill_resource)
-            self.logger.debug("Prefill response received: %s", p_resp_json)
-        except Exception as e:
-            self.logger.error("Error occurred while forwarding P request: %s", e)
-            if attempt != tmax - 1:
-                self.is_finished = False
-                return None
-            self.is_finished = True
-            return self._nonstream_error_json_response(e)
-        finally:
-            if prefill_resource and self.req_info.state != ReqState.PREFILL_END:
-                if not await self.release_all(prefill_resource):
-                    self.logger.debug(
-                        "release_all(prefill) returned False instance_id=%s endpoint_id=%s state=%s",
-                        prefill_resource.instance.id, prefill_resource.endpoint.id, self.req_info.state,
-                    )
-
-        decode_resource: ScheduledResource = None
-        try:
-            decode_resource = await self.prepare_resource(PDRole.ROLE_D)
+        trace_obj = self.req_info.trace_obj
+        headers = trace_obj.get_trace_headers_dict(is_meta=False)
+        trace_context = TracerManager().extract_trace_context(headers)
+        with TracerManager().tracer.start_as_current_span("CPCP_Prefill", context=trace_context) as span:
+            trace_obj.meta_span = span
+            trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
+            
+            tmax = self.config.exception_config.transport_retry_limit
             try:
-                req_data = self._gen_d_request(p_resp_json)
-            except BaseException:
-                await self.release_tokens(decode_resource)
-                raise
-            body = await self._fetch_nonstream_decode_body(
-                req_data, prefill_resource, decode_resource
-            )
-            if body is not None:
-                self.req_info.update_state(ReqState.DECODE_END)
-                self.logger.debug("Completed non-stream decode for request %s", self.req_info)
+                async with self._manage_request_context(), \
+                    self._manage_resource_context(PDRole.ROLE_P, self.release_tokens) as prefill_resource:
+                    p_resp_json = await self._forward_p_request(prefill_resource)
+                    self.logger.debug("Prefill response received: %s", p_resp_json)
+            except Exception as e:
+                self.logger.error("Error occurred while forwarding P request: %s", e)
+                if attempt != tmax - 1:
+                    self.is_finished = False
+                    return None
                 self.is_finished = True
-                return JSONResponse(content=body)
-            return None
-        except HTTPException as e:
-            self.logger.error("Error occurred while forwarding Decode request: %s", e)
-            await self._handle_stream_error(prefill_resource, e)
-            self.is_finished = True
-            return self._nonstream_error_json_response(e)
-        except Exception as e:
-            self.logger.error("Error occurred while forwarding Decode request: %s", e)
-            await self._handle_stream_error(prefill_resource, e)
-            if self.first_chunk_sent or attempt == tmax - 1:
+                trace_obj.set_trace_exception(e)
+                return self._nonstream_error_json_response(e)
+
+        with TracerManager().tracer.start_as_current_span("CPCP_Decode", context=trace_context) as span:
+            trace_obj.meta_span = span
+            trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
+
+            try:
+                async with self._manage_request_context(), \
+                    self._manage_resource_context(PDRole.ROLE_D, self.release_tokens) as decode_resource:
+                    try:
+                        req_data = self._gen_d_request(p_resp_json)
+                    except BaseException:
+                        await self.release_tokens(decode_resource)
+                        raise
+                    body = await self._fetch_nonstream_decode_body(
+                        req_data, prefill_resource, decode_resource
+                    )
+                    if body is not None:
+                        self.req_info.update_state(ReqState.DECODE_END)
+                        self.logger.debug("Completed non-stream decode for request %s", self.req_info)
+                        self.is_finished = True
+                        return JSONResponse(content=body)
+                    return None
+            except HTTPException as e:
+                trace_obj.set_trace_exception(e)
+                self.logger.error("Error occurred while forwarding Decode request: %s", e)
+                await self._handle_stream_error(prefill_resource, e)
                 self.is_finished = True
                 return self._nonstream_error_json_response(e)
-            return None
+            except Exception as e:
+                self.logger.error("Error occurred while forwarding Decode request: %s", e)
+                await self._handle_stream_error(prefill_resource, e)
+                if self.first_chunk_sent or attempt == tmax - 1:
+                    self.is_finished = True
+                    trace_obj.set_trace_exception(e)
+                    return self._nonstream_error_json_response(e)
+                return None
 
     def _gen_p_request(self) -> dict:
         """Generate P request parameters"""

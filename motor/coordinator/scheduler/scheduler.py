@@ -104,7 +104,7 @@ class Scheduler:
         workload = (
             Workload()
             if not hasattr(self._scheduling_policy, "update_workload")
-            else calculate_demand_workload(role, req_info.req_len)
+            else calculate_demand_workload(role, req_info)
         )
         params = UpdateWorkloadParams(
             instance_id=instance.id,

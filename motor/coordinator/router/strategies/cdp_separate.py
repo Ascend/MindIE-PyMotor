@@ -127,7 +127,9 @@ class SeparateCDPRouter(BaseRouter):
         Handles streaming Decode requests
         """
         trace_obj = self.req_info.trace_obj
-        with self._trace_span("CDP_Decode_stream", True):
+        with self._trace_span("CDP_Router_Stream", True):
+            await self.do_encode()
+            self.is_meta = False
             self.logger.debug("Handling streaming Decode request")
             max_retry = self.config.exception_config.transport_retry_limit
             rmax = self.config.exception_config.recompute_retry_limit
@@ -240,7 +242,9 @@ class SeparateCDPRouter(BaseRouter):
         Handles non-streaming Decode requests
         """
         trace_obj = self.req_info.trace_obj
-        with self._trace_span("CDP_Decode", False):
+        with self._trace_span("CDP_Router", False):
+            await self.do_encode()
+            self.is_meta = False
             self.logger.debug("Handling non-streaming Decode request")
             max_retries = self.config.exception_config.transport_retry_limit
             rmax = self.config.exception_config.recompute_retry_limit

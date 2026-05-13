@@ -380,7 +380,7 @@ class TestRouterPDSeparation:
             return InstanceReadiness.REQUIRED_MET
         monkeypatch.setattr(InstanceManager, "get_required_instances_status", mock_get_required_instances_status)
 
-        async def mock_select_and_allocate(self, role, req_id, req_len):
+        async def mock_select_and_allocate(self, role, req_info):
             return None
         monkeypatch.setattr(Scheduler, "select_and_allocate", mock_select_and_allocate)
 
@@ -667,6 +667,8 @@ class TestRouterPDSeparation:
                 "messages": [{"role": "user", "content": "Hello"}]
             })
             
+        print("Response text::::::  ", response.text)
+
         assert error_message in response.text
         # May be 400 or 500 if upstream wraps 4XX
         assert str(status.HTTP_400_BAD_REQUEST) in response.text or "Bad Request" in response.text

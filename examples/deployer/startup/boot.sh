@@ -16,7 +16,7 @@ case "$ROLE" in
     "SINGLE_CONTAINER")
         source "$SCRIPT_DIR/all_combine_in_single_container.sh"
         ;;
-    "prefill"|"decode")
+    "encode"|"prefill"|"decode")
         source "$SCRIPT_DIR/engine.sh"
         ;;
     "controller")

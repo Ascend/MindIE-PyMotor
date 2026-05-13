@@ -98,11 +98,13 @@ class _SchedulerInstanceCache:
 
     def __init__(self):
         self._instance_cache: dict[PDRole, list[Instance]] = {
+            PDRole.ROLE_E: [],
             PDRole.ROLE_P: [],
             PDRole.ROLE_D: [],
             PDRole.ROLE_U: [],
         }
         self._instance_map: dict[PDRole, dict[int, Instance]] = {
+            PDRole.ROLE_E: {},
             PDRole.ROLE_P: {},
             PDRole.ROLE_D: {},
             PDRole.ROLE_U: {},
@@ -614,7 +616,7 @@ class AsyncSchedulerClient:
         workload = (
             Workload()
             if (self._scheduler_type or "round_robin") == "round_robin"
-            else calculate_demand_workload(role, req_info.req_len)
+            else calculate_demand_workload(role, req_info)
         )
 
         request_id = str(uuid.uuid4())
@@ -653,6 +655,7 @@ class AsyncSchedulerClient:
                     role_str, out_instance.id, out_endpoint.id
                 )
                 return (out_instance, out_endpoint, workload)
+
         return None
 
     async def update_workload(self, params: UpdateWorkloadParams) -> bool:
@@ -743,11 +746,13 @@ class AsyncSchedulerClient:
                     )
                 else:
                     role_to_list: dict[PDRole, list] = {
+                        PDRole.ROLE_E: [],
                         PDRole.ROLE_P: [],
                         PDRole.ROLE_D: [],
                         PDRole.ROLE_U: [],
                     }
                     _role_map = {
+                        "encode": PDRole.ROLE_E,
                         "prefill": PDRole.ROLE_P,
                         "decode": PDRole.ROLE_D,
                         "both": PDRole.ROLE_U,
@@ -779,35 +784,39 @@ class AsyncSchedulerClient:
         elif isinstance(mode, str):
             mode = DeployMode.from_string(mode) or DeployMode.PD_SEPARATE
 
-        def _status(p_list: list, d_list: list, u_list: list) -> InstanceReadiness:
+        def _status(e_list: list, p_list: list, d_list: list, u_list: list) -> InstanceReadiness:
             if mode in (DeployMode.CDP_SEPARATE, DeployMode.CPCD_SEPARATE, DeployMode.PD_SEPARATE, \
                     DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER, DeployMode.PD_DUAL_DISPATCH):
-                has_p, has_d = len(p_list) > 0, len(d_list) > 0
+                has_e, has_p, has_d = len(e_list) > 0, len(p_list) > 0, len(d_list) > 0
+                if has_e and has_p and has_d:
+                    return InstanceReadiness.REQUIRED_MET_EPD
                 if has_p and has_d:
                     return InstanceReadiness.REQUIRED_MET
+                if has_p and has_e:
+                    return InstanceReadiness.ENCODE_PREFILL
                 if has_p:
                     return InstanceReadiness.ONLY_PREFILL
                 if has_d:
                     return InstanceReadiness.ONLY_DECODE
+                if has_e:
+                    return InstanceReadiness.ONLY_ENCODE
                 return InstanceReadiness.NONE
             if mode == DeployMode.SINGLE_NODE:
                 return InstanceReadiness.REQUIRED_MET if len(u_list) > 0 else InstanceReadiness.NONE
             return InstanceReadiness.UNKNOWN
 
+        e_list = self._cache.get_instances(PDRole.ROLE_E)
         p_list = self._cache.get_instances(PDRole.ROLE_P)
         d_list = self._cache.get_instances(PDRole.ROLE_D)
         u_list = self._cache.get_instances(PDRole.ROLE_U)
-        status = _status(p_list, d_list, u_list)
+        status = _status(e_list, p_list, d_list, u_list)
         if status.is_ready():
             return status
         try:
             await self.get_available_instances(None)
         except Exception as e:
             logger.debug("has_required_instances: warm-up get_available_instances failed: %s", e)
-        p_list = self._cache.get_instances(PDRole.ROLE_P)
-        d_list = self._cache.get_instances(PDRole.ROLE_D)
-        u_list = self._cache.get_instances(PDRole.ROLE_U)
-        return _status(p_list, d_list, u_list)
+        return _status(e_list, p_list, d_list, u_list)
 
     async def get_all_instances(self) -> tuple[dict[int, Instance], dict[int, Instance]]:
         """Interface compat; returns empty (Mgmt process uses local InstanceManager)."""

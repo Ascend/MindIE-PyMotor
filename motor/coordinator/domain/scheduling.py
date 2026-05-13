@@ -30,16 +30,24 @@ class InstanceReadiness(str, Enum):
     Instance readiness state for deploy mode (e.g. PD separate).
     Callers can distinguish "both P and D", "only P", "only D", "none" for routing/readiness.
     """
-    REQUIRED_MET = "required_met"    # PD: both P and D; SINGLE_NODE: has hybrid
-    ONLY_PREFILL = "only_prefill"    # PD mode: only prefill instances
-    ONLY_DECODE = "only_decode"      # PD mode: only decode instances
-    NONE = "none"                    # No required instances
-    UNKNOWN = "unknown"              # Unknown deploy mode
+    REQUIRED_MET_EPD = "required_met_epd"    # PD: both E, P and D
+    ENCODE_PREFILL = "encode_prefill"        # PD: only encode and prefill instances
+    REQUIRED_MET = "required_met"            # PD: both P and D; SINGLE_NODE: has hybrid
+    ONLY_PREFILL = "only_prefill"            # PD mode: only prefill instances
+    ONLY_DECODE = "only_decode"              # PD mode: only decode instances
+    ONLY_ENCODE = "only_encode"              # EPD mode: only encode instances
+    NONE = "none"                            # No required instances
+    UNKNOWN = "unknown"                      # Unknown deploy mode
 
     def is_ready(self) -> bool:
         """True if required instances are present for the deploy mode."""
-        return self == InstanceReadiness.REQUIRED_MET
-
+        return self == InstanceReadiness.REQUIRED_MET or self == InstanceReadiness.REQUIRED_MET_EPD
+    
+    def is_run(self) -> bool:
+        """True indicates that it can run normally."""
+        return (self.is_ready()
+                or self == InstanceReadiness.ONLY_PREFILL 
+                or self == InstanceReadiness.ENCODE_PREFILL)
 
 class ScheduledResource(BaseModel):
     """

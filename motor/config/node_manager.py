@@ -34,6 +34,7 @@ BASIC_CONFIG_KEY = "basic_config"
 MODEL_CONFIG_KEY = "model_config"
 PARALLEL_CONFIG_KEY = "parallel_config"
 MOTOR_NODE_MANAGER_CONFIG_KEY = "motor_nodemanger_config"
+MOTOR_ENGINE_ENCODE_CONFIG_KEY = "motor_engine_encode_config"
 MOTOR_ENGINE_PREFILL_CONFIG_KEY = "motor_engine_prefill_config"
 MOTOR_ENGINE_DECODE_CONFIG_KEY = "motor_engine_decode_config"
 ENGINE_CONFIG_KEY = "engine_config"
@@ -125,18 +126,38 @@ class SingleContainerNodemanagerConfig:
         config.single_container_flag = True
         p_instances_num = user_config_data['motor_deploy_config']['p_instances_num']
         d_instances_num = user_config_data['motor_deploy_config']['d_instances_num']
+
+        encode_model_cfg = user_config_data[MOTOR_ENGINE_ENCODE_CONFIG_KEY][MODEL_CONFIG_KEY]
         prefill_model_cfg = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG_KEY][MODEL_CONFIG_KEY]
         decode_model_cfg = user_config_data[MOTOR_ENGINE_DECODE_CONFIG_KEY][MODEL_CONFIG_KEY]
+
+        encode_parallel_config = encode_model_cfg[PARALLEL_CONFIG_KEY]
         prefill_parallel_config = prefill_model_cfg[PARALLEL_CONFIG_KEY]
         decode_parallel_config = decode_model_cfg[PARALLEL_CONFIG_KEY]
+
+        e_dp_size = encode_parallel_config[DP]
+        e_tp_size = encode_parallel_config[TP]
+        e_pp_size = encode_parallel_config[PP]
+
         p_dp_size = prefill_parallel_config[DP]
         p_tp_size = prefill_parallel_config[TP]
         p_pp_size = prefill_parallel_config[PP]
+
         d_dp_size = decode_parallel_config[DP]
         d_tp_size = decode_parallel_config[TP]
         d_pp_size = decode_parallel_config[PP]
 
         index = int(Env.index)
+
+        d_node_manager_port_offset = p_instances_num * p_dp_size + index
+        d_base_port_offset = (p_instances_num * p_dp_size + index * d_dp_size) * 2
+        d_device_offset = (p_instances_num * p_dp_size * p_tp_size * p_pp_size + 
+                            index * d_dp_size * d_tp_size * d_pp_size)
+
+        e_node_manager_port_offset = d_instances_num * d_dp_size + d_node_manager_port_offset
+        e_base_port_offset = d_base_port_offset + e_dp_size
+        e_device_offset = d_device_offset + e_dp_size * e_tp_size * e_pp_size
+
         if Env.role == 'prefill':
             config.node_manager_port_offset = index
             config.base_port_offset = index * d_dp_size * 2
@@ -145,15 +166,22 @@ class SingleContainerNodemanagerConfig:
             kv_port_offset = config.device_offset
             lookup_rpc_port_offset = index
             dp_rpc_port_offset = index
-        else:
-            config.node_manager_port_offset = p_instances_num * p_dp_size + index
-            config.base_port_offset = (p_instances_num * p_dp_size + index * d_dp_size) * 2
-            config.device_offset = p_instances_num * p_dp_size * p_tp_size * p_pp_size + \
-                    index * d_dp_size * d_tp_size * d_pp_size
+        elif Env.role == 'decode':
+            config.node_manager_port_offset = d_node_manager_port_offset
+            config.base_port_offset = d_base_port_offset
+            config.device_offset = d_device_offset
             config.device_num = d_dp_size * d_tp_size * d_pp_size
             kv_port_offset = config.device_offset
             lookup_rpc_port_offset = p_instances_num + index
             dp_rpc_port_offset = p_instances_num + index
+        elif Env.role == 'encode':
+            config.node_manager_port_offset = e_node_manager_port_offset
+            config.base_port_offset = e_base_port_offset
+            config.device_offset = e_device_offset
+            config.device_num = e_dp_size * e_tp_size * e_pp_size
+            kv_port_offset = config.device_offset
+            lookup_rpc_port_offset = index
+            dp_rpc_port_offset = index
 
         kv_config = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG_KEY][ENGINE_CONFIG_KEY].get(KV_TRANSFER_CONFIG_KEY, {})
         if kv_config:
@@ -245,7 +273,9 @@ class NodeManagerConfig:
     def _load_node_manager_config_data(cls, user_cfg: dict[str, Any]) -> dict[str, Any]:
         """Load node_manager_config from engine config based on role"""
         engine_config_key = None
-        if Env.role == "prefill":
+        if Env.role == "encode":
+            engine_config_key = MOTOR_ENGINE_ENCODE_CONFIG_KEY
+        elif Env.role == "prefill":
             engine_config_key = MOTOR_ENGINE_PREFILL_CONFIG_KEY
         elif Env.role == "decode":
             engine_config_key = MOTOR_ENGINE_DECODE_CONFIG_KEY
@@ -266,7 +296,7 @@ class NodeManagerConfig:
             engine_config[MODEL_CONFIG_KEY][MODEL_NAME_KEY]
         config_data[BASIC_CONFIG_KEY][HARDWARE_TYPE_KEY] = user_cfg["motor_deploy_config"][HARDWARE_TYPE_KEY]
         
-        if Env.role in ("prefill", "decode"):
+        if Env.role in ("encode", "prefill", "decode"):
             config_data[BASIC_CONFIG_KEY]["parallel_config"] = \
                 engine_config[MODEL_CONFIG_KEY][PARALLEL_CONFIG_KEY]
             enable_multi_endpoints = engine_config.get(ENABLE_MULTI_ENDPOINTS_KEY, True)
@@ -367,7 +397,9 @@ class NodeManagerConfig:
     def _set_device_count_for_normal_mode(cls, config: 'NodeManagerConfig', raw: dict):
         """Set device count for normal mode using motor_deploy_config"""
         deploy_config = raw["motor_deploy_config"]
-        if Env.role == "prefill":
+        if Env.role == "encode":
+            device_count = deploy_config.get("e_pod_npu_num", 0)
+        elif Env.role == "prefill":
             device_count = deploy_config.get("p_pod_npu_num", 0)
         elif Env.role == "decode":
             device_count = deploy_config.get("d_pod_npu_num", 0)

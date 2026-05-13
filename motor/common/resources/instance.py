@@ -36,6 +36,7 @@ class InsStatus(str, Enum):
 
 
 class PDRole(str, Enum):
+    ROLE_E = "encode"
     ROLE_P = "prefill"
     ROLE_D = "decode"
     ROLE_U = "both"

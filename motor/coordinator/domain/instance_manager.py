@@ -54,11 +54,13 @@ class InstanceManager:
         self._available_pool: dict[int, Instance] = {}
         self._unavailable_pool: dict[int, Instance] = {}
 
+        self._encode_pool: dict[int, Instance] = {}
         self._prefill_pool: dict[int, Instance] = {}
         self._decode_pool: dict[int, Instance] = {}
         self._hybrid_pool: dict[int, Instance] = {}
 
         self._available_role_pools = {
+            PDRole.ROLE_E: self._encode_pool,
             PDRole.ROLE_P: self._prefill_pool,
             PDRole.ROLE_D: self._decode_pool,
             PDRole.ROLE_U: self._hybrid_pool
@@ -80,6 +82,7 @@ class InstanceManager:
         if deploy_mode is None:
             logger.error("deploy_mode is required for get_required_instances_status()")
             return InstanceReadiness.UNKNOWN
+        has_e = len(self._encode_pool) > 0
         has_p = len(self._prefill_pool) > 0
         has_d = len(self._decode_pool) > 0
         has_u = len(self._hybrid_pool) > 0
@@ -90,12 +93,18 @@ class InstanceManager:
             DeployMode.PD_DISAGGREGATION_SINGLE_CONTAINER,
             DeployMode.PD_DUAL_DISPATCH,
         ):
+            if has_e and has_p and has_d:
+                return InstanceReadiness.REQUIRED_MET_EPD
             if has_p and has_d:
                 return InstanceReadiness.REQUIRED_MET
+            if has_p and has_e:
+                return InstanceReadiness.ENCODE_PREFILL
             if has_p:
                 return InstanceReadiness.ONLY_PREFILL
             if has_d:
                 return InstanceReadiness.ONLY_DECODE
+            if has_e:
+                return InstanceReadiness.ONLY_ENCODE
             return InstanceReadiness.NONE
         if deploy_mode == DeployMode.SINGLE_NODE:
             return InstanceReadiness.REQUIRED_MET if has_u else InstanceReadiness.NONE
@@ -115,10 +124,12 @@ class InstanceManager:
         async with self._lock:
             self._available_pool = {}
             self._unavailable_pool = {}
+            self._encode_pool = {}
             self._prefill_pool = {}
             self._decode_pool = {}
             self._hybrid_pool = {}
             self._available_role_pools = {
+                PDRole.ROLE_E: self._encode_pool,
                 PDRole.ROLE_P: self._prefill_pool,
                 PDRole.ROLE_D: self._decode_pool,
                 PDRole.ROLE_U: self._hybrid_pool
@@ -135,6 +146,7 @@ class InstanceManager:
         # no need to lock here, asynchrony is acceptable
         if role is None:
             merged = {
+                **self._encode_pool,
                 **self._prefill_pool,
                 **self._decode_pool,
                 **self._hybrid_pool,
@@ -294,8 +306,8 @@ class InstanceManager:
                 logger.error("Unknown event type: %s, cannot refresh instances", event_type)
                 result = False
             logger.info(
-                "Refresh instances done: P=%d, D=%d, U=%d",
-                len(self._prefill_pool), len(self._decode_pool), len(self._hybrid_pool),
+                "Refresh instances done: E=%d, P=%d, D=%d, U=%d",
+                len(self._encode_pool), len(self._prefill_pool), len(self._decode_pool), len(self._hybrid_pool),
             )
             return result
 

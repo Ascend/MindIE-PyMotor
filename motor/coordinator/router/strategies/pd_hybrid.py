@@ -38,7 +38,9 @@ class PDHybridRouter(BaseRouter):
         Handling hybrid streaming requests
         """
         trace_obj = self.req_info.trace_obj
-        with self._trace_span("PDHybrid_stream", True):
+        with self._trace_span("PDHybrid_Stream", True):
+            await self.do_encode()
+            self.is_meta = False
             self.logger.debug("Handling hybrid streaming request")
             max_retry = self.config.exception_config.transport_retry_limit
 
@@ -87,6 +89,8 @@ class PDHybridRouter(BaseRouter):
         """
         trace_obj = self.req_info.trace_obj
         with self._trace_span("PDHybrid", False):
+            await self.do_encode()
+            self.is_meta = False
             self.logger.debug("Handling hybrid non-streaming request")
             max_retries = self.config.exception_config.transport_retry_limit
 

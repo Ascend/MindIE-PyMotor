@@ -51,6 +51,8 @@ class Workload(BaseModel):
             return self.active_tokens + self.active_kv_cache * 0.3
         elif role_value == "decode":
             return self.active_tokens
+        elif role_value == "encode":
+            return self.active_tokens
         elif role_value == "both":
             return self.active_tokens + self.active_kv_cache * 0.15
         else:

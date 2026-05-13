@@ -107,7 +107,7 @@ class RequestManager:
             async with self._lock:
                 key = (req_id, role)
                 if key in self._req_workload_dict:
-                    logger.debug("Workload for request %s, role %s already exists", req_id, role)
+                    logger.warning("Workload for request %s, role %s already exists", req_id, role)
                     return False
                 self._req_workload_dict[key] = workload
             logger.debug("Added workload for request %s, role %s", req_id, role)

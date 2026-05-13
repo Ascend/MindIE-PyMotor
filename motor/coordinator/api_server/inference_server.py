@@ -285,7 +285,7 @@ class InferenceServer(BaseCoordinatorServer):
         if client is None:
             return False
         readiness = await client.has_required_instances()
-        return readiness.is_ready() or readiness == InstanceReadiness.ONLY_PREFILL
+        return readiness.is_run()
 
     def _register_routes(self) -> None:
         @self._inference_app.post("/v1/completions")

@@ -45,6 +45,7 @@ done
 sed -i '/^# patch_begin/,/^# patch_end/d' ./startup/boot.sh
 sed -i '/^function set_controller_env()/,/^}/d' ./startup/roles/controller.sh
 sed -i '/^function set_coordinator_env()/,/^}/d' ./startup/roles/coordinator.sh
+sed -i '/^function set_encode_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_prefill_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_decode_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_common_env()/,/^}/d' ./startup/common.sh
@@ -52,10 +53,12 @@ sed -i '/^function set_kv_pool_env()/,/^}/d' ./startup/roles/kv_pool.sh
 sed -i '/^function set_kv_conductor_env()/,/^}/d' ./startup/roles/kv_conductor.sh
 sed -i '/^function set_controller_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_coordinator_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
+sed -i '/^function set_encode_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_prefill_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_decode_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_kv_pool_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
 sed -i '/^function set_kv_conductor_env()/,/^}/d' ./startup/roles/all_combine_in_single_container.sh
+sed -i '/^function set_mf_store_env()/,/^}/d' ./startup/roles/mf_store.sh
 sed -i '/./,$!d' ./startup/common.sh
 
 echo "Delete completed."
