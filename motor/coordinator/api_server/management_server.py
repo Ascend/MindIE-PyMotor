@@ -43,6 +43,7 @@ from motor.coordinator.domain.probe import (
     ReadinessResult,
     RoleShmDaemonLivenessProvider,
 )
+
 logger = get_logger(__name__)
 
 # Readiness 503: result -> HTTP detail.
@@ -90,8 +91,7 @@ class ManagementServer(BaseCoordinatorServer):
         # Create dependencies before app so lifespan and routes see them (lifespan runs on uvicorn start)
         self._scheduler_connection = SchedulerConnectionManager.from_config(self.coordinator_config)
         self._instance_manager = (
-            instance_manager if instance_manager is not None
-            else InstanceManager(self.coordinator_config, TYPE_MGMT)
+            instance_manager if instance_manager is not None else InstanceManager(self.coordinator_config, TYPE_MGMT)
         )
         deploy_mode = (
             self.coordinator_config.scheduler_config.deploy_mode
@@ -237,11 +237,7 @@ class ManagementServer(BaseCoordinatorServer):
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_READINESS_503[out.result],
                 )
-            msg = (
-                "Coordinator is master"
-                if out.result == ReadinessResult.OK_MASTER
-                else "Coordinator is ok"
-            )
+            msg = "Coordinator is master" if out.result == ReadinessResult.OK_MASTER else "Coordinator is ok"
             logger.info(
                 "[Readiness] is_ready=%s instances_status=%s -> 200",
                 out.is_ready,
@@ -250,13 +246,13 @@ class ManagementServer(BaseCoordinatorServer):
             return _build_readiness_response(msg, out.is_ready)
 
         @self.management_app.get("/metrics")
-        async def get_metrics():
-            metrics = MetricsCollector().prometheus_metrics_handler()
-            return PlainTextResponse(content=metrics)
-
-        @self.management_app.get("/instance/metrics")
-        async def get_instance_metrics():
-            return MetricsCollector().prometheus_instance_metrics_handler()
+        async def get_metrics(request: Request):
+            metrics_type = request.query_params.get("type", "full")
+            role = request.query_params.get("role", None)
+            result = MetricsCollector().get_metrics(metrics_type=metrics_type, role=role)
+            if isinstance(result, str):
+                return PlainTextResponse(content=result)
+            return result
 
         @self.management_app.post("/instances/refresh", response_model=RequestResponse)
         @self.timeout_handler()
@@ -290,7 +286,6 @@ class ManagementServer(BaseCoordinatorServer):
                     "GET /startup": "startup probe",
                     "GET /readiness": "readiness check",
                     "GET /metrics": "get metrics",
-                    "GET /instance/metrics": "get instance metrics",
                     "POST /instances/refresh": "refresh instances",
                 },
             }
@@ -308,8 +303,7 @@ class ManagementServer(BaseCoordinatorServer):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        "Request body size exceeds maximum allowed size of "
-                        f"{_MAX_REQUEST_BODY_SIZE // (1024 * 1024)}MB"
+                        f"Request body size exceeds maximum allowed size of {_MAX_REQUEST_BODY_SIZE // (1024 * 1024)}MB"
                     ),
                 )
             body = json.loads(raw_body.decode("utf-8"))
@@ -322,10 +316,7 @@ class ManagementServer(BaseCoordinatorServer):
             raise
         except json.JSONDecodeError as e:
             logger.error("Failed to parse request body as JSON: %s", e)
-            preview = (
-                raw_body.decode("utf-8", errors="ignore")[:_REQUEST_BODY_PREVIEW_LENGTH]
-                if raw_body else "empty"
-            )
+            preview = raw_body.decode("utf-8", errors="ignore")[:_REQUEST_BODY_PREVIEW_LENGTH] if raw_body else "empty"
             logger.error("Request body (first %s chars): %s", _REQUEST_BODY_PREVIEW_LENGTH, preview)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

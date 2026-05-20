@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -12,14 +10,15 @@
 
 import asyncio
 import logging
-import os
 import threading
 from contextlib import asynccontextmanager
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from functools import wraps
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from motor.common.resources import RegisterMsg, ReregisterMsg, HeartbeatMsg, TerminateInstanceMsg
 from motor.common.standby.standby_manager import StandbyManager, StandbyRole
@@ -41,16 +40,20 @@ def observability_enabled_required(func: Callable):
     @wraps(func)
     async def wrapper(self, *args, **kwargs):
         if not self.enable_observability_api:
-            return raise_internal_error(
-                message="Observability is not enabled."
-            )
+            return raise_internal_error(message="Observability is not enabled.")
         return await func(self, *args, **kwargs)
+
     return wrapper
 
 
 class ControllerAPI:
-    def __init__(self, config: ControllerConfig | None = None, modules: dict[str, Any] | None = None,
-                 host: str = None, port: int = None):
+    def __init__(
+        self,
+        config: ControllerConfig | None = None,
+        modules: dict[str, Any] | None = None,
+        host: str = None,
+        port: int = None,
+    ):
         if config is None:
             config = ControllerConfig()
 
@@ -82,22 +85,19 @@ class ControllerAPI:
 
     def start(self) -> None:
         # Create API server thread
-        self.api_server_thread = threading.Thread(
-            target=self._run_api_server,
-            daemon=True,
-            name="APIServer"
-        )
+        self.api_server_thread = threading.Thread(target=self._run_api_server, daemon=True, name="APIServer")
         self.api_server_thread.start()
 
         # Observability API startup logic merging
         self.observability_api_server_thread = threading.Thread(
-            target=self._run_observability_api_server,
-            daemon=True,
-            name="ObservabilityAPIServer"
+            target=self._run_observability_api_server, daemon=True, name="ObservabilityAPIServer"
         )
         self.observability_api_server_thread.start()
-        logger.info("Observability API started successfully. Host: %s, Port: %d", 
-                self.observability_api_host, self.observability_api_port)
+        logger.info(
+            "Observability API started successfully. Host: %s, Port: %d",
+            self.observability_api_host,
+            self.observability_api_port,
+        )
 
         logger.info("ControllerAPI started.")
 
@@ -105,10 +105,11 @@ class ControllerAPI:
         """Check if the API server thread is alive"""
         # Controller API server status
         controller_alive = self.api_server_thread is not None and self.api_server_thread.is_alive()
-        
+
         # check observability API server status
-        observability_alive = (self.observability_api_server_thread is not None 
-                            and self.observability_api_server_thread.is_alive())        
+        observability_alive = (
+            self.observability_api_server_thread is not None and self.observability_api_server_thread.is_alive()
+        )
         return controller_alive and observability_alive
 
     def stop(self) -> None:
@@ -166,9 +167,17 @@ class ControllerAPI:
             raise_internal_error(f"Internal server error: {str(e)}")
 
     @observability_enabled_required
-    async def _get_metrics(self) -> dict[str, Any]:
+    async def _get_metrics(self, request: Request):
         try:
-            metrics_data = self.observability.get_metrics()	 
+            metrics_type = request.query_params.get("type", "full").strip()
+            role = request.query_params.get("role", None)
+            if role is not None:
+                role = role.strip()
+            metrics_data = self.observability.get_metrics(metrics_type=metrics_type, role=role)
+            # Prometheus text (full / single-role) returned as plain text;
+            # structured data (instance / all-role) returned as JSON.
+            if isinstance(metrics_data, str):
+                return PlainTextResponse(content=metrics_data)
             return format_success_response(metrics_data)
 
         except Exception as e:
@@ -178,13 +187,15 @@ class ControllerAPI:
     @observability_enabled_required
     async def _get_alarms(self, request: Request) -> dict[str, Any]:
         try:
-            source_id = request.query_params.get("source_id", None)	 
-            alarms = self.observability.get_alarms(source_id=source_id)	 
+            source_id = request.query_params.get("source_id", None)
+            alarms = self.observability.get_alarms(source_id=source_id)
 
-            return format_success_response({ 
-                "total": len(alarms), 
-                "alarms": alarms, 
-            })
+            return format_success_response(
+                {
+                    "total": len(alarms),
+                    "alarms": alarms,
+                }
+            )
         except Exception as e:
             logger.error("Failed to get alarms: %s", e)
             raise_internal_error(f"Internal server error: {str(e)}")
@@ -201,7 +212,7 @@ class ControllerAPI:
             "/observability/add_alarm": logging.INFO,
             "/startup": logging.ERROR,
             "/readiness": logging.ERROR,
-            "/liveness": logging.ERROR
+            "/liveness": logging.ERROR,
         }
         logging.getLogger("uvicorn.access").addFilter(ApiAccessFilter(api_filters))
 
@@ -314,23 +325,11 @@ class ControllerAPI:
         msg = "message"
         reason = "reason"
         if status.get("overall_healthy") is False:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    msg: "Controller is not ready",
-                    reason: "Overall not healthy"
-                }
-            )
+            raise HTTPException(status_code=503, detail={msg: "Controller is not ready", reason: "Overall not healthy"})
 
         if status.get("deploy_mode") == "master_standby":
             if status.get("role") != StandbyRole.MASTER.value:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        msg: "Controller is not ready",
-                        reason: "Not master"
-                    }
-                )
+                raise HTTPException(status_code=503, detail={msg: "Controller is not ready", reason: "Not master"})
         return {msg: "Controller is ready"}
 
     def _get_controller_status(self) -> dict:
@@ -357,17 +356,13 @@ class ControllerAPI:
 
         # Check module health
         # In master_standby mode, standby node doesn't run modules, so don't check health
-        if (
-            enable_master_standby
-            and StandbyManager.is_initialized()
-            and not StandbyManager().is_master()
-        ):
+        if enable_master_standby and StandbyManager.is_initialized() and not StandbyManager().is_master():
             # Standby node: modules are not running, but this is expected
             status["overall_healthy"] = True
         else:
             unhealthy_modules = []
             for name, module in self.modules.items():
-                if not hasattr(module, 'is_alive'):
+                if not hasattr(module, "is_alive"):
                     continue
                 alive = module.is_alive()
                 if not alive:
@@ -392,23 +387,17 @@ class ControllerAPI:
         # Even standby controllers should be considered alive
         if status.get("overall_healthy") is False:
             raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "Controller is not alive",
-                    "reason": "Overall not healthy"
-                }
+                status_code=503, detail={"message": "Controller is not alive", "reason": "Overall not healthy"}
             )
         else:
             return {"message": "Controller is alive"}
 
-    async def _add_alarm(self, request: Request) -> dict:	 
-        body = await request.json()	 
-        try:	 
-            if not self.enable_observability_api: 
-                return format_success_response( 
-                    message="OM is not enabled." 
-                ) 
-            record = Record(**body) 
+    async def _add_alarm(self, request: Request) -> dict:
+        body = await request.json()
+        try:
+            if not self.enable_observability_api:
+                return format_success_response(message="OM is not enabled.")
+            record = Record(**body)
             self.observability.add_alarm(record)
             return format_success_response()
         except Exception as e:
@@ -425,8 +414,8 @@ class ControllerAPI:
             "/observability/alarms": logging.ERROR,
         }
         logging.getLogger("uvicorn.access").addFilter(ApiAccessFilter(api_filters))
-        
-        # Register middleware check role 
+
+        # Register middleware check role
         app.middleware("http")(self._master_standby_middleware)
 
         # Register observability routes
@@ -437,26 +426,22 @@ class ControllerAPI:
 
         return app
 
-    async def _master_standby_middleware(self, request: Request, call_next):	 
-        # if enable master/standby and is standby role then raise exception 
-        if (
-            self.enable_master_standby
-            and StandbyManager.is_initialized()
-            and not StandbyManager().is_master()
-        ): 
-            # raise exception at the middleware layer is an incorrect way. It is better to construct the response. 
-            raise_internal_error("This controller is not master") 
-        # master continue 
-        response = await call_next(request) 
+    async def _master_standby_middleware(self, request: Request, call_next):
+        # if enable master/standby and is standby role then raise exception
+        if self.enable_master_standby and StandbyManager.is_initialized() and not StandbyManager().is_master():
+            # raise exception at the middleware layer is an incorrect way. It is better to construct the response.
+            raise_internal_error("This controller is not master")
+        # master continue
+        response = await call_next(request)
         return response
 
     def _run_observability_api_server(self) -> None:
         try:
             server_config = uvicorn.Config(
-                self.observability_app, 
-                host=self.observability_api_host, 
-                port=self.observability_api_port, 
-                log_level="info"
+                self.observability_app,
+                host=self.observability_api_host,
+                port=self.observability_api_port,
+                log_level="info",
             )
             if self.observability_tls_config.enable_tls:
                 server_config.load()
@@ -465,12 +450,16 @@ class ControllerAPI:
                     raise RuntimeError("Failed to create SSL context")
 
                 server_config.ssl = context
-                logger.info(f"Starting observability API server on https://"
-                            f"{self.observability_api_host}:{self.observability_api_port}")
+                logger.info(
+                    f"Starting observability API server on https://"
+                    f"{self.observability_api_host}:{self.observability_api_port}"
+                )
             else:
-                logger.info(f"Starting observability API server on http://"
-                            f"{self.observability_api_host}:{self.observability_api_port}")
-  
+                logger.info(
+                    f"Starting observability API server on http://"
+                    f"{self.observability_api_host}:{self.observability_api_port}"
+                )
+
             self.observability_server = uvicorn.Server(server_config)
             self.observability_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.observability_loop)

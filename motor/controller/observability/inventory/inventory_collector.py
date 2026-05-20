@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -80,8 +79,7 @@ def _get_instance_info_from_instance(instance: Instance, instance_status: Instan
         pod_associated_info_list = []
         for _, endpoint_info in pod_info.items():
             for device_info in endpoint_info.device_infos:
-                new_pod_info = {NPU_ID: device_info.device_id,
-                                NPU_IP: device_info.device_ip}
+                new_pod_info = {NPU_ID: device_info.device_id, NPU_IP: device_info.device_ip}
                 pod_associated_info_list.append(new_pod_info)
 
         new_pod_info = {POD_ASSOCIATED_INFO_LIST: pod_associated_info_list, POD_ID: pod_ip, POD_NAME: ""}
@@ -93,7 +91,7 @@ def _get_instance_info_from_instance(instance: Instance, instance_status: Instan
         "InstanceStatus": instance_status,
         "podInfoList": pod_info_list,
         SERVER_IP_LIST: list(set(server_ip_list)),
-        "serverList": []
+        "serverList": [],
     }
     return instance_info
 
@@ -110,13 +108,15 @@ class InventoryCollector(ThreadSafeSingleton):
         self.initial_instance_list = InstanceManager().get_initial_instances()
         self.inactive_instance_list = InstanceManager().get_inactive_instances()
         model_id = os.getenv(MODEL_ID, "")
-        model_service_info = {"inventories": self._collect_inventory_detail(),
-                              "inferenceFrameworkType": f"motor-{os.getenv('ENGINE_TYPE', '').lower()}",
-                              "modelID": model_id,
-                              "modelName": self._get_model_name(),
-                              "modelState": self._get_model_state(),
-                              "modelType": self._get_model_name(),
-                              "timestamp": int(time.time() * 1000)}
+        model_service_info = {
+            "inventories": self._collect_inventory_detail(),
+            "inferenceFrameworkType": f"motor-{os.getenv('ENGINE_TYPE', '').lower()}",
+            "modelID": model_id,
+            "modelName": self._get_model_name(),
+            "modelState": self._get_model_state(),
+            "modelType": self._get_model_name(),
+            "timestamp": int(time.time() * 1000),
+        }
         return model_service_info
 
     def _collect_inventory_detail(self) -> dict:
@@ -127,17 +127,18 @@ class InventoryCollector(ThreadSafeSingleton):
         for instance_info in d_instance_list:
             all_server_ip_list.extend(instance_info.get(SERVER_IP_LIST))
 
-        inventory_detail = {"DInstanceList": d_instance_list,
-                            "PInstanceList": p_instance_list,
-                            "DPGroupList": self._get_dp_group_list(),
-                            "PDHybridList": [],
-                            "backupServerList": _get_backup_server_list(),
-                            "expertList": _get_expert_list(),
-                            SERVER_IP_LIST: list(set(all_server_ip_list)),
-                            "serverOfCoordinator": _get_server_of_coordinator(),
-                            "serverOfManagerMaster": _get_server_of_controller_master(),
-                            "serverOfManagerSlave": _get_server_of_controller_slave()
-                            }
+        inventory_detail = {
+            "DInstanceList": d_instance_list,
+            "PInstanceList": p_instance_list,
+            "DPGroupList": self._get_dp_group_list(),
+            "PDHybridList": [],
+            "backupServerList": _get_backup_server_list(),
+            "expertList": _get_expert_list(),
+            SERVER_IP_LIST: list(set(all_server_ip_list)),
+            "serverOfCoordinator": _get_server_of_coordinator(),
+            "serverOfManagerMaster": _get_server_of_controller_master(),
+            "serverOfManagerSlave": _get_server_of_controller_slave(),
+        }
         return inventory_detail
 
     def _get_dp_group_list(self):
@@ -158,28 +159,25 @@ class InventoryCollector(ThreadSafeSingleton):
                     # every endpoint_info equals to one dp
                     npu_info_list = []
                     for device_info in endpoint_info.device_infos:
-                        npu_info = {NPU_ID: device_info.device_id,
-                                    NPU_IP: device_info.device_ip
-                                    }
+                        npu_info = {NPU_ID: device_info.device_id, NPU_IP: device_info.device_ip}
                         npu_info_list.append(npu_info)
                     pod_npu_info_list.extend(npu_info_list)
-                    server_info = {"NPUInfoList": npu_info_list,
-                                   "serverID": host_ip, "serverIP": pod_ip, "serverName": ""
-                                   }
-                    new_pod_info = {POD_ASSOCIATED_INFO_LIST: [],
-                                    POD_ID: pod_ip,
-                                    POD_NAME: ""
-                                    }
-                    dp_info = {"DPID": endpoint_id, "DPName": "",
-                               "DPRole": DPRole.CENTRAL, "PDInstID": temp_instance_name,
-                               "podInfoList": [new_pod_info],
-                               "serverList": [server_info]
-                               }
-                    dp_group = {
-                        "DPGroupID": endpoint_id,
-                        "DPGroupName": endpoint_id,
-                        "DPList": [dp_info]
+                    server_info = {
+                        "NPUInfoList": npu_info_list,
+                        "serverID": host_ip,
+                        "serverIP": pod_ip,
+                        "serverName": "",
                     }
+                    new_pod_info = {POD_ASSOCIATED_INFO_LIST: [], POD_ID: pod_ip, POD_NAME: ""}
+                    dp_info = {
+                        "DPID": endpoint_id,
+                        "DPName": "",
+                        "DPRole": DPRole.CENTRAL,
+                        "PDInstID": temp_instance_name,
+                        "podInfoList": [new_pod_info],
+                        "serverList": [server_info],
+                    }
+                    dp_group = {"DPGroupID": endpoint_id, "DPGroupName": endpoint_id, "DPList": [dp_info]}
                     temp_dp_group_list.append(dp_group)
                 for dp_group in temp_dp_group_list:
                     for dp_info in dp_group["DPList"]:

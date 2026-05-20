@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -10,57 +9,32 @@
 # See the Mulan PSL v2 for more details.
 
 """
-Controller OM metrics collector: client to coordinator for full (aggregated) metrics.
-If the interval between two collections is less than 15 seconds, returns the last
-collected metrics; otherwise fetches from coordinator. Only full metrics are supported,
-not per-instance metrics.
+Controller Observability metrics collector: thin proxy that routes metrics
+requests to the Coordinator. All data processing (aggregation, label injection,
+Prometheus serialization) is handled by the Coordinator.
 """
 
-import threading
-import time
-from typing import Optional
-
-from motor.common.logger import get_logger
 from motor.controller.api_client.coordinator_api_client import CoordinatorApiClient
-from motor.config.controller import ControllerConfig
-
-logger = get_logger(__name__)
 
 
 class MetricsCollector:
     """
-    Client-side metrics collector: fetches full metrics from coordinator with 15s cache.
+    Client-side metrics collector: routes requests to Coordinator.
     """
 
-    def __init__(self, config: ControllerConfig | None = None) -> None:
-        if config is None:
-            config = ControllerConfig()
-        self.config = config
-
-        self._lock = threading.RLock()
-        self._last_metrics: Optional[str] = None
-        self._last_fetch_time: float = 0.0
-        self._cache_ttl_sec = self.config.observability_config.metrics_ttl
+    def __init__(self) -> None:
+        pass
 
     def get_full_metrics(self) -> str:
-        """
-        Get full aggregated metrics. If last fetch was within 15 seconds, returns
-        cached value; otherwise fetches from coordinator and updates cache.
-        Returns empty string on error (and keeps previous cache for next call).
-        """
-        now = time.monotonic()
-        with self._lock:
-            if (self._last_metrics is not None and
-                    (now - self._last_fetch_time) < self._cache_ttl_sec):
-                return self._last_metrics
+        result = CoordinatorApiClient.get_metrics(metrics_type="full")
+        return result if result is not None else ""
 
-        metrics = CoordinatorApiClient.get_full_metrics()
-        with self._lock:
-            if metrics is not None:
-                self._last_metrics = metrics
-                self._last_fetch_time = time.monotonic()
-                return self._last_metrics
-            # On failure, return last cached if any
-            if self._last_metrics is not None:
-                return self._last_metrics
+    def get_instance_metrics_prometheus(self) -> str:
+        result = CoordinatorApiClient.get_metrics(metrics_type="instance")
+        return result if result is not None else ""
+
+    def get_role_metrics(self, role: str | None = None) -> str:
+        result = CoordinatorApiClient.get_metrics(metrics_type="role", role=role)
+        if result is None:
             return ""
+        return result

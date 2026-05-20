@@ -57,6 +57,17 @@ spec:
             app: mindie-motor-controller
           sessionAffinity: None
           type: ClusterIP
+      - name: mindie-motor-observability
+        spec:
+          ports:
+          - nodePort: 31027
+            port: 1027
+            protocol: TCP
+            targetPort: 1027
+          selector:
+            app: mindie-motor-controller
+          sessionAffinity: None
+          type: NodePort
       workload:
         apiVersion: apps/v1
         kind: Deployment

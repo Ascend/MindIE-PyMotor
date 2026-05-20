@@ -12,6 +12,7 @@
 
 import asyncio
 import os
+import threading
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import requests
@@ -21,7 +22,7 @@ from urllib.parse import urlparse
 
 from motor.common.resources.instance import Instance, PDRole, Endpoint
 from motor.coordinator.domain.instance_manager import InstanceManager
-from motor.coordinator.metrics.metrics_collector import MetricsCollector, MetricType, SingleMetric
+from motor.coordinator.metrics.metrics_collector import MetricsCollector, MetricType, Metric
 from motor.config.coordinator import CoordinatorConfig
 from motor.common.utils.singleton import ThreadSafeSingleton
 
@@ -34,7 +35,7 @@ def _cleanup_singletons():
         if singleton_cls in ThreadSafeSingleton._instances:
             instance = ThreadSafeSingleton._instances[singleton_cls]
             try:
-                if hasattr(instance, 'stop'):
+                if hasattr(instance, "stop"):
                     stop_result = instance.stop()
                     # If stop() returns a coroutine, run it to avoid "never awaited" warning
                     if asyncio.iscoroutine(stop_result):
@@ -77,6 +78,7 @@ class MockResponse:
     def json(self):
         return self.json_data
 
+
 class TestMetrics:
     def setup_method(self):
         # Create config for testing
@@ -94,27 +96,21 @@ class TestMetrics:
             model_name="test-model",
             id=0,
             role=PDRole.ROLE_P,
-            endpoints={
-                "127.0.0.1": { 0: ep0, 1: ep1 }
-            }
+            endpoints={"127.0.0.1": {0: ep0, 1: ep1}},
         )
         self.d_ins = Instance(
             job_name="test-decode",
             model_name="test-model",
             id=1,
             role=PDRole.ROLE_D,
-            endpoints={
-                "127.0.0.1": { 2: ep2, 3: ep3 }
-            }
+            endpoints={"127.0.0.1": {2: ep2, 3: ep3}},
         )
         self.h_ins = Instance(
             job_name="test-hybrid",
             model_name="test-model",
             id=2,
             role=PDRole.ROLE_U,
-            endpoints={
-                "127.0.0.1": { 4: ep4, 5: ep5 }
-            }
+            endpoints={"127.0.0.1": {4: ep4, 5: ep5}},
         )
 
         self.metrics_template = self.load_example_metrics()
@@ -127,7 +123,7 @@ class TestMetrics:
         script_path = os.path.abspath(__file__)
         script_dir = os.path.dirname(script_path)
         data_path = os.path.join(script_dir, "metrics_example.txt")
-        with open(data_path, 'r') as f:
+        with open(data_path, "r") as f:
             return f.read().strip()
 
     def clean_instances(self):
@@ -157,9 +153,11 @@ class TestMetrics:
     @staticmethod
     def _test_without_background_thread(test_func):
         """Decorator to run a test without background threads."""
+
         def wrapper(*args, **kwargs):
-            with patch('threading.Thread.start', MagicMock()):
+            with patch("threading.Thread.start", MagicMock()):
                 return test_func(*args, **kwargs)
+
         return wrapper
 
     def load_test_gauge_metric(self):
@@ -170,13 +168,11 @@ class TestMetrics:
 vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruct"} 1.0"""
 
         # metric format
-        metric_gauge = SingleMetric()
+        metric_gauge = Metric()
         metric_gauge.name = "vllm:num_requests_running"
         metric_gauge.help = "Number of requests in model execution batches."
         metric_gauge.type = MetricType.GAUGE
-        metric_gauge.label = [
-            'vllm:num_requests_running{model_name="/job/model/Qwen2.5-0.5B-Instruct"}'
-        ]
+        metric_gauge.label = ['vllm:num_requests_running{model_name="/job/model/Qwen2.5-0.5B-Instruct"}']
         metric_gauge.value = [1.0]
 
         return metric_str_gauge.strip(), copy.deepcopy(metric_gauge)
@@ -191,14 +187,14 @@ vllm:request_success_total{engine="0",finished_reason="length",model_name="/job/
 vllm:request_success_total{engine="0",finished_reason="abort",model_name="/job/model/Qwen2.5-0.5B-Instruct"} 0.0"""
 
         # metric format
-        metric_counter = SingleMetric()
+        metric_counter = Metric()
         metric_counter.name = "vllm:request_success_total"
         metric_counter.help = "Count of successfully processed requests."
         metric_counter.type = MetricType.COUNTER
         metric_counter.label = [
             'vllm:request_success_total{finished_reason="stop",model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
             'vllm:request_success_total{finished_reason="length",model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
-            'vllm:request_success_total{finished_reason="abort",model_name="/job/model/Qwen2.5-0.5B-Instruct"}'
+            'vllm:request_success_total{finished_reason="abort",model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
         ]
         metric_counter.value = [1.0, 2.0, 0.0]
 
@@ -219,7 +215,7 @@ vllm:request_params_n_count{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instr
 vllm:request_params_n_sum{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruct"} 3.0"""
 
         # metric format
-        metric_histogram = SingleMetric()
+        metric_histogram = Metric()
         metric_histogram.name = "vllm:request_params_n"
         metric_histogram.help = "Histogram of the n request parameter."
         metric_histogram.type = MetricType.HISTOGRAM
@@ -231,7 +227,7 @@ vllm:request_params_n_sum{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
             'vllm:request_params_n_bucket{le="20.0",model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
             'vllm:request_params_n_bucket{le="+Inf",model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
             'vllm:request_params_n_count{model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
-            'vllm:request_params_n_sum{model_name="/job/model/Qwen2.5-0.5B-Instruct"}'
+            'vllm:request_params_n_sum{model_name="/job/model/Qwen2.5-0.5B-Instruct"}',
         ]
         metric_histogram.value = [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
 
@@ -246,7 +242,7 @@ http_request_size_bytes_sum{handler="/v1/completions"} 312.0
 http_request_size_bytes_count{handler="/v1/chat/completions"} 1.0
 http_request_size_bytes_sum{handler="/v1/chat/completions"} 268.0"""
 
-        metric_summary = SingleMetric()
+        metric_summary = Metric()
         metric_summary.name = "http_request_size_bytes"
         metric_summary.help = "Content length of incoming requests by handler. Only value of header is respected. Otherwise ignored. No percentile calculated."
         metric_summary.type = MetricType.SUMMARY
@@ -254,7 +250,7 @@ http_request_size_bytes_sum{handler="/v1/chat/completions"} 268.0"""
             'http_request_size_bytes_count{handler="/v1/completions"}',
             'http_request_size_bytes_sum{handler="/v1/completions"}',
             'http_request_size_bytes_count{handler="/v1/chat/completions"}',
-            'http_request_size_bytes_sum{handler="/v1/chat/completions"}'
+            'http_request_size_bytes_sum{handler="/v1/chat/completions"}',
         ]
         metric_summary.value = [2.0, 312.0, 1.0, 268.0]
 
@@ -276,7 +272,7 @@ http_request_size_bytes_sum{handler="/v1/chat/completions"} 268.0"""
 
         return True
 
-    def check_metrics_equel(self, a: list[SingleMetric], b: list[SingleMetric]) -> bool:
+    def check_metrics_equel(self, a: list[Metric], b: list[Metric]) -> bool:
         if not isinstance(a, list) or not isinstance(b, list):
             return False
 
@@ -297,8 +293,8 @@ http_request_size_bytes_sum{handler="/v1/chat/completions"} 268.0"""
 
         return True
 
-    def metric_add(self, a: SingleMetric, b: SingleMetric) -> SingleMetric:
-        c = SingleMetric(a)
+    def metric_add(self, a: Metric, b: Metric) -> Metric:
+        c = a.copy()
         for i in range(len(a.value)):
             c.value[i] = a.value[i] + b.value[i]
         return c
@@ -312,7 +308,7 @@ http_request_size_bytes_sum{handler="/v1/chat/completions"} 268.0"""
             self.load_test_gauge_metric(),
             self.load_test_counter_metric(),
             self.load_test_histogram_metric(),
-            self.load_test_summary_metric()
+            self.load_test_summary_metric(),
         ]
 
         # create mix data of 4 type metrics
@@ -378,40 +374,27 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         metric_collector._clear_inactive_metrics({})
         assert len(metric_collector._inactive_instance_metrics_aggregate) == 0
 
-        unavailable_pool = {
-            self.p_ins.id: self.p_ins
-        }
+        unavailable_pool = {self.p_ins.id: self.p_ins}
         metric_collector._clear_inactive_metrics(unavailable_pool)
         assert len(metric_collector._inactive_instance_metrics_aggregate) == 0
 
         metric_collector._instance_metrics_cached = {
-            self.p_ins.id: {
-                "metrics": [
-                    metric_gauge,
-                    metric_counter,
-                    metric_histogram,
-                    metric_summary
-                ]
-            }
+            self.p_ins.id: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]}
         }
         metric_collector._clear_inactive_metrics(unavailable_pool)
         assert len(metric_collector._instance_metrics_cached) == 0
         assert self.check_metric_value_equel(
-                        metric_collector._inactive_instance_metrics_aggregate[0].value, 
-                        [0.0] * len(metric_gauge.value)
-                    )
+            metric_collector._inactive_instance_metrics_aggregate[0].value, [0.0] * len(metric_gauge.value)
+        )
         assert self.check_metric_value_equel(
-                        metric_collector._inactive_instance_metrics_aggregate[1].value, 
-                        metric_counter.value
-                    )
+            metric_collector._inactive_instance_metrics_aggregate[1].value, metric_counter.value
+        )
         assert self.check_metric_value_equel(
-                        metric_collector._inactive_instance_metrics_aggregate[2].value, 
-                        metric_histogram.value
-                    )
+            metric_collector._inactive_instance_metrics_aggregate[2].value, metric_histogram.value
+        )
         assert self.check_metric_value_equel(
-                        metric_collector._inactive_instance_metrics_aggregate[3].value, 
-                        metric_summary.value
-                    )
+            metric_collector._inactive_instance_metrics_aggregate[3].value, metric_summary.value
+        )
 
     @_test_without_background_thread
     def test_aggregate_metrics_by_instance(self):
@@ -435,22 +418,8 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         collects = {
             0: {
                 "endpoints": {
-                    0: {
-                        "metrics": [
-                            metric_gauge,
-                            metric_counter,
-                            metric_histogram,
-                            metric_summary
-                        ]
-                    },
-                    1: {
-                        "metrics": [
-                            metric_gauge,
-                            metric_counter,
-                            metric_histogram,
-                            metric_summary
-                        ]
-                    },
+                    0: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
+                    1: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
                 }
             },
         }
@@ -460,26 +429,22 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         assert len(collects) == 1
         assert "endpoints" not in collects[0]
         assert "metrics" in collects[0]
-        assert self.check_metrics_equel(collects[0]["metrics"], [
-            self.metric_add(metric_gauge, metric_gauge),
-            self.metric_add(metric_counter, metric_counter),
-            self.metric_add(metric_histogram, metric_histogram),
-            self.metric_add(metric_summary, metric_summary)
-        ])
+        assert self.check_metrics_equel(
+            collects[0]["metrics"],
+            [
+                self.metric_add(metric_gauge, metric_gauge),
+                self.metric_add(metric_counter, metric_counter),
+                self.metric_add(metric_histogram, metric_histogram),
+                self.metric_add(metric_summary, metric_summary),
+            ],
+        )
         assert len(metric_collector._instance_metrics_cached) == 1
 
         # check function: cache is not empty
         collects = {
             1: {
                 "endpoints": {
-                    2: {
-                        "metrics": [
-                            metric_gauge,
-                            metric_counter,
-                            metric_histogram,
-                            metric_summary
-                        ]
-                    },
+                    2: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
                 }
             },
         }
@@ -489,9 +454,9 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         assert len(collects) == 1
         assert "endpoints" not in collects[1]
         assert "metrics" in collects[1]
-        assert self.check_metrics_equel(collects[1]["metrics"], [
-            metric_gauge, metric_counter, metric_histogram, metric_summary
-        ])
+        assert self.check_metrics_equel(
+            collects[1]["metrics"], [metric_gauge, metric_counter, metric_histogram, metric_summary]
+        )
         assert len(metric_collector._instance_metrics_cached) == 2
 
     @_test_without_background_thread
@@ -513,17 +478,10 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
                     self.metric_add(metric_gauge, metric_gauge),
                     self.metric_add(metric_counter, metric_counter),
                     self.metric_add(metric_histogram, metric_histogram),
-                    self.metric_add(metric_summary, metric_summary)
+                    self.metric_add(metric_summary, metric_summary),
                 ]
             },
-            1: {
-                "metrics": [
-                    metric_gauge,
-                    metric_counter,
-                    metric_histogram,
-                    metric_summary
-                ]
-            },
+            1: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
         }
 
         # check function: empty collects
@@ -535,39 +493,32 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
 
         # check function: collects is not empty
         collects = {
-            1: {
-                "metrics": [
-                    metric_gauge,
-                    metric_counter,
-                    metric_histogram,
-                    metric_summary
-                ]
-            },
+            1: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
         }
         aggregate = metric_collector._aggregate_metrics_all_instance(collects)
         # Just check basic structure (skip detailed comparisons due to threading state issues)
         assert isinstance(aggregate, list)
         assert len(aggregate) == 4
 
-    def show_metrics_detail(self, metrics: list[SingleMetric]):
+    def show_metrics_detail(self, metrics: list[Metric]):
         for metric in metrics:
             print(metric.name, metric.type, metric.label, metric.value)
 
     @_test_without_background_thread
-    def test_aggregate_metric_common(self):
+    def test_aggregate_single_metric(self):
         # ensure MetricsCollector clean
         self.clean_instances()
         metric_collector = MetricsCollector(self.config)
 
-        metric_a = SingleMetric()
+        metric_a = Metric()
         metric_a.name = "test"
         metric_a.type = MetricType.COUNTER
         metric_a.help = "test"
-        metric_b = SingleMetric()
+        metric_b = Metric()
         metric_b.name = "test"
         metric_b.type = MetricType.COUNTER
         metric_b.help = "test"
-        metric_c = SingleMetric()
+        metric_c = Metric()
         metric_c.name = "test"
         metric_c.type = MetricType.COUNTER
         metric_c.help = "test"
@@ -578,7 +529,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         metric_b.value = [1.0, 2.0, 3.0]
         metric_c.label = ["a", "b", "c"]
         metric_c.value = [2.0, 4.0, 6.0]
-        metric_sum = metric_collector._aggregate_metric_common([metric_a, metric_b])
+        metric_sum = metric_collector._aggregate_single_metric([metric_a, metric_b])
         assert self.check_metrics_equel([metric_sum], [metric_c])
 
         metric_a.label = ["a"]
@@ -587,9 +538,8 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         metric_b.value = [1.0, 2.0, 3.0]
         metric_c.label = ["a", "b", "c"]
         metric_c.value = [2.0, 2.0, 3.0]
-        metric_sum = metric_collector._aggregate_metric_common([metric_a, metric_b])
+        metric_sum = metric_collector._aggregate_single_metric([metric_a, metric_b])
         assert self.check_metrics_equel([metric_sum], [metric_c])
-
 
         metric_a.label = ["a", "b", "c"]
         metric_a.value = [1.0, 2.0, 3.0]
@@ -597,7 +547,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         metric_b.value = [1.0, 2.0]
         metric_c.label = ["a", "b", "c"]
         metric_c.value = [2.0, 4.0, 3.0]
-        metric_sum = metric_collector._aggregate_metric_common([metric_a, metric_b])
+        metric_sum = metric_collector._aggregate_single_metric([metric_a, metric_b])
         assert self.check_metrics_equel([metric_sum], [metric_c])
 
         # test mean
@@ -617,9 +567,8 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         metric_b.value = [1.0, 4.0]
         metric_c.label = ["a", "b", "c"]
         metric_c.value = [1.0, 3.0, 1.5]
-        metric_sum = metric_collector._aggregate_metric_common([metric_a, metric_b])
+        metric_sum = metric_collector._aggregate_single_metric([metric_a, metric_b])
         assert self.check_metrics_equel([metric_sum], [metric_c])
-
 
     def load_test_format_diff_metric(self):
         # metric text
@@ -645,33 +594,41 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
 
         # metric format
         metrics_a = []
-        metrics_a.append(SingleMetric())
+        metrics_a.append(Metric())
         metrics_a[0].name = "http_request_duration_highr_seconds_created"
-        metrics_a[0].help = "Latency with many buckets but no API specific labels. Made for more accurate percentile calculations."
+        metrics_a[
+            0
+        ].help = "Latency with many buckets but no API specific labels. Made for more accurate percentile calculations."
         metrics_a[0].type = MetricType.GAUGE
-        metrics_a[0].label = [
-            'http_request_duration_highr_seconds_created'
-        ]
-        metrics_a[0].value = [1.765001778333063e+09]
-        metrics_a.append(SingleMetric())
+        metrics_a[0].label = ["http_request_duration_highr_seconds_created"]
+        metrics_a[0].value = [1.765001778333063e09]
+        metrics_a.append(Metric())
         metrics_a[1].name = "http_request_duration_seconds"
-        metrics_a[1].help = "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        metrics_a[
+            1
+        ].help = (
+            "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        )
         metrics_a[1].type = MetricType.HISTOGRAM
         metrics_a[1].label = []
         metrics_a[1].value = []
 
         metrics_b = []
-        metrics_b.append(SingleMetric())
+        metrics_b.append(Metric())
         metrics_b[0].name = "http_request_duration_highr_seconds_created"
-        metrics_b[0].help = "Latency with many buckets but no API specific labels. Made for more accurate percentile calculations."
+        metrics_b[
+            0
+        ].help = "Latency with many buckets but no API specific labels. Made for more accurate percentile calculations."
         metrics_b[0].type = MetricType.GAUGE
-        metrics_b[0].label = [
-            'http_request_duration_highr_seconds_created'
-        ]
-        metrics_b[0].value = [1.765019286626281e+09]
-        metrics_b.append(SingleMetric())
+        metrics_b[0].label = ["http_request_duration_highr_seconds_created"]
+        metrics_b[0].value = [1.765019286626281e09]
+        metrics_b.append(Metric())
         metrics_b[1].name = "http_request_duration_seconds"
-        metrics_b[1].help = "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        metrics_b[
+            1
+        ].help = (
+            "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        )
         metrics_b[1].type = MetricType.HISTOGRAM
         metrics_b[1].label = [
             'http_request_duration_seconds_bucket{handler="/v1/chat/completions",le="0.1",method="POST"}',
@@ -679,17 +636,19 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             'http_request_duration_seconds_bucket{handler="/v1/chat/completions",le="1.0",method="POST"}',
             'http_request_duration_seconds_bucket{handler="/v1/chat/completions",le="+Inf",method="POST"}',
             'http_request_duration_seconds_count{handler="/v1/chat/completions",method="POST"}',
-            'http_request_duration_seconds_sum{handler="/v1/chat/completions",method="POST"}'
+            'http_request_duration_seconds_sum{handler="/v1/chat/completions",method="POST"}',
         ]
         metrics_b[1].value = [1.0, 1.0, 1.0, 1.0, 1.0, 0.00824622018262744]
-        metrics_b.append(SingleMetric())
+        metrics_b.append(Metric())
         metrics_b[2].name = "http_request_duration_seconds_created"
-        metrics_b[2].help = "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        metrics_b[
+            2
+        ].help = (
+            "Latency with only few buckets by handler. Made to be only used if aggregation by handler is important."
+        )
         metrics_b[2].type = MetricType.GAUGE
-        metrics_b[2].label = [
-            'http_request_duration_seconds_created{handler="/v1/chat/completions",method="POST"}'
-        ]
-        metrics_b[2].value = [1.7650211184341915e+09]
+        metrics_b[2].label = ['http_request_duration_seconds_created{handler="/v1/chat/completions",method="POST"}']
+        metrics_b[2].value = [1.7650211184341915e09]
 
         return metrics_str_a.strip(), copy.deepcopy(metrics_a), metrics_str_b.strip(), copy.deepcopy(metrics_b)
 
@@ -713,19 +672,8 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         collects = {
             0: {
                 "endpoints": {
-                    0: {
-                        "metrics": [
-                            metrics_a[0],
-                            metrics_a[1]
-                        ]
-                    },
-                    1: {
-                        "metrics": [
-                            metrics_b[0],
-                            metrics_b[1],
-                            metrics_b[2]
-                        ]
-                    },
+                    0: {"metrics": [metrics_a[0], metrics_a[1]]},
+                    1: {"metrics": [metrics_b[0], metrics_b[1], metrics_b[2]]},
                 }
             },
         }
@@ -735,23 +683,16 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         assert len(collects) == 1
         assert "endpoints" not in collects[0]
         assert "metrics" in collects[0]
-        assert self.check_metrics_equel(collects[0]["metrics"], [
-            self.metric_add(metrics_a[0], metrics_b[0]),
-            metrics_b[1],
-            metrics_b[2]
-        ])
+        assert self.check_metrics_equel(
+            collects[0]["metrics"], [self.metric_add(metrics_a[0], metrics_b[0]), metrics_b[1], metrics_b[2]]
+        )
         assert len(metric_collector._instance_metrics_cached) == 1
 
         # check function: cache is not empty
         collects = {
             1: {
                 "endpoints": {
-                    2: {
-                        "metrics": [
-                            metrics_a[0],
-                            metrics_a[1]
-                        ]
-                    },
+                    2: {"metrics": [metrics_a[0], metrics_a[1]]},
                 }
             },
         }
@@ -765,7 +706,7 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         assert len(metric_collector._instance_metrics_cached) == 2
 
     @_test_without_background_thread
-    def test_get_serialize_metrics(self):
+    def test_format_prometheus(self):
         metric_collector = MetricsCollector(self.config)
 
         # create 4-type metric
@@ -773,25 +714,17 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         metric_str_counter, metric_counter = self.load_test_counter_metric()
         metric_str_histogram, metric_histogram = self.load_test_histogram_metric()
         metric_str_summary, metric_summary = self.load_test_summary_metric()
-        metric_str_mix = "\n".join([
-            metric_str_gauge,
-            metric_str_counter,
-            metric_str_histogram,
-            metric_str_summary
-        ])
-        metric_mix = [
-            metric_gauge,
-            metric_counter,
-            metric_histogram,
-            metric_summary
-        ]
+        metric_str_mix = "\n".join([metric_str_gauge, metric_str_counter, metric_str_histogram, metric_str_summary])
+        metric_mix = [metric_gauge, metric_counter, metric_histogram, metric_summary]
 
         # check function
-        assert metric_collector._get_serialize_metrics([metric_gauge]) == re.sub(r'engine="\d+",', '', metric_str_gauge)
-        assert metric_collector._get_serialize_metrics([metric_counter]) == re.sub(r'engine="\d+",', '', metric_str_counter)
-        assert metric_collector._get_serialize_metrics([metric_histogram]) == re.sub(r'engine="\d+",', '', metric_str_histogram)
-        assert metric_collector._get_serialize_metrics([metric_summary]) == re.sub(r'engine="\d+",', '', metric_str_summary)
-        assert metric_collector._get_serialize_metrics(metric_mix) == re.sub(r'engine="\d+",', '', metric_str_mix)
+        assert metric_collector._format_prometheus([metric_gauge]) == re.sub(r'engine="\d+",', "", metric_str_gauge)
+        assert metric_collector._format_prometheus([metric_counter]) == re.sub(r'engine="\d+",', "", metric_str_counter)
+        assert metric_collector._format_prometheus([metric_histogram]) == re.sub(
+            r'engine="\d+",', "", metric_str_histogram
+        )
+        assert metric_collector._format_prometheus([metric_summary]) == re.sub(r'engine="\d+",', "", metric_str_summary)
+        assert metric_collector._format_prometheus(metric_mix) == re.sub(r'engine="\d+",', "", metric_str_mix)
 
     def mock_get_all_instances_normal(self):
         available_pool = {
@@ -807,14 +740,14 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         return MockResponse(self.metrics_template, 200)
 
     @pytest.mark.asyncio
-    @patch('motor.coordinator.domain.instance_manager.InstanceManager.get_all_instances', new_callable=AsyncMock)
+    @patch("motor.coordinator.domain.instance_manager.InstanceManager.get_all_instances", new_callable=AsyncMock)
     async def test_get_all_instances(self, mock_get_all_instances):
         mock_get_all_instances.return_value = self.mock_get_all_instances_normal()
 
         result = await InstanceManager().get_all_instances()
         assert result == self.mock_get_all_instances_normal()
 
-    @patch('requests.get')
+    @patch("requests.get")
     def test_requests_get(self, mock_requests_get):
         mock_requests_get.side_effect = self.mock_requests_get_normal
 
@@ -829,23 +762,17 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             assert requests.get(f"http://localhost:{port}/metrics").status_code == 404
 
     def test_prometheus_metrics_handler(self, mock_metrics_collector):
-        # Test with None _last_metrics (initial state)
         mock_metrics_collector._last_metrics = None
-        mock_metrics_collector.prometheus_metrics_handler.return_value = ""
+        mock_metrics_collector.get_metrics.return_value = ""
 
-        result = mock_metrics_collector.prometheus_metrics_handler()
-        assert result is ""  # Initially ""
+        result = mock_metrics_collector.get_metrics(metrics_type="full")
+        assert result == ""
 
-        # Test with set _last_metrics
         mock_metrics_collector._last_metrics = "# HELP test metric\ntest_metric 1.0\n"
         mock_metrics_collector._last_instance_metrics = {0: []}
-        mock_metrics_collector.prometheus_metrics_handler.return_value = "# HELP test metric\ntest_metric 1.0\n"
-        mock_metrics_collector.prometheus_instance_metrics_handler.return_value = {0: []}
+        mock_metrics_collector.get_metrics.return_value = "# HELP test metric\ntest_metric 1.0\n"
 
-        result = mock_metrics_collector.prometheus_metrics_handler()
-        assert result is not None
-
-        result = mock_metrics_collector.prometheus_instance_metrics_handler()
+        result = mock_metrics_collector.get_metrics(metrics_type="full")
         assert result is not None
 
     def mock_requests_get_with_abnormal(self, *args, **kwargs):
@@ -855,15 +782,296 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         return MockResponse(None, 404)
 
     def test_prometheus_metrics_handler_abnormal(self, mock_metrics_collector):
-        # Test with empty _last_metrics
         mock_metrics_collector._last_metrics = ""
         mock_metrics_collector._last_instance_metrics = {}
-        mock_metrics_collector.prometheus_metrics_handler.return_value = ""
-        mock_metrics_collector.prometheus_instance_metrics_handler.return_value = {}
+        mock_metrics_collector.get_metrics.return_value = ""
 
-        result = mock_metrics_collector.prometheus_metrics_handler()
-        assert result == ""  # Should return empty string
+        result = mock_metrics_collector.get_metrics(metrics_type="full")
+        assert result == ""
 
-        result = mock_metrics_collector.prometheus_instance_metrics_handler()
-        assert result == {}  # Should return empty dict
 
+# ---------------------------------------------------------------------------
+# Tests for _inject_labels label injection
+# ---------------------------------------------------------------------------
+
+
+def test_inject_labels_with_existing_braces():
+    metric = Metric(name="vllm:num_requests_running", label=['vllm:num_requests_running{model="qwen"}'])
+    result = MetricsCollector._inject_labels(metric, role="prefill")
+    assert result.label == ['vllm:num_requests_running{role="prefill",model="qwen"}']
+
+
+def test_inject_labels_without_braces():
+    metric = Metric(name="vllm:num_requests_running", label=["vllm:num_requests_running"])
+    result = MetricsCollector._inject_labels(metric, role="prefill")
+    assert result.label == ['vllm:num_requests_running{role="prefill"}']
+
+
+# ---------------------------------------------------------------------------
+# Tests for _inject_labels
+# ---------------------------------------------------------------------------
+
+
+def test_inject_instance_labels_to_single_metric():
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = [
+        'vllm:num_requests_running{model="qwen"}',
+        'vllm:num_requests_running{model="qwen2"}',
+    ]
+    metric.value = [5.0, 3.0]
+
+    result = MetricsCollector._inject_labels(metric, instance_id="1", role="prefill")
+
+    assert result.name == metric.name
+    assert result.value == metric.value
+    assert result.label == [
+        'vllm:num_requests_running{instance_id="1",role="prefill",model="qwen"}',
+        'vllm:num_requests_running{instance_id="1",role="prefill",model="qwen2"}',
+    ]
+
+
+def test_inject_role_label_to_single_metric():
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    result = MetricsCollector._inject_labels(metric, role="prefill")
+
+    assert result.label == ['vllm:num_requests_running{role="prefill",model="qwen"}']
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_instance_metrics_prometheus
+# ---------------------------------------------------------------------------
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_format_instance_metrics_basic():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collector._last_instance_metrics = {0: [metric]}
+    collector._last_instance_roles = {0: "prefill"}
+
+    result = collector._format_instance_metrics()
+
+    assert "instance_id" in result
+    assert "prefill" in result
+    assert "vllm:num_requests_running" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_format_instance_metrics_empty():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    collector._last_instance_metrics = {}
+    collector._last_instance_roles = {}
+
+    result = collector._format_instance_metrics()
+    assert result == ""
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_format_instance_metrics_unknown_role():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [1.0]
+
+    collector._last_instance_metrics = {99: [metric]}
+    collector._last_instance_roles = {}
+
+    result = collector._format_instance_metrics()
+
+    assert 'role="unknown"' in result
+    assert 'instance_id="99"' in result
+    _cleanup_singletons()
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_role_metrics
+# ---------------------------------------------------------------------------
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_build_role_metrics_prefill_and_decode():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric_a = Metric()
+    metric_a.name = "vllm:num_requests_running"
+    metric_a.help = "Number of requests running."
+    metric_a.type = MetricType.GAUGE
+    metric_a.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_a.value = [5.0]
+
+    metric_b = Metric()
+    metric_b.name = "vllm:num_requests_running"
+    metric_b.help = "Number of requests running."
+    metric_b.type = MetricType.GAUGE
+    metric_b.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_b.value = [3.0]
+
+    collector._last_instance_metrics = {0: [metric_a], 1: [metric_b]}
+    collector._last_instance_roles = {0: "prefill", 1: "decode"}
+
+    result = collector._build_role_metrics()
+
+    assert "prefill" in result
+    assert "decode" in result
+    assert "vllm:num_requests_running" in result["prefill"]
+    assert "vllm:num_requests_running" in result["decode"]
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_build_role_metrics_single_role():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [2.0]
+
+    collector._last_instance_metrics = {0: [metric]}
+    collector._last_instance_roles = {0: "prefill"}
+
+    result = collector._build_role_metrics()
+
+    assert "prefill" in result
+    assert "decode" not in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_build_role_metrics_empty():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    collector._last_instance_metrics = {}
+    collector._last_instance_roles = {}
+
+    result = collector._build_role_metrics()
+    assert result == {}
+    _cleanup_singletons()
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_metrics (unified type selection)
+# ---------------------------------------------------------------------------
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_full():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+    collector._last_metrics = "# HELP test metric\ntest_metric 1.0"
+
+    result = collector.get_metrics(metrics_type="full")
+    assert "test_metric" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_instance():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collector._last_instance_metrics = {0: [metric]}
+    collector._last_instance_roles = {0: "prefill"}
+
+    result = collector.get_metrics(metrics_type="instance")
+    assert isinstance(result, str)
+    assert "instance_id" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_role_all():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collector._last_instance_metrics = {0: [metric]}
+    collector._last_instance_roles = {0: "prefill"}
+
+    result = collector.get_metrics(metrics_type="role")
+    assert isinstance(result, str)
+    assert "prefill" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_role_filtered():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric_a = Metric()
+    metric_a.name = "vllm:num_requests_running"
+    metric_a.help = "Number of requests running."
+    metric_a.type = MetricType.GAUGE
+    metric_a.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_a.value = [5.0]
+
+    metric_b = Metric()
+    metric_b.name = "vllm:num_requests_running"
+    metric_b.help = "Number of requests running."
+    metric_b.type = MetricType.GAUGE
+    metric_b.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_b.value = [3.0]
+
+    collector._last_instance_metrics = {0: [metric_a], 1: [metric_b]}
+    collector._last_instance_roles = {0: "prefill", 1: "decode"}
+
+    result = collector.get_metrics(metrics_type="role", role="prefill")
+    assert isinstance(result, str)
+    assert "prefill" in result
+    assert "decode" not in result
+    _cleanup_singletons()

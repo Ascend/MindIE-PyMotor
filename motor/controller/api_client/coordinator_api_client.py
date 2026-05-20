@@ -35,14 +35,17 @@ class CoordinatorApiClient:
             if event_msg.instances and len(event_msg.instances) > 0:
                 job_names = [instance.job_name for instance in event_msg.instances]
                 job_names_str = ", ".join(job_names)
-                logger.info("Event pushed type: %s, job names: [%s], response: %s",
-                            event_msg.event, job_names_str, response_text)
+                logger.info(
+                    "Event pushed type: %s, job names: [%s], response: %s",
+                    event_msg.event,
+                    job_names_str,
+                    response_text,
+                )
             else:
-                logger.info("Event pushed type: %s, push all instances, response: %s",
-                            event_msg.event, response_text)
+                logger.info("Event pushed type: %s, push all instances, response: %s", event_msg.event, response_text)
         except Exception as e:
             is_succeed = False
-            address = client_ars.get('address', 'unknown')
+            address = client_ars.get("address", "unknown")
             logger.error("Exception occurred while pushing event, %s, %s", address, e)
         finally:
             if client is not None:
@@ -62,21 +65,33 @@ class CoordinatorApiClient:
 
     @staticmethod
     def get_full_metrics() -> str | None:
+        """Get full aggregated metrics from coordinator (delegates to get_metrics)."""
+        return CoordinatorApiClient.get_metrics(metrics_type="full")
+
+    @staticmethod
+    def get_metrics(metrics_type: str = "full", role: str | None = None) -> str | None:
         """
-        Get full aggregated metrics from coordinator (GET /metrics, plain text).
-        Returns None on failure.
+        Get metrics from coordinator with type selection.
+        Calls GET /metrics?type=<metrics_type>&role=<role>.
+        Returns Prometheus text, or None on failure.
         """
         client = None
         try:
             client_ars = CoordinatorApiClient._generate_client_args()
             client = SafeHTTPSClient(**client_ars, timeout=5.0)
-            response = client.do_get("/metrics")
+            url = f"/metrics?type={metrics_type}"
+            if role:
+                url += f"&role={role}"
+            response = client.do_get(url)
             if response and response.ok:
-                return response.text
+                content_type = response.headers.get("content-type", "")
+                if "text/plain" in content_type:
+                    return response.text
+                return response.json()
             return None
         except Exception as e:
             address = CoordinatorApiClient._generate_client_args().get("address", "unknown")
-            logger.error("Failed to get full metrics from coordinator %s: %s", address, e)
+            logger.error("Failed to get metrics from coordinator %s: %s", address, e)
             return None
         finally:
             if client is not None:
