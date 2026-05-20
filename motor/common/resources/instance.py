@@ -39,10 +39,17 @@ class PDRole(str, Enum):
     ROLE_E = "encode"
     ROLE_P = "prefill"
     ROLE_D = "decode"
-    ROLE_U = "both"
+    ROLE_U = "union"
 
     def __repr__(self) -> str:
         return str.__repr__(self.value)
+
+    @classmethod
+    def _missing_(cls, value):
+        # Accept historical hybrid literal.
+        if isinstance(value, str) and value == "both":
+            return cls.ROLE_U
+        return super()._missing_(value)
 
 
 # Instance condition event

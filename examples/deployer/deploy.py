@@ -32,7 +32,7 @@ from lib.generator.infer_service import (
 from lib.generator.mf_store import generate_yaml_mf_store
 from lib.config_validator import (
     validate_deploy_mode_consistency, validate_deploy_mode_value,
-    validate_only_instance_changed, resolve_config_paths
+    validate_only_instance_changed, resolve_config_paths, validate_pd_hybrid_config
 )
 
 
@@ -44,6 +44,11 @@ def handle_update_config(user_config):
                                 "Please deploy once before updating configmap.")
 
     baseline_deploy = baseline_config[C.MOTOR_DEPLOY_CONFIG]
+    if deploy_config.get(C.HYBRID_INSTANCES_NUM) != baseline_deploy.get(C.HYBRID_INSTANCES_NUM):
+        raise ValueError(
+            f"{C.HYBRID_INSTANCES_NUM} in user_config differs from the deployed baseline. "
+            "Use --update_instance_num to scale instances instead of --update_config."
+        )
     if (deploy_config.get(C.P_INSTANCES_NUM) != baseline_deploy.get(C.P_INSTANCES_NUM)
             or deploy_config.get(C.D_INSTANCES_NUM) != baseline_deploy.get(C.D_INSTANCES_NUM)):
         raise ValueError(
@@ -179,6 +184,13 @@ def update_shell_add_kv_patch():
         f.writelines(new_lines)
 
 
+def resolve_deploy_mode_for_services(deploy_config):
+    deploy_mode_arg = get_deploy_mode_from_config(deploy_config)
+    if C.HYBRID_INSTANCES_NUM in deploy_config and deploy_mode_arg == C.DEPLOY_MODE_INFER_SERVICE_SET:
+        return C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML
+    return deploy_mode_arg
+
+
 def deploy_services(user_config, env_config_path, dry_run=False):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     update_kv_pool_enabled_flag(user_config)
@@ -187,7 +199,7 @@ def deploy_services(user_config, env_config_path, dry_run=False):
 
     update_engine_base_name(user_config)
 
-    deploy_mode_arg = get_deploy_mode_from_config(deploy_config)
+    deploy_mode_arg = resolve_deploy_mode_for_services(deploy_config)
     if not dry_run:
         set_env_to_shell(user_config, env_config_path, deploy_mode_arg)
     else:
@@ -261,6 +273,8 @@ def main():
     set_user_config_path(user_config_path)
     os.makedirs(C.OUTPUT_ROOT_PATH, exist_ok=True)
     user_config = read_json(user_config_path)
+    if C.HYBRID_INSTANCES_NUM in user_config.get(C.MOTOR_DEPLOY_CONFIG, {}):
+        validate_pd_hybrid_config(user_config)
     validate_instance_nums(user_config)
 
     if args.update_config:

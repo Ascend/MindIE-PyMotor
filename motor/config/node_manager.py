@@ -37,6 +37,7 @@ MOTOR_NODE_MANAGER_CONFIG_KEY = "motor_nodemanger_config"
 MOTOR_ENGINE_ENCODE_CONFIG_KEY = "motor_engine_encode_config"
 MOTOR_ENGINE_PREFILL_CONFIG_KEY = "motor_engine_prefill_config"
 MOTOR_ENGINE_DECODE_CONFIG_KEY = "motor_engine_decode_config"
+MOTOR_ENGINE_UNION_CONFIG_KEY = "motor_engine_union_config"
 ENGINE_CONFIG_KEY = "engine_config"
 KV_TRANSFER_CONFIG_KEY = "kv_transfer_config"
 KV_CONNECTOR_KEY = "kv_connector"
@@ -279,6 +280,8 @@ class NodeManagerConfig:
             engine_config_key = MOTOR_ENGINE_PREFILL_CONFIG_KEY
         elif Env.role == "decode":
             engine_config_key = MOTOR_ENGINE_DECODE_CONFIG_KEY
+        elif Env.role in ("union", "both"):
+            engine_config_key = MOTOR_ENGINE_UNION_CONFIG_KEY
         
         if not engine_config_key or engine_config_key not in user_cfg:
             return user_cfg
@@ -296,7 +299,7 @@ class NodeManagerConfig:
             engine_config[MODEL_CONFIG_KEY][MODEL_NAME_KEY]
         config_data[BASIC_CONFIG_KEY][HARDWARE_TYPE_KEY] = user_cfg["motor_deploy_config"][HARDWARE_TYPE_KEY]
         
-        if Env.role in ("encode", "prefill", "decode"):
+        if Env.role in ("encode", "prefill", "decode", "union", "both"):
             config_data[BASIC_CONFIG_KEY]["parallel_config"] = \
                 engine_config[MODEL_CONFIG_KEY][PARALLEL_CONFIG_KEY]
             enable_multi_endpoints = engine_config.get(ENABLE_MULTI_ENDPOINTS_KEY, True)
@@ -403,6 +406,8 @@ class NodeManagerConfig:
             device_count = deploy_config.get("p_pod_npu_num", 0)
         elif Env.role == "decode":
             device_count = deploy_config.get("d_pod_npu_num", 0)
+        elif Env.role in ("union", "both"):
+            device_count = deploy_config.get("hybrid_pod_npu_num", 0)
         else:
             device_count = 0
         

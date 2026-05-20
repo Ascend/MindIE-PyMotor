@@ -209,6 +209,36 @@ def pd_engine_config_file():
         pass
 
 
+@pytest.fixture
+def pd_hybrid_engine_config_file():
+    """Create a temporary JSON file with PD hybrid union config structure"""
+    config = {
+        "motor_deploy_config": {
+            "hybrid_instances_num": 1,
+            "single_hybrid_instance_pod_num": 1,
+            "hybrid_pod_npu_num": 4,
+        },
+        "motor_engine_union_config": {
+            "engine_type": "vllm",
+            "model_config": {
+                "model_name": "qwen3-8B",
+                "model_path": "/mnt/weight/qwen3_8B",
+                "npu_mem_utils": 0.9,
+                PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+            },
+            "engine_config": {"max_model_len": 2048},
+        },
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(config, f)
+        temp_path = f.name
+    yield temp_path
+    try:
+        os.unlink(temp_path)
+    except FileNotFoundError:
+        pass
+
+
 def test_deploy_config_load_simple(simple_engine_config_file):
     """Test DeployConfig.load with simple flat config"""
     config = DeployConfig.load(simple_engine_config_file)
@@ -231,6 +261,20 @@ def test_deploy_config_load_with_role_decode(pd_engine_config_file):
     config = DeployConfig.load(pd_engine_config_file, role="decode")
     assert config.engine_type == "vllm"
     assert config.model_config.model_name == "qwen3-8B"
+
+
+def test_deploy_config_load_with_role_union(pd_hybrid_engine_config_file):
+    """Test DeployConfig.load with role=union (PD hybrid config)"""
+    config = DeployConfig.load(pd_hybrid_engine_config_file, role="union")
+    assert config.engine_type == "vllm"
+    assert config.model_config.model_name == "qwen3-8B"
+    assert config.engine_config.get("max_model_len") == 2048
+
+    parallel = config.get_parallel_config("union")
+    assert parallel.dp_size == 2
+    assert parallel.tp_size == 2
+    assert parallel.pp_size == 1
+    assert config.model_config.decode_parallel_config == config.model_config.prefill_parallel_config
 
 
 def test_deploy_config_load_with_health_check(simple_engine_config_file):

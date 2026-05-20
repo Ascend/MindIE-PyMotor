@@ -71,6 +71,12 @@ class Daemon(ThreadSafeSingleton):
 
         return True
 
+    @staticmethod
+    def _to_engine_role(pd_role_info: PDRole) -> str:
+        if pd_role_info == PDRole.ROLE_U:
+            return "union"
+        return str(pd_role_info.value)
+
     def pull_engine(
         self,
         pd_role_info: PDRole,
@@ -83,7 +89,7 @@ class Daemon(ThreadSafeSingleton):
         engine_server parameters:
             --dp-rank engine dpGroup rank
             --engine-id
-            --role  prefill | decode | both
+            --role  prefill | decode | union
             --host engine service ip
             --port engine service port
             --mgmt-port endpoint management port
@@ -106,7 +112,7 @@ class Daemon(ThreadSafeSingleton):
                     "engine_server",
                     "--dp-rank", str(endpoint.id),
                     "--instance-id", str(instance_id),
-                    "--role", str(pd_role_info.value),
+                    "--role", self._to_engine_role(pd_role_info),
                     "--host", str(endpoint.ip),
                     "--port", str(int(endpoint.business_port)),
                     "--mgmt-port", str(int(endpoint.mgmt_port)),

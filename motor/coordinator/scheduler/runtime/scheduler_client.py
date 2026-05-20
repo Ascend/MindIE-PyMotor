@@ -555,7 +555,7 @@ class AsyncSchedulerClient:
         req_info: RequestInfo
     ) -> tuple[Instance, Endpoint, Workload] | None:
         """Select instance locally + ALLOCATE_ONLY RPC. Allocation workload is decided here (RR=zero, LB=demand)."""
-        role_str = role.value if role is not None else (getattr(PDRole.ROLE_U, "value", "both"))
+        role_str = role.value if role is not None else (getattr(PDRole.ROLE_U, "value", "union"))
         cache_role = role if role is not None else PDRole.ROLE_U
 
         if self._workload_reader:
@@ -755,6 +755,7 @@ class AsyncSchedulerClient:
                         "encode": PDRole.ROLE_E,
                         "prefill": PDRole.ROLE_P,
                         "decode": PDRole.ROLE_D,
+                        "union": PDRole.ROLE_U,
                         "both": PDRole.ROLE_U,
                         "hybrid": PDRole.ROLE_U,
                     }

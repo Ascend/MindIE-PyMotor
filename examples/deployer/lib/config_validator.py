@@ -14,6 +14,22 @@ import lib.constant as C
 from lib.utils import logger
 
 
+PD_SEPARATION_DEPLOY_KEYS = {
+    C.P_INSTANCES_NUM,
+    C.D_INSTANCES_NUM,
+    C.SINGER_P_INSTANCES_NUM,
+    C.SINGER_D_INSTANCES_NUM,
+    C.P_POD_NPU_NUM,
+    C.D_POD_NPU_NUM,
+}
+
+PD_HYBRID_REQUIRED_DEPLOY_KEYS = {
+    C.HYBRID_INSTANCES_NUM,
+    C.SINGLE_HYBRID_INSTANCE_POD_NUM,
+    C.HYBRID_POD_NPU_NUM,
+}
+
+
 def resolve_config_paths(config_dir, user_config_path, env_config_path):
     if not config_dir and not user_config_path and not env_config_path:
         logger.error("No configuration provided. Please use one of the following options:")
@@ -65,13 +81,14 @@ def strip_instance_nums(config_dict):
     cleaned = json.loads(json.dumps(config_dict))
     cleaned["motor_deploy_config"].pop(C.P_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.D_INSTANCES_NUM, None)
+    cleaned["motor_deploy_config"].pop(C.HYBRID_INSTANCES_NUM, None)
     return cleaned
 
 
 def validate_only_instance_changed(current_config, baseline_config):
     if strip_instance_nums(current_config) != strip_instance_nums(baseline_config):
         raise ValueError("user_config changes detected beyond instance numbers. "
-                         "Only p_instances_num/d_instances_num can be modified for scaling.")
+                         "Only p_instances_num/d_instances_num/hybrid_instances_num can be modified for scaling.")
 
 
 def validate_deploy_mode_consistency(deploy_config, baseline_config):
@@ -92,3 +109,29 @@ def validate_deploy_mode_value(deploy_mode_arg):
             f"Baseline config has invalid {C.DEPLOY_MODE_CONFIG_KEY}: {deploy_mode_arg}. "
             f"Must be one of {list(C.VALID_DEPLOY_MODES)}."
         )
+
+
+def validate_pd_hybrid_config(user_config):
+    deploy_config = user_config.get(C.MOTOR_DEPLOY_CONFIG, {})
+    if not isinstance(deploy_config, dict):
+        raise ValueError("motor_deploy_config is required for PD hybrid.")
+
+    missing_keys = PD_HYBRID_REQUIRED_DEPLOY_KEYS - deploy_config.keys()
+    if missing_keys:
+        raise ValueError(f"PD hybrid config missing required keys: {sorted(missing_keys)}")
+
+    mixed_deploy_keys = PD_SEPARATION_DEPLOY_KEYS & deploy_config.keys()
+    if mixed_deploy_keys:
+        raise ValueError(f"PD hybrid config cannot include separation keys: {sorted(mixed_deploy_keys)}")
+
+    if "engine_topology" in deploy_config:
+        raise ValueError("PD hybrid config must not include motor_deploy_config.engine_topology.")
+
+    if C.MOTOR_ENGINE_UNION_CONFIG not in user_config:
+        raise ValueError("PD hybrid config requires motor_engine_union_config.")
+    if C.MOTOR_ENGINE_PREFILL_CONFIG in user_config or "motor_engine_decode_config" in user_config:
+        raise ValueError("PD hybrid config cannot include prefill/decode engine config sections.")
+
+    scheduler_config = user_config.get(C.MOTOR_COORDINATOR_CONFIG, {}).get("scheduler_config", {})
+    if scheduler_config.get("deploy_mode") != "single_node":
+        raise ValueError("PD hybrid config requires motor_coordinator_config.scheduler_config.deploy_mode=single_node.")

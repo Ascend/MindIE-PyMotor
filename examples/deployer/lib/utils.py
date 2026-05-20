@@ -140,6 +140,13 @@ def get_json_by_path(data, path, default=None):
 
 
 def obtain_engine_instance_total(deploy_config):
+    if C.HYBRID_INSTANCES_NUM in deploy_config:
+        try:
+            hybrid_instances = int(deploy_config[C.HYBRID_INSTANCES_NUM])
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"{C.HYBRID_INSTANCES_NUM} must be an integer") from e
+        return hybrid_instances, 0
+
     if C.P_INSTANCES_NUM not in deploy_config:
         raise KeyError(f"{C.P_INSTANCES_NUM} is required in motor_deploy_config")
     if C.D_INSTANCES_NUM not in deploy_config:
@@ -188,8 +195,14 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
 
     env_config = read_json(env_config_path)
 
-    engine_type = get_json_by_path(user_config, "motor_engine_prefill_config.engine_type", "Unknown")
-    model_name = get_json_by_path(user_config, "motor_engine_prefill_config.model_config.model_name", "Unknown")
+    engine_type = get_json_by_path(
+        user_config, "motor_engine_prefill_config.engine_type",
+        get_json_by_path(user_config, "motor_engine_union_config.engine_type", "Unknown")
+    )
+    model_name = get_json_by_path(
+        user_config, "motor_engine_prefill_config.model_config.model_name",
+        get_json_by_path(user_config, "motor_engine_union_config.model_config.model_name", "Unknown")
+    )
     north_platform = get_json_by_path(user_config, "north_config.name")
 
     if C.MOTOR_COMMON_ENV not in env_config:
@@ -211,6 +224,11 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
     env_config[C.MOTOR_COMMON_ENV][C.ENV_SERVICE_ID] = service_id
     logger.info(f"Set {C.ENV_SERVICE_ID} environment variable to: {service_id}")
 
+    union_env_key = "motor_engine_union_env"
+    if union_env_key not in env_config:
+        # Backward compatibility: if union env is absent, reuse prefill env as union defaults.
+        env_config[union_env_key] = dict(env_config.get("motor_engine_prefill_env", {}))
+
     update_shell_safely(C.COMMON_SHELL_PATH, env_config, C.MOTOR_COMMON_ENV, "set_common_env")
 
     if deploy_mode == C.DEPLOY_MODE_SINGLE_CONTAINER:
@@ -219,6 +237,7 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_engine_decode_env", "set_decode_env")
+        update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, union_env_key, "set_union_env")
         update_shell_safely(C.SINGLE_CONTAINER_SHELL_PATH, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")
         update_shell_safely(C.MF_STORE_SHELL_PATH, env_config, "motor_mf_store_env", "set_mf_store_env")
         update_shell_safely(
@@ -230,6 +249,7 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
         update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_encode_env", "set_encode_env")
         update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_prefill_env", "set_prefill_env")
         update_shell_safely(C.ENGINE_SHELL_PATH, env_config, "motor_engine_decode_env", "set_decode_env")
+        update_shell_safely(C.ENGINE_SHELL_PATH, env_config, union_env_key, "set_union_env")
         update_shell_safely(C.KV_POOL_SHELL_PATH, env_config, "motor_kv_cache_pool_env", "set_kv_pool_env")
         update_shell_safely(C.MF_STORE_SHELL_PATH, env_config, "motor_mf_store_env", "set_mf_store_env")
         update_shell_safely(

@@ -139,3 +139,16 @@ class TestDaemon:
         assert 12345 in daemon.engine_pids
         # Verify Popen was called
         mock_popen.assert_called_once()
+
+    @patch('subprocess.Popen')
+    def test_hybrid_role_starts_union_engine(self, mock_popen, daemon):
+        mock_process = MagicMock(pid=12345)
+        mock_process.poll.return_value = None
+        mock_popen.return_value = mock_process
+
+        endpoint = Endpoint(id=0, ip="10.0.0.1", business_port="9000", mgmt_port="9090")
+        daemon.pull_engine(PDRole.ROLE_U, [endpoint], instance_id=1, master_dp_ip="192.168.1.100")
+
+        cmd = mock_popen.call_args.args[0]
+        role_arg_index = cmd.index("--role") + 1
+        assert cmd[role_arg_index] == "union"

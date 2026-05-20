@@ -11,6 +11,7 @@
 from typing import Dict, AsyncGenerator, Any
 import asyncio
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import HTTPException
 
 from motor.coordinator.models.request import ReqState
 from motor.coordinator.router.strategies.base import BaseRouter
@@ -21,6 +22,36 @@ from motor.common.resources.instance import PDRole
 
 class PDHybridRouter(BaseRouter):
     """Handle request with a single PD hybrid instance"""
+
+    @staticmethod
+    def _candidate_roles() -> tuple[PDRole, ...]:
+        """
+        Prefer ROLE_U for true hybrid deployments, but keep ROLE_P fallback
+        for PD-separate degradation-to-single-node scenarios.
+        """
+        return (PDRole.ROLE_U, PDRole.ROLE_P)
+
+    async def _prepare_resource_with_fallback(self, attempt: int, max_retry: int):
+        """Fallback to ROLE_P only when scheduling has no ROLE_U resource."""
+        last_error = None
+        for role in self._candidate_roles():
+            try:
+                resource = await self.prepare_resource(role)
+                return resource
+            except HTTPException as role_error:
+                last_error = role_error
+                self.logger.warning(
+                    "Hybrid scheduling with role %s failed on attempt %d/%d: %s",
+                    role,
+                    attempt + 1,
+                    max_retry,
+                    role_error,
+                )
+                continue
+
+        if last_error is not None:
+            raise last_error
+        raise HTTPException(status_code=503, detail="No available instance for hybrid scheduling")
     
     async def handle_request(self) -> StreamingResponse | JSONResponse:
 
@@ -45,10 +76,10 @@ class PDHybridRouter(BaseRouter):
             max_retry = self.config.exception_config.transport_retry_limit
 
             for attempt in range(max_retry):
+                resource = None
                 try:
-                    async with self._manage_resource_context(PDRole.ROLE_P, self.release_all) as resource, \
-                        self._manage_client_context(resource) as client:
-
+                    resource = await self._prepare_resource_with_fallback(attempt, max_retry)
+                    async with self._manage_client_context(resource) as client:
                         async for chunk in self.forward_stream_request(
                                 req_data, client, self.config.exception_config.first_token_timeout
                             ):
@@ -82,6 +113,9 @@ class PDHybridRouter(BaseRouter):
                     wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
                     self.logger.info("Retrying streaming request in %.2f seconds...", wait_time)
                     await asyncio.sleep(wait_time)
+                finally:
+                    if resource is not None:
+                        await self.release_all(resource)
 
     async def _generate_post(self, req_data: Dict[str, Any]) -> JSONResponse:
         """
@@ -95,10 +129,10 @@ class PDHybridRouter(BaseRouter):
             max_retries = self.config.exception_config.transport_retry_limit
 
             for attempt in range(max_retries):
+                resource = None
                 try:
-                    async with self._manage_resource_context(PDRole.ROLE_P, self.release_all) as resource, \
-                                self._manage_client_context(resource) as client:
-
+                    resource = await self._prepare_resource_with_fallback(attempt, max_retries)
+                    async with self._manage_client_context(resource) as client:
                         response = await self.forward_request(
                                 req_data, client, self.config.exception_config.infer_timeout
                             )
@@ -136,3 +170,6 @@ class PDHybridRouter(BaseRouter):
                     self.logger.error("All retries failed for non-streaming decode request.")
                     self.req_info.update_state(ReqState.EXCEPTION)
                     raise e
+                finally:
+                    if resource is not None:
+                        await self.release_all(resource)

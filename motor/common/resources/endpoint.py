@@ -53,7 +53,7 @@ class Workload(BaseModel):
             return self.active_tokens
         elif role_value == "encode":
             return self.active_tokens
-        elif role_value == "both":
+        elif role_value in ("union", "both"):
             return self.active_tokens + self.active_kv_cache * 0.15
         else:
             raise ValueError(f"Invalid role value: {role_value}")

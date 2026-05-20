@@ -305,7 +305,7 @@ class _SchedulerRequestDispatcher:
                 request_id=request.request_id,
                 data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
             )
-        role = PDRole(role_str) if role_str in ("encode", "prefill", "decode", "both") else PDRole.ROLE_U
+        role = PDRole(role_str) if role_str in ("encode", "prefill", "decode", "union", "both") else PDRole.ROLE_U
         params = UpdateWorkloadParams(
             instance_id=iid,
             endpoint_id=eid,

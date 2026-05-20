@@ -1,0 +1,39 @@
+{
+  "version": "v2.0",
+  "motor_deploy_config": {
+    "hybrid_instances_num": 1,
+    "single_hybrid_instance_pod_num": 1,
+    "hybrid_pod_npu_num": 2,
+    "image_name": "",
+    "job_id": "mindie-motor",
+    "hardware_type": "800I_A3",
+    "weight_mount_path": "/mnt/weight/"
+  },
+  "motor_controller_config": {},
+  "motor_coordinator_config": {
+    "scheduler_config": {
+      "deploy_mode": "single_node"
+    }
+  },
+  "motor_engine_union_config": {
+    "engine_type": "vllm",
+    "enable_multi_endpoints": true,
+    "model_config": {
+      "model_name": "qwen3-8B",
+      "model_path": "/mnt/weight/qwen3_8B",
+      "npu_mem_utils": 0.9,
+      "parallel_config": {
+        "dp_size": 1,
+        "tp_size": 1,
+        "pp_size": 1,
+        "enable_ep": false,
+        "dp_rpc_port": 9000,
+        "world_size": 1
+      }
+    },
+    "engine_config": {
+      "enforce-eager": true,
+      "max_model_len": 2048
+    }
+  }
+}

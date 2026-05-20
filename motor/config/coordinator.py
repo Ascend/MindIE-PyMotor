@@ -244,6 +244,9 @@ class DeployConfig:
 
     p_instances_num: int = 1
     d_instances_num: int = 1
+    hybrid_instances_num: Optional[int] = None
+    single_hybrid_instance_pod_num: Optional[int] = None
+    hybrid_pod_npu_num: Optional[int] = None
 
 
 @dataclass
@@ -653,13 +656,25 @@ class CoordinatorConfig:
         master_standby_check_interval = self.standby_config.master_standby_check_interval
         master_lock_ttl = self.standby_config.master_lock_ttl
         master_lock_key = self.standby_config.master_lock_key
+        deploy_summary = (
+            f"    ├─ p_instances_num:     {self.deploy_config.p_instances_num}\n"
+            f"    └─ d_instances_num:     {self.deploy_config.d_instances_num}\n"
+        )
+        if self.deploy_config.hybrid_instances_num is not None:
+            deploy_summary = (
+                f"    ├─ p_instances_num: {self.deploy_config.p_instances_num}\n"
+                f"    ├─ d_instances_num: {self.deploy_config.d_instances_num}\n"
+                f"    ├─ hybrid_instances_num: {self.deploy_config.hybrid_instances_num}\n"
+                f"    ├─ single_hybrid_instance_pod_num: "
+                f"{self.deploy_config.single_hybrid_instance_pod_num}\n"
+                f"    └─ hybrid_pod_npu_num: {self.deploy_config.hybrid_pod_npu_num}\n"
+            )
         return (
             f"{separator}\n"
             f"{title}\n"
             f"{separator}\n"
             "  Deploy Configuration:\n"
-            f"    ├─ p_instances_num:     {self.deploy_config.p_instances_num}\n"
-            f"    └─ d_instances_num:     {self.deploy_config.d_instances_num}\n"
+            f"{deploy_summary}"
             "  Logging Configuration:\n"
             f"    ├─ Log Level:           {self.logging_config.log_level}\n"
             f"    ├─ Log File:            {self.logging_config.host_log_dir}\n"

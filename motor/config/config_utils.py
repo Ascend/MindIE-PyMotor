@@ -46,6 +46,9 @@ KV_CONNECTOR_EXTRA_CONFIG = "kv_connector_extra_config"
 DEPLOY_CONFIG = "deploy_config"
 P_INSTANCES_NUM = "p_instances_num"
 D_INSTANCES_NUM = "d_instances_num"
+HYBRID_INSTANCES_NUM = "hybrid_instances_num"
+SINGLE_HYBRID_INSTANCE_POD_NUM = "single_hybrid_instance_pod_num"
+HYBRID_POD_NPU_NUM = "hybrid_pod_npu_num"
 
 
 class ConfigKey(Enum):
@@ -168,9 +171,20 @@ def _update_instances_num(
     if not isinstance(deploy_config, dict):
         return
 
+    hybrid_instances = deploy_config.get(HYBRID_INSTANCES_NUM)
+    if hybrid_instances is not None:
+        updated_config[DEPLOY_CONFIG] = {
+            P_INSTANCES_NUM: hybrid_instances,
+            D_INSTANCES_NUM: hybrid_instances,
+            HYBRID_INSTANCES_NUM: hybrid_instances,
+            SINGLE_HYBRID_INSTANCE_POD_NUM: deploy_config.get(SINGLE_HYBRID_INSTANCE_POD_NUM),
+            HYBRID_POD_NPU_NUM: deploy_config.get(HYBRID_POD_NPU_NUM),
+        }
+        return
+
     updated_config[DEPLOY_CONFIG] = {
         P_INSTANCES_NUM: deploy_config.get(P_INSTANCES_NUM, 1),
-        D_INSTANCES_NUM: deploy_config.get(D_INSTANCES_NUM, 1)
+        D_INSTANCES_NUM: deploy_config.get(D_INSTANCES_NUM, 1),
     }
 
 

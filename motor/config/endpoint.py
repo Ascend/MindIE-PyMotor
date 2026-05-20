@@ -27,6 +27,7 @@ supported_role = ["encode", "prefill", "decode", "union"]
 MOTOR_ENGINE_ENCODE_CONFIG_KEY = "motor_engine_encode_config"
 MOTOR_ENGINE_PREFILL_CONFIG_KEY = "motor_engine_prefill_config"
 MOTOR_ENGINE_DECODE_CONFIG_KEY = "motor_engine_decode_config"
+MOTOR_ENGINE_UNION_CONFIG_KEY = "motor_engine_union_config"
 MODEL_CONFIG_KEY = "model_config"
 PARALLEL_CONFIG_KEY = "parallel_config"
 ENCODE_PARALLEL_CONFIG_KEY = "encode_parallel_config"
@@ -126,7 +127,15 @@ class DeployConfig:
         with open(file_path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
         data = raw_data
-        if isinstance(raw_data, dict) and (
+        if isinstance(raw_data, dict) and MOTOR_ENGINE_UNION_CONFIG_KEY in raw_data:
+            data = raw_data.get(MOTOR_ENGINE_UNION_CONFIG_KEY, {})
+            _update_engine_server_tls_config(data, raw_data)
+
+            model_cfg = data.get(MODEL_CONFIG_KEY, {})
+            if PARALLEL_CONFIG_KEY in model_cfg:
+                model_cfg.setdefault(PREFILL_PARALLEL_CONFIG_KEY, model_cfg[PARALLEL_CONFIG_KEY])
+                model_cfg.setdefault(DECODE_PARALLEL_CONFIG_KEY, model_cfg[PARALLEL_CONFIG_KEY])
+        elif isinstance(raw_data, dict) and (
                 MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
                 or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
         ):

@@ -417,3 +417,45 @@ def test_from_json_success():
     assert config.basic_config.model_name == "test_model"
     assert config.logging_config.log_level == "DEBUG"
     assert config.logging_config.log_max_line_length == 4096
+
+
+@patch.dict('os.environ', {'ROLE': 'both'})
+def test_from_json_loads_union_config_for_hybrid():
+    """Test NodeManagerConfig loads union engine config for PD hybrid."""
+    user_config = {
+        "motor_deploy_config": {
+            "hardware_type": "800I-A3",
+            "hybrid_instances_num": 1,
+            "single_hybrid_instance_pod_num": 1,
+            "hybrid_pod_npu_num": 4,
+        },
+        "motor_engine_union_config": {
+            "engine_type": "vllm",
+            "enable_multi_endpoints": True,
+            "model_config": {
+                "model_name": "qwen3-8B",
+                "model_path": "/mnt/weight/qwen3_8B",
+                "npu_mem_utils": 0.9,
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+            },
+            "engine_config": {"max_model_len": 2048},
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        json.dump(user_config, f)
+        temp_path = f.name
+
+    try:
+        config = NodeManagerConfig.from_json(temp_path)
+    finally:
+        os.unlink(temp_path)
+
+    assert config.basic_config.role == PDRole.ROLE_U
+    assert config.basic_config.model_name == "qwen3-8B"
+    assert config.basic_config.hardware_type == "800I-A3"
+    assert config.basic_config.parallel_config.dp_size == 2
+    assert config.basic_config.parallel_config.tp_size == 2
+    assert config.basic_config.parallel_config.pp_size == 1
+    assert config.basic_config.device_num == 4
+    assert config.endpoint_config.endpoint_num == 2

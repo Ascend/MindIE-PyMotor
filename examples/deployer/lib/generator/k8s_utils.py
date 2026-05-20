@@ -67,8 +67,8 @@ def update_kv_pool_enabled_flag(user_config):
     global g_kv_pool_enabled
     g_kv_pool_enabled = False
 
-    kv_connector = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG, {}).get(C.ENGINE_CONFIG, {})\
-        .get(C.KV_TRANSFER_CONFIG, {}).get(C.KV_CONNECTOR, "")
+    engine_section = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG) or user_config.get(C.MOTOR_ENGINE_UNION_CONFIG, {})
+    kv_connector = engine_section.get(C.ENGINE_CONFIG, {}).get(C.KV_TRANSFER_CONFIG, {}).get(C.KV_CONNECTOR, "")
     if kv_connector == C.MULTI_CONNECTOR:
         g_kv_pool_enabled = True
 
@@ -90,7 +90,8 @@ def update_engine_type_flag(user_config):
     global g_mf_store_enabled
     g_mf_store_enabled = False
 
-    g_engine_type = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG, {}).get("engine_type", "")
+    engine_section = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG) or user_config.get(C.MOTOR_ENGINE_UNION_CONFIG, {})
+    g_engine_type = engine_section.get("engine_type", "")
     if g_engine_type == C.ENGINE_TYPE_SGLANG:
         g_mf_store_enabled = True
 
@@ -247,6 +248,8 @@ def modify_sp_block_num(data, pd_flag, config):
         sp_block_num = int(config[C.SINGER_D_INSTANCES_NUM]) * int(config[C.D_POD_NPU_NUM])
     elif pd_flag == C.NODE_TYPE_P:
         sp_block_num = int(config[C.SINGER_P_INSTANCES_NUM]) * int(config[C.P_POD_NPU_NUM])
+    elif pd_flag == C.NODE_TYPE_U:
+        sp_block_num = int(config[C.SINGLE_HYBRID_INSTANCE_POD_NUM]) * int(config[C.HYBRID_POD_NPU_NUM])
     else:
         return
     apply_sp_block_annotation(data[C.METADATA], sp_block_num, hardware_type)
@@ -307,14 +310,18 @@ def exec_all_kubectl_singer(deploy_config, yaml_file):
 
 
 def scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, node_type):
-    """Scale engine instances by type (p or d)."""
+    """Scale engine instances by type (p, d or u)."""
     from lib.generator.engine import obtain_engine_instance_total
     
     job_id = deploy_config[C.CONFIG_JOB_ID]
     totals = obtain_engine_instance_total(deploy_config)
     bases = obtain_engine_instance_total(baseline_deploy_config)
-    total = totals[0] if node_type == C.NODE_TYPE_P else totals[1]
-    base = bases[0] if node_type == C.NODE_TYPE_P else bases[1]
+    if node_type in (C.NODE_TYPE_P, C.NODE_TYPE_U):
+        total = totals[0]
+        base = bases[0]
+    else:
+        total = totals[1]
+        base = bases[1]
     if total < base:
         logger.info(f"Scale-in {node_type} instance, {base} -> {total}")
         for index in reversed(range(total, base)):
@@ -331,6 +338,11 @@ def scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_
 
 def elastic_distributed_engine_deploy(deploy_config, baseline_deploy_config, out_deploy_yaml_path):
     """Elastic distributed engine deployment - scale in/out engine instances."""
+    if C.HYBRID_INSTANCES_NUM in deploy_config:
+        scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, C.NODE_TYPE_U)
+        logger.info("Engine scale done.")
+        return
+
     scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, C.NODE_TYPE_P)
     scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, C.NODE_TYPE_D)
     logger.info("Engine scale done.")

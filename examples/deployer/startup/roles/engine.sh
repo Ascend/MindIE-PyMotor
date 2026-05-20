@@ -9,8 +9,8 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-if [ "$ROLE" != "encode" ] && [ "$ROLE" != "prefill" ] && [ "$ROLE" != "decode" ]; then
-    echo "Error: This script is for prefill or decode role only. Current ROLE=$ROLE"
+if [ "$ROLE" != "encode" ] && [ "$ROLE" != "prefill" ] && [ "$ROLE" != "decode" ] && [ "$ROLE" != "union" ]; then
+    echo "Error: This script is for encode/prefill/decode/union role only. Current ROLE=$ROLE"
     exit 1
 fi
 
@@ -24,7 +24,7 @@ set_cann_env
 set_mf_store_env
 
 # CRD scenario: refresh JOB_NAME with INFER_SERVICE_INDEX and INSTANCE_INDEX injected by CRD
-# Final format: {namespace}-{InferServiceSet_name}-{INFER_SERVICE_INDEX}-p/d{INSTANCE_INDEX}
+# Final format: {namespace}-{InferServiceSet_name}-{INFER_SERVICE_INDEX}-p/d/u{INSTANCE_INDEX}
 if [ -n "$INFER_SERVICE_INDEX" ] && [ -n "$INSTANCE_INDEX" ]; then
     if [ "$ROLE" = "encode" ]; then
         export JOB_NAME="${JOB_NAME}-${INFER_SERVICE_INDEX}-e${INSTANCE_INDEX}"
@@ -32,6 +32,8 @@ if [ -n "$INFER_SERVICE_INDEX" ] && [ -n "$INSTANCE_INDEX" ]; then
         export JOB_NAME="${JOB_NAME}-${INFER_SERVICE_INDEX}-p${INSTANCE_INDEX}"
     elif [ "$ROLE" = "decode" ]; then
         export JOB_NAME="${JOB_NAME}-${INFER_SERVICE_INDEX}-d${INSTANCE_INDEX}"
+    elif [ "$ROLE" = "union" ]; then
+        export JOB_NAME="${JOB_NAME}-${INFER_SERVICE_INDEX}-u${INSTANCE_INDEX}"
     fi
     echo "CRD mode: JOB_NAME refreshed to $JOB_NAME"
 fi
@@ -46,6 +48,8 @@ elif [ "$ROLE" = "decode" ]; then
     set_decode_env
 elif [ "$ROLE" = "prefill" ]; then
     set_prefill_env
+elif [ "$ROLE" = "union" ]; then
+    set_union_env
 fi
 
 python3 -m motor.node_manager.main &

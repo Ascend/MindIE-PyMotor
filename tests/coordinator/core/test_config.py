@@ -181,6 +181,43 @@ def test_from_json_success(temp_json_file):
     assert config.config_path == temp_json_file
 
 
+def test_from_json_maps_hybrid_instances(temp_json_file):
+    """Test PD hybrid deploy config maps hybrid instances for runtime compatibility"""
+    user_config = {
+        "motor_deploy_config": {
+            "hybrid_instances_num": 3,
+            "single_hybrid_instance_pod_num": 1,
+            "hybrid_pod_npu_num": 4,
+        },
+        "motor_coordinator_config": {
+            "scheduler_config": {
+                "deploy_mode": "single_node",
+            }
+        },
+        "motor_engine_union_config": {
+            "engine_type": "vllm",
+            "model_config": {
+                "model_name": "qwen3-8B",
+                "model_path": "/mnt/weight/qwen3_8B",
+                "npu_mem_utils": 0.9,
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+            },
+            "engine_config": {"max_model_len": 2048},
+        },
+    }
+    with open(temp_json_file, 'w') as f:
+        json.dump(user_config, f)
+
+    config = CoordinatorConfig.from_json(temp_json_file)
+
+    assert config.scheduler_config.deploy_mode.value == "single_node"
+    assert config.deploy_config.hybrid_instances_num == 3
+    assert config.deploy_config.single_hybrid_instance_pod_num == 1
+    assert config.deploy_config.hybrid_pod_npu_num == 4
+    assert config.deploy_config.p_instances_num == 3
+    assert config.deploy_config.d_instances_num == 3
+
+
 def test_from_json_with_invalid_json(temp_json_file):
     """Test loading configuration from invalid JSON file"""
     with open(temp_json_file, 'w') as f:
@@ -332,6 +369,41 @@ def test_config_summary():
     assert "Rate Limiting" in summary
     assert "Master/Standby" in summary
     assert "Config Path" in summary
+
+
+def test_config_summary_includes_hybrid_fields(temp_json_file):
+    """Test configuration summary includes PD hybrid deploy fields."""
+    user_config = {
+        "motor_deploy_config": {
+            "hybrid_instances_num": 3,
+            "single_hybrid_instance_pod_num": 1,
+            "hybrid_pod_npu_num": 4,
+        },
+        "motor_coordinator_config": {
+            "scheduler_config": {
+                "deploy_mode": "single_node",
+            }
+        },
+        "motor_engine_union_config": {
+            "engine_type": "vllm",
+            "model_config": {
+                "model_name": "qwen3-8B",
+                "model_path": "/mnt/weight/qwen3_8B",
+                "npu_mem_utils": 0.9,
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+            },
+            "engine_config": {"max_model_len": 2048},
+        },
+    }
+    with open(temp_json_file, 'w') as f:
+        json.dump(user_config, f)
+
+    config = CoordinatorConfig.from_json(temp_json_file)
+    summary = config.get_config_summary()
+
+    assert "hybrid_instances_num: 3" in summary
+    assert "single_hybrid_instance_pod_num: 1" in summary
+    assert "hybrid_pod_npu_num: 4" in summary
 
 
 def test_multiple_instances():
