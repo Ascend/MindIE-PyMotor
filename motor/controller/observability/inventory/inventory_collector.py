@@ -27,6 +27,7 @@ POD_NAME = "podName"
 POD_ASSOCIATED_INFO_LIST = "podAssociatedInfoList"
 SERVER_IP_LIST = "serverIPList"
 MODEL_ID = "sys_id"
+SERVICE_ID = "SERVICE_ID"
 
 
 class ModelState(Enum):
@@ -44,6 +45,11 @@ class InstanceStatus(Enum):
     RUNNING = "running"
     ERROR = "error"
     INIT = "init"
+
+
+def _get_service_created_time():
+    service_id = os.getenv(SERVICE_ID, "")
+    return service_id.rsplit("_", 1)[-1] if service_id else ""
 
 
 def _get_backup_server_list():
@@ -108,8 +114,10 @@ class InventoryCollector(ThreadSafeSingleton):
         self.initial_instance_list = InstanceManager().get_initial_instances()
         self.inactive_instance_list = InstanceManager().get_inactive_instances()
         model_id = os.getenv(MODEL_ID, "")
+
         model_service_info = {
             "inventories": self._collect_inventory_detail(),
+            "created": _get_service_created_time(),
             "inferenceFrameworkType": f"motor-{os.getenv('ENGINE_TYPE', '').lower()}",
             "modelID": model_id,
             "modelName": self._get_model_name(),
@@ -117,6 +125,7 @@ class InventoryCollector(ThreadSafeSingleton):
             "modelType": self._get_model_name(),
             "timestamp": int(time.time() * 1000),
         }
+
         return model_service_info
 
     def _collect_inventory_detail(self) -> dict:
