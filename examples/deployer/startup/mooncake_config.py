@@ -106,7 +106,9 @@ def generate_kv_conductor_config(output_path: str, user_config_path: str) -> boo
     master_server_port = kv_pool_cfg.get(MASTER_SERVER_PORT_KEY, DEFAULT_MASTER_SERVER_PORT)
     mooncake_master = out_cfg[KVEVENT_INSTANCE][MOONCAKE_MASTER]
     mooncake_master[ENDPOINT_ADDRESS] = f"tcp://{kvp_master_service}:{master_server_port}"
-    mooncake_master[MODEL_NAME] = user_cfg["motor_engine_prefill_config"]["model_config"]["model_name"]
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from lib.utils import resolve_model_name
+    mooncake_master[MODEL_NAME] = resolve_model_name(user_cfg["motor_engine_prefill_config"])
     write_json(output_path, out_cfg)
     logging.info("kv_conductor_config generated: %s", output_path)
     return True

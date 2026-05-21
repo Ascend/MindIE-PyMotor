@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 from motor.common.resources.instance import ParallelConfig, PDRole
+from motor.config.resolver import ConfigResolver
 from motor.config.tls_config import TLSConfig
 from motor.common.utils.env import Env
 from motor.common.utils.patch_check import safe_open
@@ -31,7 +32,6 @@ PP = "pp_size"
 TP = "tp_size"
 DP = "dp_size"
 BASIC_CONFIG_KEY = "basic_config"
-MODEL_CONFIG_KEY = "model_config"
 PARALLEL_CONFIG_KEY = "parallel_config"
 MOTOR_NODE_MANAGER_CONFIG_KEY = "motor_nodemanger_config"
 MOTOR_ENGINE_ENCODE_CONFIG_KEY = "motor_engine_encode_config"
@@ -127,26 +127,24 @@ class SingleContainerNodemanagerConfig:
         config.single_container_flag = True
         p_instances_num = user_config_data['motor_deploy_config']['p_instances_num']
         d_instances_num = user_config_data['motor_deploy_config']['d_instances_num']
-
-        encode_model_cfg = user_config_data[MOTOR_ENGINE_ENCODE_CONFIG_KEY][MODEL_CONFIG_KEY]
-        prefill_model_cfg = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG_KEY][MODEL_CONFIG_KEY]
-        decode_model_cfg = user_config_data[MOTOR_ENGINE_DECODE_CONFIG_KEY][MODEL_CONFIG_KEY]
-
-        encode_parallel_config = encode_model_cfg[PARALLEL_CONFIG_KEY]
-        prefill_parallel_config = prefill_model_cfg[PARALLEL_CONFIG_KEY]
-        decode_parallel_config = decode_model_cfg[PARALLEL_CONFIG_KEY]
-
-        e_dp_size = encode_parallel_config[DP]
-        e_tp_size = encode_parallel_config[TP]
-        e_pp_size = encode_parallel_config[PP]
-
-        p_dp_size = prefill_parallel_config[DP]
-        p_tp_size = prefill_parallel_config[TP]
-        p_pp_size = prefill_parallel_config[PP]
-
-        d_dp_size = decode_parallel_config[DP]
-        d_tp_size = decode_parallel_config[TP]
-        d_pp_size = decode_parallel_config[PP]
+        encode_section = user_config_data.get(MOTOR_ENGINE_ENCODE_CONFIG_KEY, {})
+        prefill_section = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG_KEY]
+        decode_section = user_config_data[MOTOR_ENGINE_DECODE_CONFIG_KEY]
+        encode_resolver = ConfigResolver(encode_section) if encode_section else None
+        prefill_resolver = ConfigResolver(prefill_section)
+        decode_resolver = ConfigResolver(decode_section)
+        encode_parallel_config = encode_resolver.get_parallel_config() if encode_resolver else {}
+        prefill_parallel_config = prefill_resolver.get_parallel_config()
+        decode_parallel_config = decode_resolver.get_parallel_config()
+        e_dp_size = encode_parallel_config.get(DP, 1)
+        e_tp_size = encode_parallel_config.get(TP, 1)
+        e_pp_size = encode_parallel_config.get(PP, 1)
+        p_dp_size = prefill_parallel_config.get(DP, 1)
+        p_tp_size = prefill_parallel_config.get(TP, 1)
+        p_pp_size = prefill_parallel_config.get(PP, 1)
+        d_dp_size = decode_parallel_config.get(DP, 1)
+        d_tp_size = decode_parallel_config.get(TP, 1)
+        d_pp_size = decode_parallel_config.get(PP, 1)
 
         index = int(Env.index)
 
@@ -295,13 +293,12 @@ class NodeManagerConfig:
         if BASIC_CONFIG_KEY not in config_data:
             config_data[BASIC_CONFIG_KEY] = {}
         
-        config_data[BASIC_CONFIG_KEY][MODEL_NAME_KEY] = \
-            engine_config[MODEL_CONFIG_KEY][MODEL_NAME_KEY]
+        resolver = ConfigResolver(engine_config)
+        config_data[BASIC_CONFIG_KEY][MODEL_NAME_KEY] = resolver.get_model_name("")
         config_data[BASIC_CONFIG_KEY][HARDWARE_TYPE_KEY] = user_cfg["motor_deploy_config"][HARDWARE_TYPE_KEY]
-        
+
         if Env.role in ("encode", "prefill", "decode", "union", "both"):
-            config_data[BASIC_CONFIG_KEY]["parallel_config"] = \
-                engine_config[MODEL_CONFIG_KEY][PARALLEL_CONFIG_KEY]
+            config_data[BASIC_CONFIG_KEY]["parallel_config"] = resolver.get_parallel_config()
             enable_multi_endpoints = engine_config.get(ENABLE_MULTI_ENDPOINTS_KEY, True)
             config_data[BASIC_CONFIG_KEY][ENABLE_MULTI_ENDPOINTS_KEY] = enable_multi_endpoints
         
@@ -425,7 +422,7 @@ class NodeManagerConfig:
         Example: tp=2, pp=4 => 8 devices per pod
         """
         dp = config.basic_config.parallel_config.dp_size
-        devices_per_dp = config.basic_config.parallel_config.tp_size * config.basic_config.parallel_config.pp_size
+        devices_per_dp = config.basic_config.parallel_config.local_world_size
 
         # only enable multi endpoints should check device count
         if (
@@ -594,7 +591,7 @@ class NodeManagerConfig:
             f"    ├─ PP Size:          PP={self.basic_config.parallel_config.pp_size}\n"
             f"    ├─ DP Size:          DP={self.basic_config.parallel_config.dp_size}\n"
             f"    ├─ EP Size:          EP={self.basic_config.parallel_config.ep_size}\n"
-            f"    ├─ SP Size:          SP={self.basic_config.parallel_config.sp_size}\n"
+            f"    ├─ PCP Size:         PCP={self.basic_config.parallel_config.pcp_size}\n"
             f"    └─ World Size:       World Size={self.basic_config.parallel_config.world_size}\n"
             f"{separator}"
         )

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from motor.common.logger import get_logger
+from motor.config.resolver import ConfigResolver
 
 logger = get_logger(__name__)
 
@@ -34,7 +35,6 @@ ENDPOINT = "endpoint"
 REPLAY_ENDPOINT = "replay_endpoint"
 KV_CONDUCTOR_CONFIG = "kv_conductor_config"
 HTTP_SERVER_PORT = "http_server_port"
-MODEL_CONFIG = "model_config"
 MODEL_PATH = "model_path"
 SSL_ENABLE = "ssl_enable"
 SSL_CA_CERTS = "ssl_ca_certs"
@@ -203,12 +203,15 @@ def _update_prefill_kv_event_config(
             logger.warning("kv_events_config is None")
             return
 
+        prefill_section = user_config_data[MOTOR_ENGINE_PREFILL_CONFIG]
+        resolver = ConfigResolver(prefill_section)
+
         updated_config[PREFILL_KV_EVENT_CONFIG] = {
             ENDPOINT: kv_events_config.get(ENDPOINT, ""),
             REPLAY_ENDPOINT: kv_events_config.get(REPLAY_ENDPOINT, ""),
             BLOCK_SIZE: prefill_engine_config.get("block-size", 128),
             HTTP_SERVER_PORT: user_config_data[KV_CONDUCTOR_CONFIG][HTTP_SERVER_PORT],
-            MODEL_PATH: user_config_data[MOTOR_ENGINE_PREFILL_CONFIG][MODEL_CONFIG][MODEL_PATH]
+            MODEL_PATH: resolver.get_model_path("")
         }
     except Exception as e:
         logger.warning("Failed to get prefill config: %s", e)

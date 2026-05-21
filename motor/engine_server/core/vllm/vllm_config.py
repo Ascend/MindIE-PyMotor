@@ -46,11 +46,12 @@ def _get_default_mapping() -> dict[str, str]:
         'model_path': 'model',
         'model_name': 'served_model_name',
         'npu_mem_utils': 'gpu_memory_utilization',
-        'dp_rank': 'data_parallel_rank',
         'dp_size': 'data_parallel_size',
         'tp_size': 'tensor_parallel_size',
         'pp_size': 'pipeline_parallel_size',
         'enable_ep': 'enable_expert_parallel',
+        'dp_rpc_port': 'data_parallel_rpc_port',
+        'cp_kv_cache_interleave_size': 'cp_kv_cache_interleave_size',
     }
 
 
@@ -64,11 +65,12 @@ class VLLMConfig(IConfig):
     endpoint_config: EndpointConfig | None = None
 
     def initialize(self):
-        if self.endpoint_config.deploy_config.get_parallel_config(self.endpoint_config.role).dp_size > 1:
+        role = self.endpoint_config.role
+        if self.endpoint_config.deploy_config.get_parallel_config(role).dp_size > 1:
             self.data_parallel_address = self.endpoint_config.master_dp_ip
             self.data_parallel_rpc_port = self.endpoint_config.deploy_config. \
-                get_parallel_config(self.endpoint_config.role).dp_rpc_port
-        if self.endpoint_config.role == constants.PREFILL_ROLE or self.endpoint_config.role == constants.DECODE_ROLE:
+                get_parallel_config(role).dp_rpc_port
+        if role == constants.PREFILL_ROLE or role == constants.DECODE_ROLE:
             self._process_kv_transfer_config()
 
     def validate(self):
@@ -147,11 +149,13 @@ class VLLMConfig(IConfig):
 
         kv_config[constants.KV_CONNECTOR_EXTRA_CONFIG][constants.KV_PREFILL] = {
             constants.DP_SIZE: prefill_parallel.dp_size,
-            constants.TP_SIZE: prefill_parallel.tp_size
+            constants.TP_SIZE: prefill_parallel.tp_size,
+            constants.PP_SIZE: prefill_parallel.pp_size,
         }
         kv_config[constants.KV_CONNECTOR_EXTRA_CONFIG][constants.KV_DECODE] = {
             constants.DP_SIZE: decode_parallel.dp_size,
-            constants.TP_SIZE: decode_parallel.tp_size
+            constants.TP_SIZE: decode_parallel.tp_size,
+            constants.PP_SIZE: decode_parallel.pp_size,
         }
 
     def _process_store_connector(self, kv_config):
@@ -176,7 +180,7 @@ class VLLMConfig(IConfig):
         1. Include all key-value pairs from engine_config
         2. For other fields, only include those defined in self.mapping
         3. Use the value from mapping as the final key name
-        4. If there's a conflict between engine_config and model_config, model_config takes precedence
+        4. If there's a conflict between engine_config and model_config, engine_config takes precedence
         """
         flattened = {}
 
@@ -189,14 +193,18 @@ class VLLMConfig(IConfig):
             if hasattr(model_config, server_key):
                 value = getattr(model_config, server_key)
                 if value is not None:
-                    flattened[vllm_key] = value
+                    flattened.setdefault(vllm_key, value)
 
-        parallel_config = deploy_config.get_parallel_config(self.endpoint_config.role)
+        role = self.endpoint_config.role
+        parallel_config = deploy_config.get_parallel_config(role)
         for server_key, vllm_key in self.mapping.items():
             if hasattr(parallel_config, server_key):
                 value = getattr(parallel_config, server_key)
                 if value is not None:
-                    flattened[vllm_key] = value
+                    flattened.setdefault(vllm_key, value)
+
+        if parallel_config.pcp_size > 1:
+            flattened.setdefault("prefill_context_parallel_size", parallel_config.pcp_size)
 
         flattened.update({"host": self.endpoint_config.host, "port": self.endpoint_config.port})
         if self.data_parallel_address is not None:

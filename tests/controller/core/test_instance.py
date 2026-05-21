@@ -10,7 +10,9 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-from motor.common.resources.instance import Instance, ReadOnlyInstance, ParallelConfig
+import pytest
+
+from motor.common.resources.instance import Instance, ReadOnlyInstance, ParallelConfig, PDRole
 from motor.common.resources.endpoint import Endpoint
 
 
@@ -246,3 +248,5 @@ def test_is_endpoints_enough_no_endpoints() -> None:
 
     assert instance.is_endpoints_enough() is False
     assert instance.get_endpoints_num() == 0
+
+

@@ -50,19 +50,13 @@
   "motor_engine_prefill_config": {
     "engine_type": "sglang",
     "enable_multi_endpoints": false,
-    "model_config": {
-      "model_name": "qwen3-8B",
-      "model_path": "/mnt/share/weight/Qwen3-8B",
-      "npu_mem_utils": 0.9,
-      "parallel_config": {
-        "dp_size": 1,
-        "tp_size": 2,
-        "pp_size": 1,
-        "world_size": 2,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
+      "served-model-name": "qwen3-8B",
+      "model-path": "/mnt/share/weight/Qwen3-8B",
+      "mem-fraction-static": 0.9,
+      "dp-size": 1,
+      "tp-size": 2,
+      "pp-size": 1,
       "disaggregation_bootstrap_port": 9100,
       "enable_dp_attention": false,
       "moe_a2a_backend": "none",
@@ -83,19 +77,13 @@
   "motor_engine_decode_config": {
     "engine_type": "sglang",
     "enable_multi_endpoints": false,
-    "model_config": {
-      "model_name": "qwen3-8B",
-      "model_path": "/mnt/share/weight/Qwen3-8B",
-      "npu_mem_utils": 0.9,
-      "parallel_config": {
-        "dp_size": 1,
-        "tp_size": 2,
-        "pp_size": 1,
-        "world_size": 2,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
+      "served-model-name": "qwen3-8B",
+      "model-path": "/mnt/share/weight/Qwen3-8B",
+      "mem-fraction-static": 0.9,
+      "dp-size": 1,
+      "tp-size": 2,
+      "pp-size": 1,
       "enable_dp_attention": false,
       "moe_a2a_backend": "none",
       "disaggregation_transfer_backend": "ascend",

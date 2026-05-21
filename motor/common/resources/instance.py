@@ -71,33 +71,35 @@ class NodeManagerInfo(BaseModel):
 
 class ParallelConfig(BaseModel):
     dp_size: int = Field(default=1, description="Data parallel size")
-    cp_size: int = Field(default=1, description="Context parallel size")
+    pcp_size: int = Field(default=1, description="Prefill context parallel size")
     tp_size: int = Field(default=1, description="Tensor parallel size")
-    sp_size: int = Field(default=1, description="Sequence parallel size, usually it reuse tp's pg")
     ep_size: int = Field(default=1, description="Expert parallel size")
     pp_size: int = Field(default=1, description="Pipeline parallel size")
-    world_size: int = Field(default=0, description="World size, default is dp * cp * tp * pp")
+    world_size: int = Field(default=0, description="World size: dp * pcp_size * tp * pp")
+    local_world_size: int = Field(default=0, description="Local world size: pcp * tp * pp (no dp)")
 
     def __init__(
         self,
         dp_size: int = None,
-        cp_size: int = None,
+        pcp_size: int = None,
         tp_size: int = None,
-        sp_size: int = None,
         ep_size: int = None,
         pp_size: int = None,
         world_size: int = None,
+        local_world_size: int = None,
         **kwargs
     ) -> None:
         dp_val = dp_size if dp_size is not None else 1
-        cp_val = cp_size if cp_size is not None else 1
+        pcp_val = pcp_size if pcp_size is not None else 1
         tp_val = tp_size if tp_size is not None else 1
-        sp_val = sp_size if sp_size is not None else 1
         pp_val = pp_size if pp_size is not None else 1
         world_size_val = world_size if world_size is not None else 0
+        local_world_size_val = local_world_size if local_world_size is not None else 0
 
         if world_size_val == 0:
-            world_size_val = dp_val * cp_val * tp_val * pp_val
+            world_size_val = dp_val * pcp_val * tp_val * pp_val
+        if local_world_size_val == 0:
+            local_world_size_val = pcp_val * tp_val * pp_val
 
         enable_ep = kwargs.get('enable_ep', False)
         if enable_ep:
@@ -107,16 +109,17 @@ class ParallelConfig(BaseModel):
 
         super().__init__(
             dp_size=dp_val,
-            cp_size=cp_val,
+            pcp_size=pcp_val,
             tp_size=tp_val,
-            sp_size=sp_val,
             ep_size=ep_val,
             pp_size=pp_val,
             world_size=world_size_val,
+            local_world_size=local_world_size_val,
         )
         logger.debug(
-            "ParallelConfig initialized with dp:%d, cp:%d, tp:%d, sp:%d, ep:%d, pp:%d, world_size:%d, enable_ep:%s",
-            dp_val, cp_val, tp_val, sp_val, ep_val, pp_val, world_size_val, enable_ep
+            "ParallelConfig initialized with dp:%d, pcp:%d, tp:%d, ep:%d, pp:%d, "
+            "world_size:%d, local_world_size:%d, enable_ep:%s",
+            dp_val, pcp_val, tp_val, ep_val, pp_val, world_size_val, local_world_size_val, enable_ep
         )
 
 

@@ -23,22 +23,16 @@
   "motor_nodemanger_config": {},
   "motor_engine_prefill_config": {
     "engine_type": "vllm",
-    "model_config": {
-      "model_name": "GLM-5",
-      "model_path": "/data01/models/GLM-5-w4a8-mtp-QuaRot",
-      "npu_mem_utils": 0.95,
-      "parallel_config": {
-        "dp_size": 4,
-        "tp_size": 8,
-        "pp_size": 1,
-        "enable_ep": true,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
-      "enable-expert-parallel": true,
+      "served_model_name": "GLM-5",
+      "model": "/data01/models/GLM-5-w4a8-mtp-QuaRot",
+      "gpu_memory_utilization": 0.95,
+      "data_parallel_size": 4,
+      "tensor_parallel_size": 8,
+      "pipeline_parallel_size": 1,
+      "data_parallel_rpc_port": 9000,
+      "enable_expert_parallel": true,
       "enable-chunked-prefill": true,
-      "enable-prefix-caching": true,
       "seed": 1024,
       "max-model-len": 65536,
       "max-num-batched-tokens": 4096,
@@ -83,22 +77,16 @@
   },
   "motor_engine_decode_config": {
     "engine_type": "vllm",
-    "model_config": {
-      "model_name": "GLM-5",
-      "model_path": "/data01/models/GLM-5-w4a8-mtp-QuaRot",
-      "npu_mem_utils": 0.95,
-      "parallel_config": {
-        "dp_size": 8,
-        "tp_size": 4,
-        "pp_size": 1,
-        "enable_ep": true,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
-      "enable-expert-parallel": true,
+      "served_model_name": "GLM-5",
+      "model": "/data01/models/GLM-5-w4a8-mtp-QuaRot",
+      "gpu_memory_utilization": 0.95,
+      "data_parallel_size": 8,
+      "tensor_parallel_size": 4,
+      "pipeline_parallel_size": 1,
+      "data_parallel_rpc_port": 9000,
+      "enable_expert_parallel": true,
       "enable-chunked-prefill": true,
-      "enable-prefix-caching": true,
       "seed": 1024,
       "max-model-len": 65536,
       "max-num-batched-tokens": 64,

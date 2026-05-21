@@ -15,7 +15,7 @@ import os
 import sys
 import pytest
 import tempfile
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
@@ -242,7 +242,10 @@ def test_reload_success(mock_safe_open, config_data):
 
     # Mock os.path.exists and os.path.getmtime for our test paths
     with patch('os.path.exists', return_value=True), \
-         patch('os.path.getmtime', return_value=1234567890.0):
+         patch('os.path.getmtime', return_value=1234567890.0), \
+         patch('pathlib.Path.exists', return_value=True), \
+         patch('pathlib.Path.stat') as mock_path_stat:
+        mock_path_stat.return_value = MagicMock(st_mtime=1234567890.0)
         result = config.reload()
 
     assert result is True
@@ -419,6 +422,17 @@ def test_from_json_success():
     assert config.logging_config.log_max_line_length == 4096
 
 
+@patch.dict('os.environ', {'ROLE': 'prefill'})
+def test_generate_endpoint_ports_with_cp_prefill():
+    config = create_config_object()
+    config.basic_config.parallel_config = ParallelConfig(dp_size=4, tp_size=2, pp_size=1, pcp_size=2, local_world_size=4, world_size=16)
+    config.basic_config.role = PDRole.ROLE_P
+    config.basic_config.enable_multi_endpoints = True
+    config.basic_config.device_num = 8
+
+    NodeManagerConfig._generate_endpoint_ports(config)
+
+    # prefill with cp=2 needs cp*tp*pp = 4 devices/endpoint => 8 devices gives 2 endpoints
 @patch.dict('os.environ', {'ROLE': 'both'})
 def test_from_json_loads_union_config_for_hybrid():
     """Test NodeManagerConfig loads union engine config for PD hybrid."""

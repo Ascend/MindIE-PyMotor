@@ -34,12 +34,11 @@ from motor.config.config_utils import (
     INFER_TLS_CONFIG,
     ETCD_TLS_CONFIG,
 )
+from motor.config.resolver import ConfigResolver
 
 FILE_ENCODING = "utf-8"
 
 AIGW = "aigw"
-MODEL_CONFIG = "model_config"
-MODEL_NAME = "model_name"
 ENGINE_CONFIG = "engine_config"
 MAX_MODEL_LEN = "max_model_len"
 AIGW_ID = "id"
@@ -382,7 +381,8 @@ class CoordinatorConfig:
                 try:
                     prefill = user_config_data[ConfigKey.MOTOR_ENGINE_PREFILL.value]
                     decode = user_config_data[ConfigKey.MOTOR_ENGINE_DECODE.value]
-                    cfg[AIGW][AIGW_ID] = prefill[MODEL_CONFIG][MODEL_NAME]
+                    prefill_resolver = ConfigResolver(prefill)
+                    cfg[AIGW][AIGW_ID] = prefill_resolver.get_model_name("")
                     cfg[AIGW][AIGW_OBJECT] = AIGW_OBJECT_MODEL
                     cfg[AIGW][AIGW_OWNED_BY] = AIGW_OWNED_BY_MOTOR
                     cfg[AIGW][AIGW_P_MAX_SEQLEN] = prefill[ENGINE_CONFIG][MAX_MODEL_LEN]

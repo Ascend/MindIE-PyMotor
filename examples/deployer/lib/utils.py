@@ -139,6 +139,24 @@ def get_json_by_path(data, path, default=None):
     return current
 
 
+def resolve_model_name(engine_section, default="Unknown"):
+    """Resolve model_name from engine_config (native) or model_config (legacy).
+
+    Checks engine_config first using engine-type-specific keys, then falls back
+    to the deprecated model_config.
+    """
+    engine_config = engine_section.get("engine_config", {})
+    engine_type = engine_section.get("engine_type", "vllm")
+    if engine_type == "sglang":
+        name = engine_config.get("served-model-name")
+    else:
+        name = engine_config.get("served_model_name")
+    if name:
+        return name
+    model_config = engine_section.get("model_config", {})
+    return model_config.get("model_name", default)
+
+
 def obtain_engine_instance_total(deploy_config):
     if C.HYBRID_INSTANCES_NUM in deploy_config:
         try:
@@ -195,14 +213,12 @@ def set_env_to_shell(user_config, env_config_path, deploy_mode):
 
     env_config = read_json(env_config_path)
 
-    engine_type = get_json_by_path(
-        user_config, "motor_engine_prefill_config.engine_type",
-        get_json_by_path(user_config, "motor_engine_union_config.engine_type", "Unknown")
-    )
-    model_name = get_json_by_path(
-        user_config, "motor_engine_prefill_config.model_config.model_name",
-        get_json_by_path(user_config, "motor_engine_union_config.model_config.model_name", "Unknown")
-    )
+    prefill_section = user_config.get("motor_engine_prefill_config", {})
+    union_section = user_config.get("motor_engine_union_config", {})
+    engine_section = prefill_section if prefill_section else union_section
+
+    engine_type = get_json_by_path(engine_section, "engine_type", "Unknown")
+    model_name = resolve_model_name(engine_section)
     north_platform = get_json_by_path(user_config, "north_config.name")
 
     if C.MOTOR_COMMON_ENV not in env_config:

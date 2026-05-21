@@ -401,9 +401,9 @@ class InstanceAssembler(ThreadSafeSingleton):
         return pod_endpoints
 
     def _build_single_endpoint(self, msg: RegisterMsg, id_offset: int) -> dict[int, Endpoint]:
-        devices_per_endpoint = msg.parallel_config.tp_size * msg.parallel_config.pp_size
+        devices_per_endpoint = msg.parallel_config.local_world_size
         device_infos = self._build_device_infos(msg, 0, devices_per_endpoint, id_offset)
-        
+
         logger.info("Building single endpoint for pod %s, %d devices per endpoint",
                     msg.pod_ip, devices_per_endpoint)
         return {
@@ -417,7 +417,7 @@ class InstanceAssembler(ThreadSafeSingleton):
         }
 
     def _build_multi_endpoints(self, msg: RegisterMsg, id_offset: int) -> dict[int, Endpoint]:
-        devices_per_endpoint = msg.parallel_config.tp_size * msg.parallel_config.pp_size
+        devices_per_endpoint = msg.parallel_config.local_world_size
         total_devices_needed = len(msg.business_port) * devices_per_endpoint
         total_devices_available = msg.device_num
         

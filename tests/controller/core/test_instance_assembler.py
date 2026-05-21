@@ -65,7 +65,7 @@ def test_config():
     role = "prefill"
     pod_ip1 = "127.0.0.1"
     pod_ip2 = "127.0.0.2"
-    parallel_config = ParallelConfig(dp_size=dp, tp_size=tp)
+    parallel_config = ParallelConfig(dp_size=dp, tp_size=tp, local_world_size=tp, world_size=dp * tp)
     return {
         'dp': dp,
         'tp': tp,
@@ -846,7 +846,7 @@ def test_restore_data_reconstruction_exception(instance_assembler):
                 "id": 0,
                 "role": "prefill",
                 "parallel_config": {
-                    "dp_size": 1, "cp_size": 1, "tp_size": 1, "sp_size": 1,
+                    "dp_size": 1, "pcp_size": 1, "tp_size": 1,
                     "ep_size": 1, "pp_size": 1, "world_size": 1
                 },
                 "endpoints": {},

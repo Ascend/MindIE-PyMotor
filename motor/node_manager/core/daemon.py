@@ -154,7 +154,7 @@ class Daemon(ThreadSafeSingleton):
         Returns:
             Comma-separated device IDs string, e.g., "0,1,2,3"
         """
-        local_world_size = self.parallel_config.tp_size * self.parallel_config.pp_size
+        local_world_size = self.parallel_config.local_world_size
         start_device_id = (index * local_world_size % device_size)
         end_device_id = start_device_id + local_world_size
         if end_device_id > device_size:

@@ -122,8 +122,8 @@ def mock_device_list(device_num: int):
 
 
 def mock_input(p_num: int | None = 2, d_num: int | None = 1):
-    parallel_config = ParallelConfig(dp_size=16, cp_size=1, tp_size=2, sp_size=1, ep_size=1, pp_size=1, world_size=32)
-    parallel_config_p = ParallelConfig(dp_size=2, cp_size=1, tp_size=16, sp_size=1, ep_size=1, pp_size=1, world_size=16)
+    parallel_config = ParallelConfig(dp_size=16, pcp_size=1, tp_size=2, ep_size=1, pp_size=1, world_size=32)
+    parallel_config_p = ParallelConfig(dp_size=2, pcp_size=1, tp_size=16, ep_size=1, pp_size=1, world_size=16)
     test_node_manager_info_0 = NodeManagerInfo(pod_ip='192.168.222.213', port='1026')
     test_node_manager_info_1 = NodeManagerInfo(pod_ip='192.168.222.214', port='1026')
     test_node_manager_info_2 = NodeManagerInfo(pod_ip='192.168.222.215', port='1026')

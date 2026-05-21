@@ -25,7 +25,6 @@ from motor.config.endpoint import (
     HealthCheckConfig,
     DeployConfig,
     EndpointConfig,
-    PARALLEL_CONFIG_KEY,
     PREFILL_PARALLEL_CONFIG_KEY,
     DECODE_PARALLEL_CONFIG_KEY,
     ENCODE_PARALLEL_CONFIG_KEY
@@ -38,20 +37,23 @@ from motor.engine_server.constants import constants
 
 
 def test_parallel_config_default_values():
-    """Test ParallelConfig default values and __post_init__"""
+    """Test ParallelConfig default values with auto-computation fallback"""
     config = ParallelConfig()
     assert config.dp_size == 1
     assert config.tp_size == 1
     assert config.pp_size == 1
-    assert config.world_size == 1
+    assert config.world_size == 1  # auto-computed: 1*1*1*1
+    assert config.local_world_size == 1  # auto-computed: 1*1*1
     assert config.enable_ep is False
     assert config.dp_rpc_port == 9000
 
 
-def test_parallel_config_world_size_auto_calculation():
-    """Test that world_size is auto-calculated when None"""
-    config = ParallelConfig(dp_size=2, tp_size=2, pp_size=1)
+def test_parallel_config_with_resolver_values():
+    """Test that world_size and local_world_size are accepted when provided"""
+    config = ParallelConfig(dp_size=2, tp_size=2, pp_size=1, pcp_size=1,
+                            world_size=4, local_world_size=2)
     assert config.world_size == 4
+    assert config.local_world_size == 2
 
 
 def test_parallel_config_world_size_explicit():
@@ -62,13 +64,18 @@ def test_parallel_config_world_size_explicit():
 
 def test_parallel_config_from_dict():
     """Test ParallelConfig.from_dict"""
-    data = {"dp_size": 4, "tp_size": 2, "pp_size": 1, "dp_rpc_port": 9001}
+    data = {"dp_size": 4, "tp_size": 2, "pp_size": 1, "dp_rpc_port": 9001,
+            "world_size": 8, "local_world_size": 2}
     config = ParallelConfig.from_dict(data)
     assert config.dp_size == 4
     assert config.tp_size == 2
     assert config.pp_size == 1
     assert config.dp_rpc_port == 9001
     assert config.world_size == 8
+    assert config.local_world_size == 2
+
+
+
 
 
 # --- ModelConfig tests ---
@@ -184,7 +191,7 @@ def pd_engine_config_file():
                 "model_name": "qwen3-8B",
                 "model_path": "/mnt/weight/qwen3_8B",
                 "npu_mem_utils": 0.9,
-                PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
             },
             "engine_config": {"max_model_len": 2048},
         },
@@ -194,7 +201,7 @@ def pd_engine_config_file():
                 "model_name": "qwen3-8B",
                 "model_path": "/mnt/weight/qwen3_8B",
                 "npu_mem_utils": 0.9,
-                PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
             },
             "engine_config": {"max_model_len": 2048},
         },
@@ -224,7 +231,7 @@ def pd_hybrid_engine_config_file():
                 "model_name": "qwen3-8B",
                 "model_path": "/mnt/weight/qwen3_8B",
                 "npu_mem_utils": 0.9,
-                PARALLEL_CONFIG_KEY: {"dp_size": 2, "tp_size": 2, "pp_size": 1},
+                "parallel_config": {"dp_size": 2, "tp_size": 2, "pp_size": 1},
             },
             "engine_config": {"max_model_len": 2048},
         },
