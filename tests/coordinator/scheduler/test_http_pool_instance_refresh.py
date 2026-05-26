@@ -17,6 +17,7 @@ import pytest
 
 from motor.common.resources.instance import Instance, PDRole
 from motor.common.resources.endpoint import Endpoint, EndpointStatus, Workload
+from motor.coordinator.domain.scheduling import InstanceReadiness
 from motor.coordinator.models.request import RequestInfo
 from motor.coordinator.scheduler.runtime.scheduler_client import (
     _collect_active_endpoints_from_cache,
@@ -56,6 +57,9 @@ class TestCollectActiveEndpointsFromCache:
     async def test_returns_only_normal_endpoints(self):
         """Endpoints with status=normal are included; others are excluded."""
         cache = _SchedulerInstanceCache()
+        inst0 = _make_instance(0, PDRole.ROLE_E, [
+            ("10.0.0.5", "8005", EndpointStatus.NORMAL),
+        ])
         inst1 = _make_instance(1, PDRole.ROLE_P, [
             ("10.0.0.1", "8001", EndpointStatus.NORMAL),
             ("10.0.0.2", "8002", EndpointStatus.ABNORMAL),
@@ -64,11 +68,12 @@ class TestCollectActiveEndpointsFromCache:
             ("10.0.0.3", "8003", EndpointStatus.NORMAL),
             ("10.0.0.4", "8004", EndpointStatus.PAUSED),
         ])
+        await cache.replace_all(PDRole.ROLE_E, [inst0])
         await cache.replace_all(PDRole.ROLE_P, [inst1])
         await cache.replace_all(PDRole.ROLE_D, [inst2])
 
         result = _collect_active_endpoints_from_cache(cache)
-        expected = {("10.0.0.1", "8001"), ("10.0.0.3", "8003")}
+        expected = {("10.0.0.5", "8005"), ("10.0.0.1", "8001"), ("10.0.0.3", "8003")}
         assert set(result) == expected
 
     @pytest.mark.asyncio
@@ -89,6 +94,77 @@ class TestCollectActiveEndpointsFromCache:
         cache = _SchedulerInstanceCache()
         result = _collect_active_endpoints_from_cache(cache)
         assert result == []
+
+
+class TestSchedulerClientEndpointTopK:
+    """Test worker-side endpoint TopK selection without a persistent endpoint heap."""
+
+    def test_load_balance_selects_topk_from_all_endpoints(self):
+        config = SchedulerClientConfig(
+            scheduler_address="ipc:///tmp/test_scheduler",
+            scheduler_type="load_balance",
+            endpoint_instance_score_weight=0.0,
+        )
+        client = AsyncSchedulerClient(config)
+        inst1 = _make_instance(1, PDRole.ROLE_P, [
+            ("10.0.0.1", "8001", EndpointStatus.NORMAL),
+            ("10.0.0.2", "8002", EndpointStatus.NORMAL),
+        ])
+        inst2 = _make_instance(2, PDRole.ROLE_P, [
+            ("10.0.0.3", "8003", EndpointStatus.NORMAL),
+            ("10.0.0.4", "8004", EndpointStatus.NORMAL),
+        ])
+        workloads = {
+            10: Workload(active_tokens=10),
+            11: Workload(active_tokens=12),
+            20: Workload(active_tokens=1),
+            21: Workload(active_tokens=50),
+        }
+        for inst in (inst1, inst2):
+            for endpoint in inst.get_all_endpoints():
+                endpoint.workload = workloads[endpoint.id]
+
+        req_info = RequestInfo(
+            req_id="req-topk",
+            req_data={"test": "data"},
+            req_len=100,
+            api="/test/api",
+        )
+
+        candidates = client._select_endpoint_candidates_from_list(
+            [inst1, inst2], PDRole.ROLE_P, req_info, top_k=2
+        )
+
+        assert [(inst.id, ep.id) for inst, ep, _ in candidates] == [(2, 20), (1, 10)]
+
+
+@pytest.mark.asyncio
+async def test_has_required_instances_uses_cache_after_warmup():
+    """Readiness warm-up should return status from the freshly refreshed cache."""
+    config = SchedulerClientConfig(
+        scheduler_address="ipc:///tmp/test_scheduler",
+    )
+    client = AsyncSchedulerClient(config)
+
+    async def mock_get_available_instances(role=None):
+        e_inst = _make_instance(1, PDRole.ROLE_E, [
+            ("10.0.0.1", "8001", EndpointStatus.NORMAL),
+        ])
+        p_inst = _make_instance(2, PDRole.ROLE_P, [
+            ("10.0.0.2", "8002", EndpointStatus.NORMAL),
+        ])
+        d_inst = _make_instance(3, PDRole.ROLE_D, [
+            ("10.0.0.3", "8003", EndpointStatus.NORMAL),
+        ])
+        await client._cache.replace_all(PDRole.ROLE_E, [e_inst])
+        await client._cache.replace_all(PDRole.ROLE_P, [p_inst])
+        await client._cache.replace_all(PDRole.ROLE_D, [d_inst])
+        return {1: e_inst, 2: p_inst, 3: d_inst}
+
+    with patch.object(client, "get_available_instances", side_effect=mock_get_available_instances):
+        readiness = await client.has_required_instances()
+
+    assert readiness == InstanceReadiness.REQUIRED_MET_EPD
 
 
 @pytest.mark.asyncio

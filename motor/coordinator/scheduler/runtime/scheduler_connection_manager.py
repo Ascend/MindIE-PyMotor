@@ -77,6 +77,9 @@ class SchedulerConnectionManager:
             scheduler_type=scheduler_type,
             client_index=client_index,
             client_count=client_count,
+            endpoint_instance_score_weight=(
+                coordinator_config.scheduler_config.endpoint_instance_score_weight
+            ),
             tls_config=coordinator_config.infer_tls_config,
             deploy_mode=coordinator_config.scheduler_config.deploy_mode,
             on_instance_refreshed=on_instance_refreshed,

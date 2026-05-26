@@ -54,6 +54,22 @@ def _should_log_scheduling_sample(req_id: str) -> bool:
     return hash(req_id) % _SCHEDULING_LOG_SAMPLE_RATE == 0
 
 
+def _scheduling_state_for_role(role: PDRole) -> ReqState:
+    if role == PDRole.ROLE_E:
+        return ReqState.E_SCHEDULING
+    if role == PDRole.ROLE_P:
+        return ReqState.P_SCHEDULING
+    return ReqState.D_SCHEDULING
+
+
+def _allocated_state_for_role(role: PDRole) -> ReqState:
+    if role == PDRole.ROLE_E:
+        return ReqState.E_ALLOCATED
+    if role == PDRole.ROLE_P:
+        return ReqState.P_ALLOCATED
+    return ReqState.D_ALLOCATED
+
+
 class RequestLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg: str, kwargs: Any) -> tuple[str, Any]:
         req_id = self.extra.get(REQUEST_ID_KEY, DEFAULT_REQUEST_ID) if self.extra else DEFAULT_REQUEST_ID
@@ -226,7 +242,7 @@ class BaseRouter(ABC):
 
     async def prepare_resource(self, role: PDRole) -> ScheduledResource:
         """Select instance + allocate workload (one RPC), record in RequestManager, retry on failure."""
-        self.req_info.update_state(ReqState.P_SCHEDULING if role == PDRole.ROLE_P else ReqState.D_SCHEDULING)
+        self.req_info.update_state(_scheduling_state_for_role(role))
 
         last_exception = None
         t0_prepare = time.perf_counter()
@@ -255,12 +271,16 @@ class BaseRouter(ABC):
                 if not await self._request_manager.add_req_workload(
                     self.req_info.req_id, role, allocate_workload
                 ):
+                    await self._rollback_allocated_workload(
+                        ins,
+                        endpoint,
+                        role,
+                        allocate_workload,
+                    )
                     msg = f"Request {self.req_info.req_id} already allocated for role {role}"
                     raise RuntimeError(msg)
 
-                self.req_info.update_state(
-                    ReqState.P_ALLOCATED if role == PDRole.ROLE_P else ReqState.D_ALLOCATED
-                )
+                self.req_info.update_state(_allocated_state_for_role(role))
 
                 elapsed_prepare_ms = (time.perf_counter() - t0_prepare) * 1000
                 if _should_log_scheduling_sample(self.req_info.req_id):
@@ -300,6 +320,35 @@ class BaseRouter(ABC):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=error_detail
         )
+
+    async def _rollback_allocated_workload(
+        self,
+        instance: Instance,
+        endpoint: Endpoint,
+        role: PDRole,
+        allocate_workload: Workload,
+    ) -> bool:
+        """Undo a scheduler allocation if local request workload bookkeeping fails."""
+        rollback_workload = Workload(
+            active_kv_cache=-allocate_workload.active_kv_cache,
+            active_tokens=-allocate_workload.active_tokens,
+        )
+        params = UpdateWorkloadParams(
+            instance_id=instance.id,
+            endpoint_id=endpoint.id,
+            role=role,
+            req_id=self.req_info.req_id,
+            workload_action=WorkloadAction.RELEASE_TOKENS,
+            workload_change=rollback_workload,
+        )
+        with CancelScope(shield=True):
+            success = await self._scheduler.update_workload(params)
+        if not success:
+            self.logger.warning(
+                "Failed to rollback allocated workload instance_id=%s endpoint_id=%s role=%s",
+                instance.id, endpoint.id, role,
+            )
+        return success
 
     async def forward_stream_request(self,
                                      req_data: dict,

@@ -446,6 +446,64 @@ async def test_load_balance_policy_selection_logic(scheduler_setup):
 
 
 @pytest.mark.asyncio
+async def test_load_balance_selects_global_lowest_endpoint():
+    """Load-balance should choose the lowest endpoint globally, not filter by instance first."""
+    config = CoordinatorConfig()
+    config.scheduler_config.scheduler_type = SchedulerType.LOAD_BALANCE
+    config.scheduler_config.endpoint_instance_score_weight = 0.0
+    instance_manager = InstanceManager(config)
+
+    inst_a = Instance(
+        job_name="prefill-a",
+        model_name="test_model",
+        id=1,
+        role=PDRole.ROLE_P,
+        status=InsStatus.ACTIVE,
+        parallel_config=ParallelConfig(dp_size=2),
+    )
+    inst_b = Instance(
+        job_name="prefill-b",
+        model_name="test_model",
+        id=2,
+        role=PDRole.ROLE_P,
+        status=InsStatus.ACTIVE,
+        parallel_config=ParallelConfig(dp_size=2),
+    )
+    inst_a.add_endpoints(
+        "pod-a",
+        {
+            0: Endpoint(id=10, ip="10.0.0.1", business_port="8000", mgmt_port="9000",
+                        status=EndpointStatus.NORMAL, workload=Workload()),
+            1: Endpoint(id=11, ip="10.0.0.1", business_port="8001", mgmt_port="9001",
+                        status=EndpointStatus.NORMAL, workload=Workload()),
+        },
+    )
+    inst_b.add_endpoints(
+        "pod-b",
+        {
+            0: Endpoint(id=20, ip="10.0.0.2", business_port="8000", mgmt_port="9000",
+                        status=EndpointStatus.NORMAL, workload=Workload()),
+            1: Endpoint(id=21, ip="10.0.0.2", business_port="8001", mgmt_port="9001",
+                        status=EndpointStatus.NORMAL, workload=Workload()),
+        },
+    )
+    await instance_manager.refresh_instances(EventType.ADD, [inst_a, inst_b])
+
+    await instance_manager.update_instance_workload(1, 10, Workload(active_tokens=10))
+    await instance_manager.update_instance_workload(1, 11, Workload(active_tokens=10))
+    await instance_manager.update_instance_workload(2, 20, Workload(active_tokens=1))
+    await instance_manager.update_instance_workload(2, 21, Workload(active_tokens=50))
+
+    scheduler = Scheduler(instance_provider=instance_manager, config=config)
+    result = await scheduler.select_instance_and_endpoint(role=PDRole.ROLE_P)
+
+    assert result is not None
+    selected_instance, selected_endpoint = result
+    assert selected_instance.id == 2
+    assert selected_endpoint.id == 20
+
+
+@pytest.mark.asyncio
 async def test_round_robin_instance_selection(scheduler_setup):
     """Test round robin instance selection."""
     all_instances, instance_manager = scheduler_setup

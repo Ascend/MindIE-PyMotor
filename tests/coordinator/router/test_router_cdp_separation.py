@@ -802,3 +802,59 @@ class TestRouterCDPSeparation:
         assert response_data["usage"]["prompt_tokens_details"] == prompt_tokens_details
         
         assert req_info.prompt_tokens_details == prompt_tokens_details
+
+    @pytest.mark.asyncio
+    async def test_cdp_nonstream_recompute_merges_partial_output(
+        self, client, monkeypatch: MonkeyPatch, setup_cdp_separation
+    ):
+        """Non-stream CDP recompute should return partial text plus retry continuation."""
+        req_info = await create_mock_request_info(stream=False)
+        req_info.entry_api = req_info.api
+
+        responses = [
+            {
+                "prompt_token_ids": [1, 2],
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "partial "},
+                        "stop_reason": "recomputed",
+                        "token_ids": [3, 4],
+                    }
+                ],
+                "usage": {"completion_tokens": 2},
+            },
+            {
+                "object": "text_completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "text": "continuation",
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"completion_tokens": 1},
+            },
+        ]
+
+        async def mock_forward_request(self, req_data: dict, client: httpx.AsyncClient, timeout):
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.aclose = AsyncMock(return_value=None)
+            mock_response.json.return_value = responses.pop(0)
+            return mock_response
+
+        monkeypatch.setattr(SeparateCDPRouter, "forward_request", mock_forward_request)
+
+        cdp_router = SeparateCDPRouter(
+            req_info, CoordinatorConfig(),
+            scheduler=Scheduler(instance_provider=InstanceManager(CoordinatorConfig()), config=CoordinatorConfig()),
+            request_manager=_request_manager
+        )
+
+        response = await cdp_router.handle_request()
+        response_json = response.body.decode() if hasattr(response.body, 'decode') else response.body
+        response_data = json.loads(response_json)
+
+        assert responses == []
+        assert response_data["choices"][0]["message"]["content"] == "partial continuation"
+        assert req_info.state == ReqState.DECODE_END

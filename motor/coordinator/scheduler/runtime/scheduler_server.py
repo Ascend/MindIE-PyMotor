@@ -30,10 +30,13 @@ from motor.coordinator.domain import UpdateWorkloadParams
 from motor.coordinator.models.constants import DEFAULT_REQUEST_ID, REQUEST_ID_KEY
 from motor.coordinator.domain.instance_manager import InstanceManager
 from motor.coordinator.scheduler.scheduler import Scheduler
+from motor.coordinator.scheduler.policy.load_balance import LoadBalancePolicy
 from motor.coordinator.scheduler.runtime.workload_shm import WorkloadSharedMemoryWriter
 from motor.coordinator.scheduler.runtime.workload_shm.layout import DEFAULT_WORKLOAD_SHM_MAX_ENTRIES
 from motor.coordinator.scheduler.runtime.zmq_protocol import (
     SchedulerRequest, SchedulerResponse, SchedulerRequestType, SchedulerResponseType,
+    CANDIDATE_POLICY_LOAD_BALANCE,
+    KNOWN_CANDIDATE_POLICIES,
     INSTANCE_CHANGE_TOPIC,
     pack_send_frames, unpack_recv_payload,
 )
@@ -77,6 +80,11 @@ _ROLE_DISPLAY_HYBRID = "hybrid"
 # Response data keys for allocate_only / select_and_allocate (avoid duplicate string literals)
 _KEY_INSTANCE = "instance"
 _KEY_ENDPOINT = "endpoint"
+_KEY_SELECTED_SCORE = "selected_score"
+_KEY_WORKLOAD_SEQUENCE = "workload_sequence"
+_KEY_INSTANCE_VERSION = "instance_version"
+_KEY_FAST_PATH = "fast_path"
+_KEY_CANDIDATE_POLICY = "candidate_policy"
 
 
 def _should_log_scheduling_sample(sample_key: str) -> bool:
@@ -150,6 +158,15 @@ class _SchedulerRequestDispatcher:
         self._config = config
         self._workload_writer = workload_writer
         self._on_instance_refresh_done = on_instance_refresh_done
+        self._workload_commit_lock = asyncio.Lock()
+        self._endpoint_instance_score_weight = max(
+            0.0,
+            getattr(config.scheduler_config, "endpoint_instance_score_weight", 0.05),
+        )
+        scheduler_type = getattr(config.scheduler_config, "scheduler_type", "")
+        self._is_load_balance_scheduler = (
+            getattr(scheduler_type, "value", scheduler_type) == "load_balance"
+        )
 
     async def dispatch(self, request: SchedulerRequest) -> SchedulerResponse:
         """Dispatch request to the appropriate handler (async handlers supported)."""
@@ -210,9 +227,12 @@ class _SchedulerRequestDispatcher:
             workload_action=workload_action,
             workload_change=workload_change,
         )
-        success = await self._scheduler.update_workload(params)
-        if success and self._workload_writer:
-            await self._workload_writer.write_single_entry(int(instance_id), int(endpoint_id))
+        async with self._workload_commit_lock:
+            success = await self._scheduler.update_workload(params)
+            if success and self._workload_writer:
+                await self._workload_writer.write_single_entry(
+                    int(instance_id), int(endpoint_id)
+                )
         return SchedulerResponse(
             response_type=SchedulerResponseType.SUCCESS,
             request_id=request.request_id,
@@ -248,10 +268,11 @@ class _SchedulerRequestDispatcher:
                 request_id=request.request_id,
                 error=f"Invalid event type: {event_type_str}",
             )
-        changed = await self._instance_manager.refresh_instances(event_type, instances)
-        if changed:
-            if self._workload_writer:
+        async with self._workload_commit_lock:
+            changed = await self._instance_manager.refresh_instances(event_type, instances)
+            if changed and self._workload_writer:
                 self._workload_writer.write_snapshot()
+        if changed:
             if self._on_instance_refresh_done:
                 try:
                     result = self._on_instance_refresh_done()
@@ -266,12 +287,21 @@ class _SchedulerRequestDispatcher:
         )
 
     async def _handle_allocate_only(self, request: SchedulerRequest) -> SchedulerResponse:
-        """Worker selects locally; Scheduler only allocates. Validate (instance_id, endpoint_id) exists."""
+        """
+        Worker proposes one endpoint; Scheduler authoritatively commits one workload allocation.
+        """
         instance_id = request.data.get("instance_id")
         endpoint_id = request.data.get("endpoint_id")
         req_id = request.data.get("req_id", "")
         workload_data = request.data.get("workload")
         role_str = request.data.get("role")
+        worker_workload_sequence = self._parse_optional_int(
+            request.data.get(_KEY_WORKLOAD_SEQUENCE)
+        )
+        worker_instance_version = self._parse_optional_int(
+            request.data.get(_KEY_INSTANCE_VERSION)
+        )
+        candidate_policy = request.data.get(_KEY_CANDIDATE_POLICY)
 
         if instance_id is None or endpoint_id is None:
             return SchedulerResponse(
@@ -293,61 +323,229 @@ class _SchedulerRequestDispatcher:
                 request_id=request.request_id,
                 error=f"Invalid workload format: {e}",
             )
-        iid, eid = int(instance_id), int(endpoint_id)
-        exists = await self._instance_manager.has_instance_endpoint(iid, eid)
-        if not exists:
+        role = PDRole(role_str) if role_str in ("encode", "prefill", "decode", "union", "both") else PDRole.ROLE_U
+        selected_candidate = self._extract_allocate_candidate(request.data)
+        if selected_candidate is None:
             logger.warning(
-                "ALLOCATE_ONLY instance_id=%s endpoint_id=%s not in available pool req_id=%s",
-                iid, eid, req_id,
+                "ALLOCATE_ONLY has no valid endpoint req_id=%s instance_id=%s endpoint_id=%s",
+                req_id, instance_id, endpoint_id,
             )
             return SchedulerResponse(
                 response_type=SchedulerResponseType.SUCCESS,
                 request_id=request.request_id,
                 data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
             )
-        role = PDRole(role_str) if role_str in ("encode", "prefill", "decode", "union", "both") else PDRole.ROLE_U
-        params = UpdateWorkloadParams(
-            instance_id=iid,
-            endpoint_id=eid,
-            role=role,
-            req_id=req_id,
-            workload_action=WorkloadAction.ALLOCATION,
-            workload_change=workload,
-        )
-        success = await self._scheduler.update_workload(params)
+        async with self._workload_commit_lock:
+            fast_path = self._can_use_worker_top1_fast_path(
+                worker_workload_sequence,
+                worker_instance_version,
+            )
+            selected = (
+                self._select_valid_candidate(selected_candidate, role)
+                if fast_path
+                else self._select_authoritative_allocate_candidate(
+                    selected_candidate, role, candidate_policy
+                )
+            )
+            if fast_path and selected is None:
+                selected = self._select_authoritative_allocate_candidate(
+                    selected_candidate, role, candidate_policy
+                )
+                fast_path = False
+            if selected is None:
+                logger.warning(
+                    "ALLOCATE_ONLY endpoint unavailable req_id=%s candidate=%s",
+                    req_id, selected_candidate,
+                )
+                return SchedulerResponse(
+                    response_type=SchedulerResponseType.SUCCESS,
+                    request_id=request.request_id,
+                    data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
+                )
+            instance, endpoint, selected_score = selected
+            params = UpdateWorkloadParams(
+                instance_id=instance.id,
+                endpoint_id=endpoint.id,
+                role=role,
+                req_id=req_id,
+                workload_action=WorkloadAction.ALLOCATION,
+                workload_change=workload,
+            )
+            success = await self._scheduler.update_workload(params)
+            if success and self._workload_writer:
+                await self._workload_writer.write_single_entry(instance.id, endpoint.id)
+
         if not success:
             return SchedulerResponse(
                 response_type=SchedulerResponseType.SUCCESS,
                 request_id=request.request_id,
                 data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
             )
-        if self._workload_writer:
-            await self._workload_writer.write_single_entry(iid, eid)
-        instance = None
-        endpoint = None
-        for r in (PDRole.ROLE_E, PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
-            inst = self._instance_manager.get_available_instances(r).get(iid)
-            if inst:
-                instance = inst
-                for pod_eps in (inst.endpoints or {}).values():
-                    for ep in (pod_eps or {}).values():
-                        if ep.id == eid:
-                            endpoint = ep
-                            break
-                if endpoint:
-                    break
         instance_data = _serialize_instance_minimal(instance) if instance else None
         endpoint_data = _serialize_endpoint_minimal(endpoint) if endpoint else None
         if _should_log_scheduling_sample(req_id or request.request_id):
             logger.info(
-                "ALLOCATE_ONLY req_id=%s ins=%s ep=%s",
-                req_id, iid, eid,
+                "ALLOCATE_ONLY req_id=%s ins=%s ep=%s score=%.4f fast_path=%s",
+                req_id, instance.id, endpoint.id, selected_score, fast_path,
             )
         return SchedulerResponse(
             response_type=SchedulerResponseType.SUCCESS,
             request_id=request.request_id,
-            data={_KEY_INSTANCE: instance_data, _KEY_ENDPOINT: endpoint_data},
+            data={
+                _KEY_INSTANCE: instance_data,
+                _KEY_ENDPOINT: endpoint_data,
+                _KEY_SELECTED_SCORE: selected_score,
+                _KEY_FAST_PATH: fast_path,
+            },
         )
+
+    @staticmethod
+    def _parse_optional_int(value) -> int | None:
+        """Parse optional integer request field."""
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _extract_allocate_candidate(data: dict) -> tuple[int, int] | None:
+        """Parse selected endpoint id from top-level request fields."""
+        instance_id = data.get("instance_id")
+        endpoint_id = data.get("endpoint_id")
+        if instance_id is not None and endpoint_id is not None:
+            try:
+                return (int(instance_id), int(endpoint_id))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _select_authoritative_candidate(
+        self,
+        candidate: tuple[int, int],
+        role: PDRole,
+    ) -> tuple[Instance, Endpoint, float] | None:
+        """Select the best candidate using SchedulerServer's current workload ledger."""
+        return self._select_valid_candidate(candidate, role)
+
+    def _select_authoritative_allocate_candidate(
+        self,
+        candidate: tuple[int, int],
+        role: PDRole,
+        candidate_policy: str | None,
+    ) -> tuple[Instance, Endpoint, float] | None:
+        """
+        Select allocation target using SchedulerServer's authoritative workload view.
+
+        Load-balance can scan all endpoints cheaply at the current cluster size. Other policies
+        keep the worker-proposed endpoint semantics.
+        """
+        if self._should_scan_global_load_balance(candidate_policy):
+            selected = self._select_global_load_balance_candidate(role)
+            if selected is not None:
+                return selected
+        return self._select_authoritative_candidate(candidate, role)
+
+    def _should_scan_global_load_balance(self, candidate_policy: str | None) -> bool:
+        """Return True when candidates were selected by load-balance semantics."""
+        if candidate_policy == CANDIDATE_POLICY_LOAD_BALANCE:
+            return True
+        if candidate_policy in KNOWN_CANDIDATE_POLICIES:
+            return False
+        if candidate_policy is not None:
+            logger.warning(
+                "Unknown allocate candidate_policy=%s; falling back to scheduler_type",
+                candidate_policy,
+            )
+        return self._is_load_balance_scheduler
+
+    def _select_global_load_balance_candidate(
+        self,
+        role: PDRole,
+    ) -> tuple[Instance, Endpoint, float] | None:
+        """Select the globally lowest-score endpoint for role from SchedulerServer's local pool."""
+        instances = self._instance_manager.get_available_instances(role).values()
+        candidates = LoadBalancePolicy.select_endpoint_candidates_from_list(
+            instances,
+            role=role,
+            top_k=1,
+            instance_score_weight=self._endpoint_instance_score_weight,
+        )
+        if not candidates:
+            return None
+        candidate = candidates[0]
+        return (candidate.instance, candidate.endpoint, candidate.score)
+
+    def _can_use_worker_top1_fast_path(
+        self,
+        worker_workload_sequence: int | None,
+        worker_instance_version: int | None,
+    ) -> bool:
+        """Return True when worker selected from the exact SchedulerServer workload view."""
+        if not self._workload_writer:
+            return False
+        return (
+            worker_workload_sequence is not None
+            and worker_instance_version is not None
+            and worker_workload_sequence == self._workload_writer.sequence
+            and worker_instance_version == self._workload_writer.instance_version
+        )
+
+    def _select_valid_candidate(
+        self,
+        candidate: tuple[int, int],
+        role: PDRole,
+    ) -> tuple[Instance, Endpoint, float] | None:
+        """
+        Validate one worker-selected candidate and calculate its current score for observability.
+
+        This is the fast path: when workload_sequence and instance_version match, SchedulerServer
+        only validates the worker-selected endpoint.
+        """
+        instance_id, endpoint_id = candidate
+        found = self._find_available_instance_endpoint(instance_id, endpoint_id)
+        if found is None:
+            return None
+        instance, endpoint = found
+        try:
+            instance_role = PDRole(instance.role)
+        except ValueError:
+            instance_role = PDRole.ROLE_U
+        if instance_role != role:
+            return None
+        try:
+            score = LoadBalancePolicy.calculate_endpoint_score(
+                instance,
+                endpoint,
+                role=role,
+                instance_score_weight=self._endpoint_instance_score_weight,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to score fast-path allocate candidate instance_id=%s endpoint_id=%s: %s",
+                instance_id,
+                endpoint_id,
+                e,
+            )
+            return None
+        return (instance, endpoint, score)
+
+    def _find_available_instance_endpoint(
+        self,
+        instance_id: int,
+        endpoint_id: int,
+    ) -> tuple[Instance, Endpoint] | None:
+        """Find an available instance/endpoint pair in the SchedulerServer local pool."""
+        for role in (PDRole.ROLE_E, PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
+            instance = self._instance_manager.get_available_instances(role).get(instance_id)
+            if not instance:
+                continue
+            for pod_eps in (instance.endpoints or {}).values():
+                for endpoint in (pod_eps or {}).values():
+                    if endpoint.id == endpoint_id:
+                        return (instance, endpoint)
+        return None
 
 # ==================== Transport (ROUTER frontend) ====================
 

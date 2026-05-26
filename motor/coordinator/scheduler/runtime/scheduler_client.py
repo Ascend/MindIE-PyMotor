@@ -25,6 +25,9 @@ from motor.coordinator.domain import InstanceReadiness, UpdateWorkloadParams
 from motor.coordinator.scheduler.runtime.zmq_protocol import (
     SchedulerRequest, SchedulerResponse, SchedulerRequestType, SchedulerResponseType,
     INSTANCE_CHANGE_TOPIC,
+    CANDIDATE_POLICY_LOAD_BALANCE,
+    CANDIDATE_POLICY_ROUND_ROBIN,
+    CANDIDATE_POLICY_KV_CACHE_AFFINITY,
     pack_send_frames, unpack_recv_payload,
     ZMQMessageSerializer,
 )
@@ -48,7 +51,7 @@ def _collect_active_endpoints_from_cache(cache: "_SchedulerInstanceCache") -> li
     Filter logic aligned with BaseRouter._select_endpoint_from_instance.
     """
     endpoints: list[tuple[str, str]] = []
-    for role in (PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
+    for role in (PDRole.ROLE_E, PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_U):
         for inst in cache.get_instances(role):
             if not inst or not inst.endpoints:
                 continue
@@ -136,15 +139,19 @@ class _SchedulerInstanceCache:
         cached_endpoint = self._endpoint_map.get((instance_id, endpoint_id))
         if not cached_endpoint:
             return
+        old_workload = cached_endpoint.workload or Workload()
         cached_endpoint.workload = Workload(
             active_tokens=active_tokens,
             active_kv_cache=active_kv_cache,
         )
-        gathered = Workload()
-        for (iid, eid), ep in self._endpoint_map.items():
-            if iid == instance_id:
-                gathered += ep.workload
-        cached_instance.gathered_workload = gathered
+        if cached_instance.gathered_workload is None:
+            cached_instance.gathered_workload = Workload()
+        cached_instance.gathered_workload.active_tokens += (
+            active_tokens - old_workload.active_tokens
+        )
+        cached_instance.gathered_workload.active_kv_cache += (
+            active_kv_cache - old_workload.active_kv_cache
+        )
 
     def _apply_role_under_lock(self, role: PDRole, instances: list[Instance]) -> None:
         """Update cache and maps for one role. Must be called with _lock held."""
@@ -367,14 +374,19 @@ _INSTANCE_PUB_SUB_SETTLE_MS = 150
 
 class _InstancePushSubscriber:
     """
-    SUB socket that listens for instance-change notifications from Scheduler PUB.
-    On each message, parses optional instance_version and invokes on_notify(version).
+    SUB socket that listens for Scheduler PUB notifications.
+
+    Instance-change messages trigger instance cache refresh.
     Uses its own ZMQ context to avoid coupling with DEALER transport.
     """
 
-    def __init__(self, sub_address: str, on_notify: OnInstanceChangeNotify) -> None:
+    def __init__(
+        self,
+        sub_address: str,
+        on_instance_change: OnInstanceChangeNotify,
+    ) -> None:
         self._sub_address = sub_address
-        self._on_notify = on_notify
+        self._on_instance_change = on_instance_change
         self._context: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
         self._stop_event = asyncio.Event()
@@ -428,14 +440,10 @@ class _InstancePushSubscriber:
             while not self._stop_event.is_set() and self._socket:
                 try:
                     frames = await self._socket.recv_multipart()
-                    # Multipart: [INSTANCE_CHANGE_TOPIC, version_bytes] -> version; single frame -> None
-                    version = None
-                    if len(frames) >= 2 and frames[0] == INSTANCE_CHANGE_TOPIC:
-                        try:
-                            version = int(frames[1].decode())
-                        except ValueError:
-                            pass
-                    await self._on_notify(version)
+                    topic = frames[0] if frames else b""
+                    if topic == INSTANCE_CHANGE_TOPIC:
+                        version = self._parse_int_frame(frames, 1)
+                        await self._on_instance_change(version)
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
@@ -446,6 +454,16 @@ class _InstancePushSubscriber:
         except Exception as e:
             if not self._stop_event.is_set():
                 logger.error("Instance push SUB recv loop error: %s", e, exc_info=True)
+
+    @staticmethod
+    def _parse_int_frame(frames: list[bytes], index: int) -> int | None:
+        """Parse int from a multipart frame."""
+        if len(frames) <= index:
+            return None
+        try:
+            return int(frames[index].decode())
+        except (ValueError, UnicodeDecodeError):
+            return None
 
 
 @dataclass
@@ -460,6 +478,7 @@ class SchedulerClientConfig:
     scheduler_type: str | None = None
     client_index: int = 0
     client_count: int = 1
+    endpoint_instance_score_weight: float = 0.05
     tls_config: Any | None = None
     deploy_mode: Any | None = None
     on_instance_refreshed: OnInstanceRefreshedCallback | None = None
@@ -476,6 +495,9 @@ class AsyncSchedulerClient:
         self.timeout = config.timeout
         self._client_index = max(0, config.client_index)
         self._client_count = max(1, config.client_count)
+        self._endpoint_instance_score_weight = max(
+            0.0, config.endpoint_instance_score_weight
+        )
         self._deploy_mode = config.deploy_mode
 
         self._serializer = ZMQMessageSerializer()
@@ -492,7 +514,8 @@ class AsyncSchedulerClient:
 
         instance_pub = (config.instance_pub_address or "").strip()
         self._push_subscriber = _InstancePushSubscriber(
-            instance_pub, self._on_instance_change_notify
+            instance_pub,
+            self._on_instance_change_notify,
         ) if instance_pub else None
 
     @property
@@ -530,24 +553,62 @@ class AsyncSchedulerClient:
 
     async def select_instance_and_endpoint(self, req_info: RequestInfo, role: PDRole | None = None):
         """Select instance and endpoint from cache or GET_AVAILABLE_INSTANCES. Returns (Instance, Endpoint) or None."""
+        candidates = await self._select_endpoint_candidates(req_info, role, top_k=1)
+        if not candidates:
+            return None
+        instance, endpoint, _ = candidates[0]
+        return (instance, endpoint)
+
+    async def _select_endpoint_candidates(
+        self,
+        req_info: RequestInfo,
+        role: PDRole | None = None,
+        top_k: int = 1,
+    ) -> list[tuple[Instance, Endpoint, float]]:
+        candidates, _ = await self._select_endpoint_candidates_with_policy(
+            req_info, role, top_k
+        )
+        return candidates
+
+    async def _select_endpoint_candidates_with_policy(
+        self,
+        req_info: RequestInfo,
+        role: PDRole | None = None,
+        top_k: int = 1,
+    ) -> tuple[list[tuple[Instance, Endpoint, float]], str]:
+        """Select endpoint candidates from cache or fresh instances."""
         cache_role = role if role is not None else PDRole.ROLE_U
         cached_instances = self._cache.get_instances(cache_role)
         if cached_instances:
             # Cache stores instances sorted by id (see replace_all call sites); use as-is for RR
-            selected = self._select_instance_and_endpoint_from_list(cached_instances, cache_role, req_info)
-            if selected:
-                logger.debug("Selected instance from cache (role=%s, policy=%s)", role, self._scheduler_type)
-                return selected
+            candidates, candidate_policy = self._select_endpoint_candidates_from_list_with_policy(
+                cached_instances, cache_role, req_info, top_k=top_k
+            )
+            if candidates:
+                logger.debug(
+                    "Selected %d endpoint candidate(s) from cache (role=%s, policy=%s)",
+                    len(candidates),
+                    role,
+                    self._scheduler_type,
+                )
+                return candidates, candidate_policy
         instances = await self.get_available_instances(role)
         if not instances:
-            return None
+            return [], self._scheduler_type or CANDIDATE_POLICY_ROUND_ROBIN
 
         # get_available_instances already wrote sorted list to cache; build sorted list once for this path
         instance_list = sorted(instances.values(), key=lambda i: i.id)
-        selected = self._select_instance_and_endpoint_from_list(instance_list, cache_role, req_info)
-        if selected:
-            logger.debug("Selected instance from fresh fetch (role=%s, policy=%s)", role, self._scheduler_type)
-        return selected
+        candidates, candidate_policy = self._select_endpoint_candidates_from_list_with_policy(
+            instance_list, cache_role, req_info, top_k=top_k
+        )
+        if candidates:
+            logger.debug(
+                "Selected %d endpoint candidate(s) from fresh fetch (role=%s, policy=%s)",
+                len(candidates),
+                role,
+                self._scheduler_type,
+            )
+        return candidates, candidate_policy
 
     async def select_and_allocate(
         self,
@@ -607,10 +668,12 @@ class AsyncSchedulerClient:
                 else:
                     self._last_instance_version = current_version
 
-        selected = await self.select_instance_and_endpoint(req_info, role)
-        if not selected:
+        candidates, candidate_policy = await self._select_endpoint_candidates_with_policy(
+            req_info, role, top_k=1
+        )
+        if not candidates:
             return None
-        instance, endpoint = selected
+        instance, endpoint, _ = candidates[0]
 
         # Allocation workload: RR does not use load, so use zero; LB uses demand for accounting.
         workload = (
@@ -620,6 +683,11 @@ class AsyncSchedulerClient:
         )
 
         request_id = str(uuid.uuid4())
+        workload_sequence = (
+            self._workload_reader.last_sequence
+            if self._workload_reader is not None
+            else None
+        )
         request = SchedulerRequest(
             request_type=SchedulerRequestType.ALLOCATE_ONLY,
             request_id=request_id,
@@ -628,7 +696,10 @@ class AsyncSchedulerClient:
                 "endpoint_id": endpoint.id,
                 "role": role_str,
                 "req_id": req_info.req_id,
+                "workload_sequence": workload_sequence,
+                "instance_version": self._last_instance_version,
                 "workload": workload.model_dump(mode="json"),
+                "candidate_policy": candidate_policy,
             },
         )
         response = await self._transport.send_request(request)
@@ -806,10 +877,15 @@ class AsyncSchedulerClient:
                 return InstanceReadiness.REQUIRED_MET if len(u_list) > 0 else InstanceReadiness.NONE
             return InstanceReadiness.UNKNOWN
 
-        e_list = self._cache.get_instances(PDRole.ROLE_E)
-        p_list = self._cache.get_instances(PDRole.ROLE_P)
-        d_list = self._cache.get_instances(PDRole.ROLE_D)
-        u_list = self._cache.get_instances(PDRole.ROLE_U)
+        def _cached_lists() -> tuple[list, list, list, list]:
+            return (
+                self._cache.get_instances(PDRole.ROLE_E),
+                self._cache.get_instances(PDRole.ROLE_P),
+                self._cache.get_instances(PDRole.ROLE_D),
+                self._cache.get_instances(PDRole.ROLE_U),
+            )
+
+        e_list, p_list, d_list, u_list = _cached_lists()
         status = _status(e_list, p_list, d_list, u_list)
         if status.is_ready():
             return status
@@ -817,6 +893,7 @@ class AsyncSchedulerClient:
             await self.get_available_instances(None)
         except Exception as e:
             logger.debug("has_required_instances: warm-up get_available_instances failed: %s", e)
+        e_list, p_list, d_list, u_list = _cached_lists()
         return _status(e_list, p_list, d_list, u_list)
 
     async def get_all_instances(self) -> tuple[dict[int, Instance], dict[int, Instance]]:
@@ -856,32 +933,54 @@ class AsyncSchedulerClient:
         except Exception as e:
             logger.warning("Instance change notify refresh failed: %s", e)
 
-    def _select_instance_and_endpoint_from_list(
-        self, instances: list[Instance], role: PDRole, req_info: RequestInfo
-    ) -> tuple[Instance, Endpoint] | None:
+    def _select_endpoint_candidates_from_list(
+        self,
+        instances: list[Instance],
+        role: PDRole,
+        req_info: RequestInfo,
+        top_k: int = 1,
+    ) -> list[tuple[Instance, Endpoint, float]]:
+        candidates, _ = self._select_endpoint_candidates_from_list_with_policy(
+            instances, role, req_info, top_k
+        )
+        return candidates
+
+    def _select_endpoint_candidates_from_list_with_policy(
+        self,
+        instances: list[Instance],
+        role: PDRole,
+        req_info: RequestInfo,
+        top_k: int = 1,
+    ) -> tuple[list[tuple[Instance, Endpoint, float]], str]:
         if not instances:
-            return None
+            return [], self._scheduler_type or CANDIDATE_POLICY_ROUND_ROBIN
         st = self._scheduler_type or "round_robin"
-        selected_instance = None
         if st == "load_balance":
-            selected_instance = self._select_instance_and_endpoint_by_load_balance(instances, role)
-            if selected_instance is not None:
-                return self._select_endpoint_for_instance(selected_instance)
+            candidates = self._select_endpoint_candidates_by_load_balance(
+                instances, role, top_k
+            )
+            if candidates:
+                return candidates, CANDIDATE_POLICY_LOAD_BALANCE
             logger.warning("load_balance failed, falling back to round-robin")
         elif st == "kv_cache_affinity":
             if role is PDRole.ROLE_P:
                 selected = KvCacheAffinityPolicy.select_endpoint_from_list(instances, req_info)
                 if selected is not None:
-                    return selected
+                    instance, endpoint = selected
+                    return [(instance, endpoint, 0.0)], CANDIDATE_POLICY_KV_CACHE_AFFINITY
                 logger.warning("kv_cache_affinity failed, falling back to load_balance")
-                selected_instance = self._select_instance_and_endpoint_by_load_balance(instances, role)
-                if selected_instance is not None:
-                    return self._select_endpoint_for_instance(selected_instance)
+                candidates = self._select_endpoint_candidates_by_load_balance(
+                    instances, role, top_k
+                )
+                if candidates:
+                    return candidates, CANDIDATE_POLICY_LOAD_BALANCE
                 logger.warning("load_balance also failed, falling back to round-robin")
             else:
-                selected_instance = self._select_instance_and_endpoint_by_load_balance(instances, role)
-            if selected_instance is not None:
-                return self._select_endpoint_for_instance(selected_instance)
+                candidates = self._select_endpoint_candidates_by_load_balance(
+                    instances, role, top_k
+                )
+                if candidates:
+                    return candidates, CANDIDATE_POLICY_LOAD_BALANCE
             logger.warning("kv_cache_affinity failed, falling back to round-robin")
         # Round-robin path: default policy or load_balance fallback
         if role not in self._instance_rr_counters:
@@ -895,8 +994,12 @@ class AsyncSchedulerClient:
         )
         self._instance_rr_counters[role] = next_counter - start_offset
         if not selected_instance:
-            return None
-        return self._select_endpoint_for_instance(selected_instance)
+            return [], CANDIDATE_POLICY_ROUND_ROBIN
+        selected = self._select_endpoint_for_instance(selected_instance)
+        if not selected:
+            return [], CANDIDATE_POLICY_ROUND_ROBIN
+        instance, endpoint = selected
+        return [(instance, endpoint, 0.0)], CANDIDATE_POLICY_ROUND_ROBIN
 
     def _select_endpoint_for_instance(
         self, instance: Instance
@@ -924,12 +1027,22 @@ class AsyncSchedulerClient:
         except Exception as e:
             logger.warning("Failed to initialize instance cache: %s", e, exc_info=True)
 
-    def _select_instance_and_endpoint_by_load_balance(
-        self, instances: list[Instance], role: PDRole
-    ) -> Instance | None:
+    def _select_endpoint_candidates_by_load_balance(
+        self,
+        instances: list[Instance],
+        role: PDRole,
+        top_k: int = 1,
+    ) -> list[tuple[Instance, Endpoint, float]]:
         n = len(instances)
         start_index = (n * self._client_index) // self._client_count if n else 0
-        selected_instance = LoadBalancePolicy.select_instance_from_list(
-            instances, role, start_index=start_index
+        candidates = LoadBalancePolicy.select_endpoint_candidates_from_list(
+            instances,
+            role,
+            top_k=max(1, top_k),
+            instance_score_weight=self._endpoint_instance_score_weight,
+            start_index=start_index,
         )
-        return selected_instance
+        return [
+            (candidate.instance, candidate.endpoint, candidate.score)
+            for candidate in candidates
+        ]

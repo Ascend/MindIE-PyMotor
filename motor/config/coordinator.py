@@ -119,6 +119,9 @@ class SchedulerType(Enum):
 class SchedulerConfig:
     deploy_mode: DeployMode = field(default=DeployMode.PD_SEPARATE)
     scheduler_type: SchedulerType = field(default=SchedulerType.LOAD_BALANCE)
+    # Weight of the instance average workload in endpoint-first load balancing.
+    # 0 means pure global endpoint minimum; small values preserve instance pressure awareness.
+    endpoint_instance_score_weight: float = 0.05
 
 
 @dataclass
@@ -520,6 +523,13 @@ class CoordinatorConfig:
                     f"num_workers({iwc.num_workers}) - 1 = {last_port} exceeds max port 65535"
                 )
 
+        # Validate scheduler score configuration
+        self._validate_positive_number(
+            self.scheduler_config.endpoint_instance_score_weight,
+            "endpoint_instance_score_weight",
+            allow_zero=True,
+        )
+
         # Validate host address
         self._validate_ip_or_hostname(self.api_config.coordinator_api_host, "coordinator_api_host")
 
@@ -697,7 +707,9 @@ class CoordinatorConfig:
             "\n"
             "  Scheduler Configuration:\n"
             f"    ├─ Deploy Mode:               {self.scheduler_config.deploy_mode.value}\n"
-            f"    └─ Scheduler Type:            {self.scheduler_config.scheduler_type.value}\n"
+            f"    ├─ Scheduler Type:            {self.scheduler_config.scheduler_type.value}\n"
+            f"    └─ Endpoint Instance Weight:  "
+            f"{self.scheduler_config.endpoint_instance_score_weight}\n"
             "\n"
             "  Multiprocess (Inference Workers):\n"
             f"    ├─ Num Workers:               {self.inference_workers_config.num_workers}\n"

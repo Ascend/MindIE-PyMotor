@@ -38,7 +38,7 @@ def calculate_demand_workload(role: PDRole, req_info: RequestInfo) -> Workload:
 
     if role == PDRole.ROLE_E:
         score = _calculate_encode_scores(req_info)
-        return Workload(active_kv_cache=score, active_tokens=score)
+        return Workload(active_tokens=score)
     if role == PDRole.ROLE_P:
         score = _calculate_prefill_scores(req_info.req_len)
         return Workload(active_kv_cache=score, active_tokens=score)
@@ -72,7 +72,7 @@ def _calculate_encode_scores(req_info: RequestInfo) -> float:
                 img_url = content_item.get("image_url", {}).get("url", "")
                 mul_token += get_mul_token(img_url)
             elif content_type == "video_url":
-                mul_token += len(req_info.req_len) * 32
+                mul_token += req_info.req_len * 32
     return mul_token
 
 

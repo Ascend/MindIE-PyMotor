@@ -278,34 +278,36 @@ class SeparateCDPRouter(BaseRouter):
                                     ri = recompute_common.build_request_info_for_nonstream_recompute(
                                         req_data, body
                                     )
-                                    # Each non-stream recomputed body carries the full partial for that round; += would
-                                    # duplicate prefixes across recompute rounds.
-                                    self._recompute.total_generated_token = ri["generated_token"]
+                                    self._recompute.total_generated_token = self._merge_recompute_text(
+                                        self._recompute.total_generated_token,
+                                        ri["generated_token"],
+                                    )
                                     self._recompute.retry_count = self._prepare_recompute_retry(
                                         req_data, ri, self._recompute.retry_count
                                     )
                                     recompute_broke = True
-                                    break
-                                self.req_info.update_state(ReqState.DECODE_END)
-                                if (
-                                    "chat" in self.req_info.effective_entry_api()
-                                    and body.get("object") == "text_completion"
-                                ):
-                                    adapt_completion_nonstream_to_chat(
-                                        body, req_id=self.req_info.req_id
-                                    )
-                                recompute_common.strip_nonstream_response_body_for_client(
-                                    body,
-                                    client_return_token_ids=self.req_info.req_data.get(
-                                        "_client_return_token_ids", False
-                                    ),
-                                )
-                                if self.req_info.prompt_tokens_details:
-                                    if body.get("usage", {}):
-                                        body['usage']['prompt_tokens_details'] = (
-                                            self.req_info.prompt_tokens_details
+                                else:
+                                    self.req_info.update_state(ReqState.DECODE_END)
+                                    if (
+                                        "chat" in self.req_info.effective_entry_api()
+                                        and body.get("object") == "text_completion"
+                                    ):
+                                        adapt_completion_nonstream_to_chat(
+                                            body, req_id=self.req_info.req_id
                                         )
-                                return JSONResponse(content=body)
+                                    self._merge_nonstream_recompute_body(body)
+                                    recompute_common.strip_nonstream_response_body_for_client(
+                                        body,
+                                        client_return_token_ids=self.req_info.req_data.get(
+                                            "_client_return_token_ids", False
+                                        ),
+                                    )
+                                    if self.req_info.prompt_tokens_details:
+                                        if body.get("usage", {}):
+                                            body['usage']['prompt_tokens_details'] = (
+                                                self.req_info.prompt_tokens_details
+                                            )
+                                    return JSONResponse(content=body)
                             if not recompute_broke and self.req_info.is_cancelled:
                                 raise Exception("exception occurred in Prefill request")
                         if recompute_broke:
@@ -352,6 +354,37 @@ class SeparateCDPRouter(BaseRouter):
                 label, attempt + 1, max_attempts, err_str
             )
         return err_str
+
+    @staticmethod
+    def _merge_recompute_text(prefix: str, current: str) -> str:
+        """Merge recompute text without duplicating engines that already echo the prefix."""
+        if not prefix:
+            return current
+        if not current:
+            return prefix
+        if current.startswith(prefix):
+            return current
+        return prefix + current
+
+    def _merge_nonstream_recompute_body(self, body: dict[str, Any]) -> None:
+        """Patch final non-stream retry response with text generated before recompute."""
+        if self._recompute.retry_count <= 0 or not self._recompute.total_generated_token:
+            return
+        choices = body.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            return
+        choice = choices[0]
+        final_text = self._merge_recompute_text(
+            self._recompute.total_generated_token,
+            recompute_common.extract_content_from_choice(choice),
+        )
+        client_expects_chat_shape = "chat" in self.req_info.effective_entry_api()
+        recompute_common.update_nonstream_retry_choice(
+            choice,
+            {"chat_flag": client_expects_chat_shape},
+            final_text,
+            client_expects_chat_shape=client_expects_chat_shape,
+        )
 
     def _worker_metaserver_url(self) -> str:
         host = self.config.api_config.coordinator_api_host

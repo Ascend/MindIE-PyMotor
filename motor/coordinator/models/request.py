@@ -30,6 +30,8 @@ class RequestType(Enum):
 
 class ReqState(Enum):
     ARRIVE = 'Arrive'               # Request arrive
+    E_SCHEDULING = 'E_Scheduling'   # Currently scheduling E instance
+    E_ALLOCATED = 'E_Allocated'     # Allocated E instance
     P_SCHEDULING = 'P_Scheduling'   # Currently scheduling P instance
     P_ALLOCATED = 'P_Allocated'     # Allocated P instance
     PREFILL_END = 'Prefill End'     # Prefill completed

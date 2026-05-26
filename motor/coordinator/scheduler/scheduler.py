@@ -62,6 +62,12 @@ class Scheduler:
         self._scheduling_policy = SchedulingPolicyFactory.create(
             self._policy_type, self._instance_provider
         )
+        if self._config and hasattr(
+            self._scheduling_policy, "set_endpoint_instance_score_weight"
+        ):
+            self._scheduling_policy.set_endpoint_instance_score_weight(
+                self._config.scheduler_config.endpoint_instance_score_weight
+            )
         logger.info("Scheduler started.")
     
     def get_scheduling_policy(self) -> BaseSchedulingPolicy:

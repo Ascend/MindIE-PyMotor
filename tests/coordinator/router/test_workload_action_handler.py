@@ -43,6 +43,53 @@ class TestCalculateDemandWorkload:
         assert w.active_tokens == 10.0
         assert w.active_kv_cache == 0
 
+    def test_encode_role_uses_tokens_without_kv_cache(self, monkeypatch):
+        """ROLE_E: encode allocation should not leave KV cache workload to release."""
+        monkeypatch.setattr(
+            "motor.coordinator.domain.workload_calculator.get_mul_token",
+            lambda _: 42,
+        )
+        req_info = MagicMock()
+        req_info.req_data = {
+            "messages": [
+                {
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,test"},
+                        }
+                    ]
+                }
+            ]
+        }
+
+        w = calculate_demand_workload(PDRole.ROLE_E, req_info)
+
+        assert w.active_tokens == 42
+        assert w.active_kv_cache == 0
+
+    def test_encode_video_role_uses_request_length(self):
+        """ROLE_E video workload should use integer req_len without calling len(req_len)."""
+        req_info = MagicMock()
+        req_info.req_len = 10
+        req_info.req_data = {
+            "messages": [
+                {
+                    "content": [
+                        {
+                            "type": "video_url",
+                            "video_url": {"url": "https://example.com/video.mp4"},
+                        }
+                    ]
+                }
+            ]
+        }
+
+        w = calculate_demand_workload(PDRole.ROLE_E, req_info)
+
+        assert w.active_tokens == 320
+        assert w.active_kv_cache == 0
+
     def test_hybrid_role(self):
         """ROLE_U: both set, average of prefill and decode scores."""
         req_info = MagicMock()
@@ -160,6 +207,39 @@ class TestWorkloadActionHandler:
         )
         assert workload_change is None
         assert role is None
+
+    @pytest.mark.asyncio
+    async def test_encode_release_tokens_deletes_workload_record(self, mock_request_manager):
+        """Encode has no KV workload, so token release should clear the request record."""
+        instance = Instance(
+            job_name="encode",
+            model_name="m",
+            id=1,
+            role=PDRole.ROLE_E,
+            status=InsStatus.ACTIVE,
+            parallel_config=ParallelConfig(dp_size=1),
+        )
+        endpoint = Endpoint(
+            id=1,
+            ip="127.0.0.1",
+            business_port="8080",
+            mgmt_port="8080",
+            status=EndpointStatus.NORMAL,
+        )
+        resource = ScheduledResource(instance=instance, endpoint=endpoint)
+        current = Workload(active_tokens=42)
+        mock_request_manager.get_req_workload = AsyncMock(return_value=current)
+        handler = WorkloadActionHandler(mock_request_manager)
+        req_info = MagicMock()
+
+        workload_change, role = await handler.compute_and_update(
+            resource, "req-encode", WorkloadAction.RELEASE_TOKENS, req_info=req_info
+        )
+
+        assert role == PDRole.ROLE_E
+        assert workload_change == Workload(active_tokens=-42)
+        mock_request_manager.update_req_workload.assert_called_once()
+        mock_request_manager.del_req_workload.assert_called_once_with("req-encode", PDRole.ROLE_E)
 
     @pytest.mark.asyncio
     async def test_compute_and_update_invalid_resource_returns_none(self, mock_request_manager):

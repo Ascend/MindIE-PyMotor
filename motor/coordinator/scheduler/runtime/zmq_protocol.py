@@ -63,6 +63,16 @@ class SchedulerResponse(msgspec.Struct):
     error: str | None = None
 
 
+# Candidate policy values for ALLOCATE_ONLY request data["candidate_policy"].
+CANDIDATE_POLICY_LOAD_BALANCE = "load_balance"
+CANDIDATE_POLICY_ROUND_ROBIN = "round_robin"
+CANDIDATE_POLICY_KV_CACHE_AFFINITY = "kv_cache_affinity"
+KNOWN_CANDIDATE_POLICIES = frozenset({
+    CANDIDATE_POLICY_LOAD_BALANCE,
+    CANDIDATE_POLICY_ROUND_ROBIN,
+    CANDIDATE_POLICY_KV_CACHE_AFFINITY,
+})
+
 # Zero-copy: dict/list larger than this (bytes) go in separate frame; main frame stores __ref__ index only
 ZERO_COPY_REF_KEY = "__ref__"
 DEFAULT_ZERO_COPY_THRESHOLD = 1024
