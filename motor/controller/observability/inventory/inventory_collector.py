@@ -77,11 +77,10 @@ def _get_server_of_controller_master():
 
 def _get_instance_info_from_instance(instance: Instance, instance_status: InstanceStatus):
     server_ip_list = []
-    pod_ip_list = []
 
     pod_info_list = []
     for pod_ip, pod_info in instance.endpoints.items():
-        pod_ip_list.append(pod_ip)
+        server_ip_list.append(pod_ip)
         pod_associated_info_list = []
         for _, endpoint_info in pod_info.items():
             for device_info in endpoint_info.device_infos:
@@ -129,18 +128,20 @@ class InventoryCollector(ThreadSafeSingleton):
         return model_service_info
 
     def _collect_inventory_detail(self) -> dict:
-        p_instance_list, d_instance_list = self._get_p_d_instance_list()
+        p_instance_list, d_instance_list, u_instance_list = self._get_instance_role_lists()
         all_server_ip_list = []
         for instance_info in p_instance_list:
-            all_server_ip_list.extend(instance_info.get(SERVER_IP_LIST))
+            all_server_ip_list.extend(self._extract_server_ips(instance_info))
         for instance_info in d_instance_list:
-            all_server_ip_list.extend(instance_info.get(SERVER_IP_LIST))
+            all_server_ip_list.extend(self._extract_server_ips(instance_info))
+        for instance_info in u_instance_list:
+            all_server_ip_list.extend(self._extract_server_ips(instance_info))
 
         inventory_detail = {
             "DInstanceList": d_instance_list,
             "PInstanceList": p_instance_list,
             "DPGroupList": self._get_dp_group_list(),
-            "PDHybridList": [],
+            "PDHybridList": u_instance_list,
             "backupServerList": _get_backup_server_list(),
             "expertList": _get_expert_list(),
             SERVER_IP_LIST: list(set(all_server_ip_list)),
@@ -149,6 +150,13 @@ class InventoryCollector(ThreadSafeSingleton):
             "serverOfManagerSlave": _get_server_of_controller_slave(),
         }
         return inventory_detail
+
+    @staticmethod
+    def _extract_server_ips(instance_info: dict) -> list[str]:
+        server_ips = instance_info.get(SERVER_IP_LIST) or []
+        if server_ips:
+            return server_ips
+        return [pod_info.get(POD_ID) for pod_info in instance_info.get("podInfoList", []) if pod_info.get(POD_ID)]
 
     def _get_dp_group_list(self):
         dp_group_list = []
@@ -210,13 +218,28 @@ class InventoryCollector(ThreadSafeSingleton):
     def _get_model_state(self):
         prefill_count = 0
         decode_count = 0
+        hybrid_count = 0
         instance_name_list = []
         for temp_instance in self.active_instance_list:
             if temp_instance.role == PDRole.ROLE_P:
                 prefill_count += 1
             elif temp_instance.role == PDRole.ROLE_D:
                 decode_count += 1
+            elif temp_instance.role == PDRole.ROLE_U:
+                hybrid_count += 1
             instance_name_list.append(temp_instance.job_name)
+
+        if hybrid_count > 0:
+            for temp_instance in self.initial_instance_list:
+                temp_instance_name = temp_instance.job_name
+                if temp_instance_name not in instance_name_list:
+                    return ModelState.SUB_HEALTHY
+            for temp_instance in self.inactive_instance_list:
+                temp_instance_name = temp_instance.job_name
+                if temp_instance_name not in instance_name_list:
+                    return ModelState.SUB_HEALTHY
+            return ModelState.HEALTHY
+
         if prefill_count == 0 or decode_count == 0:
             return ModelState.UNHEALTHY
         # check whether there are instances in initial_instance_list/inactive_instance_list
@@ -230,15 +253,18 @@ class InventoryCollector(ThreadSafeSingleton):
                 return ModelState.SUB_HEALTHY
         return ModelState.HEALTHY
 
-    def _get_p_d_instance_list(self):
+    def _get_instance_role_lists(self):
         p_instance_list = []
         d_instance_list = []
+        u_instance_list = []
         instance_name_list = []
         for temp_instance in self.active_instance_list:
             if temp_instance.role == PDRole.ROLE_P:
                 p_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.RUNNING))
             elif temp_instance.role == PDRole.ROLE_D:
                 d_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.RUNNING))
+            elif temp_instance.role == PDRole.ROLE_U:
+                u_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.RUNNING))
             instance_name_list.append(temp_instance.job_name)
         for temp_instance in self.initial_instance_list:
             temp_instance_name = temp_instance.job_name
@@ -248,6 +274,8 @@ class InventoryCollector(ThreadSafeSingleton):
                 p_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.INIT))
             elif temp_instance.role == PDRole.ROLE_D:
                 d_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.INIT))
+            elif temp_instance.role == PDRole.ROLE_U:
+                u_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.INIT))
             instance_name_list.append(temp_instance_name)
         for temp_instance in self.inactive_instance_list:
             temp_instance_name = temp_instance.job_name
@@ -257,5 +285,7 @@ class InventoryCollector(ThreadSafeSingleton):
                 p_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.ERROR))
             elif temp_instance.role == PDRole.ROLE_D:
                 d_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.ERROR))
+            elif temp_instance.role == PDRole.ROLE_U:
+                u_instance_list.append(_get_instance_info_from_instance(temp_instance, InstanceStatus.ERROR))
             instance_name_list.append(temp_instance_name)
-        return p_instance_list, d_instance_list
+        return p_instance_list, d_instance_list, u_instance_list
