@@ -170,7 +170,18 @@ spec:
     - name: coordinator
       replicas: 1
       services:
-      - name: mindie-motor-service
+      - name: mindie-motor-coordinator-infer
+        spec:
+          ports:
+          - nodePort: 31015
+            port: 1025
+            protocol: TCP
+            targetPort: 1025
+          selector:
+            app: mindie-motor-coordinator
+          sessionAffinity: None
+          type: NodePort
+      - name: mindie-motor-coordinator-mgmt
         spec:
           ports:
           - port: 1026
@@ -180,13 +191,13 @@ spec:
             app: mindie-motor-coordinator
           sessionAffinity: None
           type: ClusterIP
-      - name: mindie-motor-infer
+      - name: mindie-motor-coordinator-obs
         spec:
           ports:
-          - nodePort: 31015
-            port: 1025
+          - nodePort: 31017
+            port: 1027
             protocol: TCP
-            targetPort: 1025
+            targetPort: 1027
           selector:
             app: mindie-motor-coordinator
           sessionAffinity: None

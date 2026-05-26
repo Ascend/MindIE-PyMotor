@@ -21,13 +21,14 @@ logger = get_logger(__name__)
 
 class Observability(ThreadSafeSingleton):
     """
-    Observability module for Motor Controller: manages alarms and metrics routing.
+    Observability module for Motor Controller: manages alarms.
+    Metrics are served by the Coordinator; this module provides an internal
+    get_metrics() for Controller components that need Coordinator metrics data.
     """
 
     def __init__(self, config: ControllerConfig | None = None) -> None:
         super().__init__()
 
-        # If already initialized, return
         if hasattr(self, "_initialized"):
             return
         self._initialized = True
@@ -65,10 +66,11 @@ class Observability(ThreadSafeSingleton):
 
     def get_metrics(self, metrics_type: str = "full", role: str | None = None) -> str:
         """
-        Get metrics by type. Routes request to Coordinator for data processing.
+        Get metrics from Coordinator (internal API, not exposed via HTTP).
+        Controller components that need metrics data should call this method.
 
         :param metrics_type: "full" (default), "instance", or "role"
-        :param role: when metrics_type is "role", filter to a specific role (e.g. "prefill", "decode")
+        :param role: when metrics_type is "role", filter to a specific role
         :returns: Prometheus text
         """
         try:

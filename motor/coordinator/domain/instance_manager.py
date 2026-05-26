@@ -22,6 +22,7 @@ from motor.coordinator.api_client.conductor_api_client import ConductorApiClient
 
 TYPE_SCHEDULER = "schedule"
 TYPE_MGMT = "mgmt"
+TYPE_OBS = "obs"
 
 logger = get_logger(__name__)
 
@@ -319,7 +320,7 @@ class InstanceManager:
         return self._available_role_pools.get(_role_to_pdrole(instance.role))
 
     def _register_kv_instance(self, instances: list[Instance], is_register: bool = True) -> None:
-        """Apply kv instance refresh, to avoid duplication, only mgmt needs to do this."""
+        """Only the Mgmt process registers KV instances (Scheduler/Obs are mirrors)."""
         if self.typename != TYPE_MGMT:
             return
 

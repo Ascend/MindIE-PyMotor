@@ -22,14 +22,12 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
 
 from motor.common.resources.http_msg_spec import InsEventMsg
 from motor.common.http.cert_util import CertUtil
 from motor.common.logger import get_logger
 from motor.common.http.security_utils import sanitize_error_message, log_audit_event
 from motor.config.coordinator import CoordinatorConfig, DeployMode
-from motor.coordinator.metrics.metrics_collector import MetricsCollector
 from motor.coordinator.models.response import RequestResponse
 from motor.coordinator.api_server.base_server import BaseCoordinatorServer
 from motor.coordinator.scheduler.runtime import SchedulerConnectionManager
@@ -129,12 +127,6 @@ class ManagementServer(BaseCoordinatorServer):
         logger.info("Management server is starting...")
         await self._scheduler_connection.connect()
         try:
-            MetricsCollector().set_event_loop(asyncio.get_running_loop())
-            MetricsCollector().set_scheduler_provider(lambda: self._instance_manager)
-            MetricsCollector().start()
-        except Exception as e:
-            logger.warning("Ignored error setting metrics collector: %s", e)
-        try:
             yield
         except asyncio.CancelledError:
             logger.info("Management server startup was cancelled")
@@ -143,10 +135,6 @@ class ManagementServer(BaseCoordinatorServer):
             raise
         finally:
             logger.info("Management server is shutting down...")
-            try:
-                MetricsCollector().stop()
-            except Exception as e:
-                logger.warning("Ignored error stopping metrics collector: %s", e)
             await self._scheduler_connection.disconnect()
 
     async def run(self) -> None:
@@ -245,15 +233,6 @@ class ManagementServer(BaseCoordinatorServer):
             )
             return _build_readiness_response(msg, out.is_ready)
 
-        @self.management_app.get("/metrics")
-        async def get_metrics(request: Request):
-            metrics_type = request.query_params.get("type", "full")
-            role = request.query_params.get("role", None)
-            result = MetricsCollector().get_metrics(metrics_type=metrics_type, role=role)
-            if isinstance(result, str):
-                return PlainTextResponse(content=result)
-            return result
-
         @self.management_app.post("/instances/refresh", response_model=RequestResponse)
         @self.timeout_handler()
         async def refresh_instances(request: Request) -> RequestResponse:
@@ -285,7 +264,6 @@ class ManagementServer(BaseCoordinatorServer):
                     "GET /liveness": "liveness check",
                     "GET /startup": "startup probe",
                     "GET /readiness": "readiness check",
-                    "GET /metrics": "get metrics",
                     "POST /instances/refresh": "refresh instances",
                 },
             }

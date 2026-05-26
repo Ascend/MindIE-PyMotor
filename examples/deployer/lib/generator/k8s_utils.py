@@ -15,7 +15,7 @@ import lib.constant as C
 from lib.utils import logger, safe_exec_cmd, load_yaml
 
 g_controller_service = "mindie-motor-controller-service"
-g_coordinator_service = "mindie-motor-coordinator-service"
+g_coordinator_service = "mindie-motor-coordinator-mgmt"
 g_kv_pool_service = "kvp-master"
 g_kv_conductor_service = "kv-conductor"
 g_kv_pool_enabled = False
@@ -101,8 +101,7 @@ def get_deploy_mode_from_config(deploy_config):
     mode = deploy_config.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_INFER_SERVICE_SET)
     if mode not in C.VALID_DEPLOY_MODES:
         raise ValueError(
-            f"motor_deploy_config.{C.DEPLOY_MODE_CONFIG_KEY} must be one of {list(C.VALID_DEPLOY_MODES)}, "
-            f"got: {mode}"
+            f"motor_deploy_config.{C.DEPLOY_MODE_CONFIG_KEY} must be one of {list(C.VALID_DEPLOY_MODES)}, got: {mode}"
         )
     return mode
 
@@ -276,16 +275,11 @@ def create_motor_config_configmap(job_id):
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/all_combine_in_single_container.sh "
         "--from-file=./probe/probe.sh "
         "--from-file=./probe/probe.py "
-        f"--from-file=user_config.json={g_user_config_path}"
-        + " -n " + job_id
+        f"--from-file=user_config.json={g_user_config_path}" + " -n " + job_id
     )
 
 
-def exec_all_kubectl_multi(
-    deploy_config,
-    baseline_config,
-    deploy_mode_arg=C.DEPLOY_MODE_INFER_SERVICE_SET
-):
+def exec_all_kubectl_multi(deploy_config, baseline_config, deploy_mode_arg=C.DEPLOY_MODE_INFER_SERVICE_SET):
     """Execute kubectl commands for multi-deployment or infer-service-set mode."""
     job_id = deploy_config[C.CONFIG_JOB_ID]
     out_deploy_yaml_path = C.OUTPUT_ROOT_PATH
@@ -312,7 +306,7 @@ def exec_all_kubectl_singer(deploy_config, yaml_file):
 def scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, node_type):
     """Scale engine instances by type (p, d or u)."""
     from lib.generator.engine import obtain_engine_instance_total
-    
+
     job_id = deploy_config[C.CONFIG_JOB_ID]
     totals = obtain_engine_instance_total(deploy_config)
     bases = obtain_engine_instance_total(baseline_deploy_config)

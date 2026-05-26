@@ -233,6 +233,24 @@ vllm:kv_cache_usage_perc{role="decode",model_name="Qwen2.5-7B-Instruct"} 0.635
 
 ---
 
+## 实例指标查询接口（已弃用）
+
+> [!WARNING] 已弃用
+> `GET /instance/metrics` 接口已弃用，请使用 `GET /metrics?type=instance` 代替。调用本接口将返回 HTTP 410 Gone。
+
+**接口格式**
+
+请求类型：**GET**
+URL：`http(s)://{CoordinatorIP}:{管理端口}/instance/metrics`
+
+**响应示例**
+
+```text
+# /instance/metrics is deprecated. Use GET /metrics?type=instance instead.
+```
+
+---
+
 ## 实例刷新接口
 
 **接口功能**

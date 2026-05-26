@@ -168,21 +168,23 @@ class ControllerAPI:
 
     @observability_enabled_required
     async def _get_metrics(self, request: Request):
+        """[DEPRECATED] Metrics proxy: forward to Coordinator.
+        Use Coordinator's GET /metrics?type={type}&role={role} directly.
+        """
+        logger.warning(
+            "[DEPRECATED] /observability/metrics is deprecated. Use Coordinator's GET /metrics?type=%s instead.",
+            request.query_params.get("type", "full"),
+        )
         try:
             metrics_type = request.query_params.get("type", "full").strip()
             role = request.query_params.get("role", None)
             if role is not None:
                 role = role.strip()
             metrics_data = self.observability.get_metrics(metrics_type=metrics_type, role=role)
-            # Prometheus text (full / single-role) returned as plain text;
-            # structured data (instance / all-role) returned as JSON.
-            if isinstance(metrics_data, str):
-                return PlainTextResponse(content=metrics_data)
-            return format_success_response(metrics_data)
-
+            return PlainTextResponse(content=metrics_data)
         except Exception as e:
             logger.error("Failed to get metrics: %s", e)
-            raise_internal_error(f"Internal server error: {str(e)}")
+            raise_internal_error("Internal server error: %s" % str(e))
 
     @observability_enabled_required
     async def _get_alarms(self, request: Request) -> dict[str, Any]:
@@ -278,9 +280,9 @@ class ControllerAPI:
                     raise RuntimeError("Failed to create SSL context")
 
                 server_config.ssl = context
-                logger.info(f"Starting Controller API server on https://{self.host}:{self.port}")
+                logger.info("Starting Controller API server on https://%s:%d", self.host, self.port)
             else:
-                logger.info(f"Starting Controller API server on http://{self.host}:{self.port}")
+                logger.info("Starting Controller API server on http://%s:%d", self.host, self.port)
 
             self.server = uvicorn.Server(server_config)
             self.loop = asyncio.new_event_loop()
@@ -451,13 +453,15 @@ class ControllerAPI:
 
                 server_config.ssl = context
                 logger.info(
-                    f"Starting observability API server on https://"
-                    f"{self.observability_api_host}:{self.observability_api_port}"
+                    "Starting observability API server on https://%s:%d",
+                    self.observability_api_host,
+                    self.observability_api_port,
                 )
             else:
                 logger.info(
-                    f"Starting observability API server on http://"
-                    f"{self.observability_api_host}:{self.observability_api_port}"
+                    "Starting observability API server on http://%s:%d",
+                    self.observability_api_host,
+                    self.observability_api_port,
                 )
 
             self.observability_server = uvicorn.Server(server_config)

@@ -65,17 +65,21 @@ ROLE_HEARTBEAT_STALE_SEC = 5.0
 
 def _default_skip_paths() -> set[str]:
     return {
-        "/", "/startup", "/readiness", "/liveness", "/metrics",
-        "/instances/refresh", "/docs", "/redoc", "/openapi.json", "/favicon.ico"
+        "/",
+        "/startup",
+        "/readiness",
+        "/liveness",
+        "/metrics",
+        "/instances/refresh",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/favicon.ico",
     }
 
 
 def _default_rate_limit_skip_paths() -> list[str]:
-    return [
-        "/liveness", "/readiness", "/metrics",
-        "/docs", "/redoc", "/openapi.json",
-        "/favicon.ico", "/startup"
-    ]
+    return ["/liveness", "/readiness", "/metrics", "/docs", "/redoc", "/openapi.json", "/favicon.ico", "/startup"]
 
 
 class DeployMode(Enum):
@@ -192,6 +196,7 @@ class InferenceWorkersConfig:
 @dataclass
 class SchedulerProcessConfig:
     """Scheduler process configuration (default only; not user-configurable in first version)."""
+
     ipc_dir: str = ""  # Base dir for IPC sockets; empty => /tmp. Used to avoid hardcoded /tmp in containers.
     timeout: float = 5.0  # Client request timeout (seconds)
     reconnect_interval: float = 5.0  # Client reconnect interval (seconds)
@@ -235,6 +240,7 @@ class ApiConfig:
     coordinator_api_dns: str = field(default_factory=lambda: Env.coordinator_service or '127.0.0.1')
     coordinator_api_infer_port: int = 1025
     coordinator_api_mgmt_port: int = 1026
+    coordinator_obs_port: int = 1027
 
 
 @dataclass
@@ -251,6 +257,7 @@ class DeployConfig:
 @dataclass
 class TracerConfig:
     """Tracer configuration class"""
+
     endpoint: str = ""
     root_sampling_rate: float = 1.0
     remote_parent_sampled: float = 1.0
@@ -337,7 +344,7 @@ class CoordinatorConfig:
                         else:
                             cfg = raw
                         tls_configs = [MGMT_TLS_CONFIG, INFER_TLS_CONFIG, ETCD_TLS_CONFIG]
-                        _update_tls_config(tls_configs, cfg, raw)   
+                        _update_tls_config(tls_configs, cfg, raw)
                         _update_instances_num(cfg, raw)
                         _update_prefill_kv_event_config(cfg, raw)
         except json.JSONDecodeError as e:
@@ -373,7 +380,7 @@ class CoordinatorConfig:
 
             scheduler_handlers = {
                 'deploy_mode': lambda obj, key, value: set_enum_field(obj, key, value, DeployMode),
-                'scheduler_type': lambda obj, key, value: set_enum_field(obj, key, value, SchedulerType)
+                'scheduler_type': lambda obj, key, value: set_enum_field(obj, key, value, SchedulerType),
             }
 
             # Enrich AIGW fields from user_config if present
@@ -492,6 +499,7 @@ class CoordinatorConfig:
         # Validate HTTP configuration
         self._validate_port_range(self.api_config.coordinator_api_infer_port, "coordinator_api_infer_port")
         self._validate_port_range(self.api_config.coordinator_api_mgmt_port, "coordinator_api_mgmt_port")
+        self._validate_port_range(self.api_config.coordinator_obs_port, "coordinator_obs_port")
         if self.inference_workers_config.worker_metaserver_base_port != 0:
             self._validate_port_range(
                 self.inference_workers_config.worker_metaserver_base_port,
@@ -526,14 +534,14 @@ class CoordinatorConfig:
         self._validate_positive_number(self.prometheus_metrics_config.reuse_time, "reuse_time")
 
         # Validate standby configuration
-        self._validate_positive_number(self.standby_config.master_standby_check_interval,
-                                       "master_standby_check_interval")
+        self._validate_positive_number(
+            self.standby_config.master_standby_check_interval, "master_standby_check_interval"
+        )
         self._validate_positive_number(self.standby_config.master_lock_ttl, "master_lock_ttl")
-        self._validate_positive_number(self.standby_config.master_lock_retry_interval,
-                                       "master_lock_retry_interval")
-        self._validate_positive_number(self.standby_config.master_lock_max_failures,
-                                       "master_lock_max_failures",
-                                       allow_zero=True)
+        self._validate_positive_number(self.standby_config.master_lock_retry_interval, "master_lock_retry_interval")
+        self._validate_positive_number(
+            self.standby_config.master_lock_max_failures, "master_lock_max_failures", allow_zero=True
+        )
 
         # Validate master lock key path
         self._validate_endpoint_path(self.standby_config.master_lock_key, "master_lock_key")
@@ -684,7 +692,8 @@ class CoordinatorConfig:
             f"    ├─ HTTP Pod IP:         {self.api_config.coordinator_api_host}\n"
             f"    ├─ HTTP Pod DNS:         {self.api_config.coordinator_api_dns}\n"
             f"    ├─ Inference Port:      {self.api_config.coordinator_api_infer_port}\n"
-            f"    └─ Management Port:     {self.api_config.coordinator_api_mgmt_port}\n"
+            f"    ├─ Management Port:     {self.api_config.coordinator_api_mgmt_port}\n"
+            f"    └─ Observability Port:  {self.api_config.coordinator_obs_port}\n"
             "\n"
             "  Scheduler Configuration:\n"
             f"    ├─ Deploy Mode:               {self.scheduler_config.deploy_mode.value}\n"
@@ -718,12 +727,7 @@ class CoordinatorConfig:
             f"{separator}"
         )
 
-    def _validate_positive_number(
-        self,
-        value: float | int,
-        field_name: str,
-        allow_zero: bool = False
-    ) -> None:
+    def _validate_positive_number(self, value: float | int, field_name: str, allow_zero: bool = False) -> None:
         """Validate that a number is positive (optionally allow zero)"""
         if allow_zero and value < 0:
             self._errors.append(f"{field_name} cannot be negative")
@@ -750,8 +754,7 @@ class CoordinatorConfig:
 
         # If not IP, validate as hostname (basic validation)
         if not re.match(
-            r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$',
-            value
+            r'^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$', value
         ):
             self._errors.append(f"{field_name} must be a valid IP address or hostname")
 

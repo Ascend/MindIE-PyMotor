@@ -53,49 +53,11 @@ Controller 进程入口为 `motor/controller/main.py`。启动时加载 `Control
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/observability/inventory` | 获取服务库存信息 |
-| `GET` | `/observability/metrics` | 获取监控指标，支持 `type` 参数切换指标粒度（见下方） |
+| `GET` | `/observability/metrics` | 获取监控指标（**已弃用**，请使用 Coordinator 的 `/metrics` 接口） |
 | `GET` | `/observability/alarms` | 获取告警信息，支持 `source_id` 查询参数过滤 |
 
-#### GET /observability/metrics
-
-> [!NOTE]路由代理说明
-> Controller 的 `/observability/metrics` 是 Coordinator `/metrics` 的路由代理，不做数据加工。所有指标的聚合、标签注入、Prometheus 格式序列化均在 Coordinator 侧完成。Controller 仅将请求转发至 Coordinator 的 `GET /metrics?type={type}&role={role}` 并返回响应。
-
-**请求参数**
-
-| 参数名 | 类型 | 必选 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| `type` | string | 否 | `full` | 指标类型：`full`（全量聚合）、`instance`（实例级）、`role`（按角色聚合） |
-| `role` | string | 否 | 无 | 当 `type=role` 时，指定角色名：`prefill` 或 `decode`。不指定时返回所有角色的聚合指标字典 |
-
-**`type` 取值说明**
-
-| 取值 | Content-Type | 返回格式 | 说明 |
-|------|-------------|----------|------|
-| `full` | `text/plain` | Prometheus text | 全量聚合指标（默认），Coordinator 聚合所有实例/端点后的 Prometheus 文本 |
-| `instance` | `text/plain` | Prometheus text | 实例级指标，Coordinator 已注入 `instance_id` 和 `role` 标签 |
-| `role`（指定 role） | `text/plain` | Prometheus text | 指定角色的聚合指标，Coordinator 已注入 `role` 标签 |
-| `role`（不指定 role） | `text/plain` | Prometheus text | 所有角色的聚合指标拼接为单一 Prometheus 文本 |
-
-**使用样例**
-
-```bash
-# 全量聚合指标（默认）
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics"
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics?type=full"
-
-# 实例级指标
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics?type=instance"
-
-# 所有角色的聚合指标
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics?type=role"
-
-# 仅 Prefill 角色
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics?type=role&role=prefill"
-
-# 仅 Decode 角色
-curl -X GET "http://{ControllerIP}:{observability_api_port}/observability/metrics?type=role&role=decode"
-```
+> [!WARNING] 已弃用
+> `GET /observability/metrics` 已弃用，将在后续版本移除。请改为直接访问 Coordinator 的 `GET /metrics?type={type}&role={role}` 接口。Coordinator 的地址和端口见 [Coordinator 指标查询接口](../../api_reference/management_and_monitoring_interfaces.md#指标查询接口)。
 
 ## 使用样例
 

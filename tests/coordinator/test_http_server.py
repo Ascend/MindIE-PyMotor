@@ -295,12 +295,6 @@ class TestCoordinatorServer:
         data = response.json()
         assert data["status"] == "ok", f"Readiness check status abnormal: {data}"
 
-        # Test /metrics
-        response = self.mgmt_client.get("/metrics")
-        assert response.status_code == 200, f"Metrics endpoint failed: {response.status_code}"
-        data = response.text
-        assert data == "", "Metrics response should be empty"
-
     def test_readiness_endpoints_fail_when_instance_manager_not_ready(self):
         """Test readiness when instance manager reports not ready (reuse server's mock)."""
         im = MagicMock()
@@ -668,7 +662,7 @@ class TestCoordinatorServer:
         assert response.status_code in [200, 401, 403], f"Unexpected status code: {response.status_code}"
 
         # Test 5: Skip paths don't require API Key (/startup, /readiness, etc.)
-        skip_paths = ["/startup", "/readiness", "/metrics"]
+        skip_paths = ["/startup", "/readiness"]
         for path in skip_paths:
             response = self.mgmt_client.get(f"{path}")
             assert response.status_code == 200, f"Skip path {path} returned non-200 status code: {response.status_code}"
@@ -772,7 +766,7 @@ class TestFastAPIMiddleware:
             os.environ["RATE_LIMIT_MAX_REQUESTS"] = "200"
             os.environ["RATE_LIMIT_WINDOW_SIZE"] = "30"
             os.environ["RATE_LIMIT_SCOPE"] = "global"
-            os.environ["RATE_LIMIT_SKIP_PATHS"] = "/liveness,/metrics"
+            os.environ["RATE_LIMIT_SKIP_PATHS"] = "/liveness,/health"
 
             config = self.load_rate_limit_config()
             assert config.enabled == False, "Should load enabled from env"
@@ -780,7 +774,7 @@ class TestFastAPIMiddleware:
             assert config.window_size == 30, "Should load window_size from env"
             assert config.scope == "global", "Should load scope from env"
             assert "/liveness" in config.skip_paths, "Should load skip_paths from env"
-            assert "/metrics" in config.skip_paths, "Should load skip_paths from env"
+            assert "/health" in config.skip_paths, "Should load skip_paths from env"
         finally:
             # Restore original env
             if original_enabled:
