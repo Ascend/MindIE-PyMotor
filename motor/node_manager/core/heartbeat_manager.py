@@ -15,7 +15,6 @@ import time
 
 from motor.common.resources.endpoint import Endpoint, EndpointStatus
 from motor.common.resources.http_msg_spec import StartCmdMsg, HeartbeatMsg
-from motor.common.http.http_client import SafeHTTPSClient
 from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.node_manager import NodeManagerConfig
@@ -103,7 +102,7 @@ class HeartbeatManager(ThreadSafeSingleton):
         """
         with self._suicide_lock:
             return self._should_suicide
-    
+
     def stop(self) -> None:
         self.stop_event.set()
         if self._heartbeat_report_thread.is_alive():
@@ -122,8 +121,13 @@ class HeartbeatManager(ThreadSafeSingleton):
         with self._endpoint_lock:
             for endpoint in self._endpoints:
                 if endpoint.status != EndpointStatus.NORMAL:
-                    logger.warning("Endpoint %d at %s:%s is in status %s",
-                                   endpoint.id, endpoint.ip, endpoint.mgmt_port, endpoint.status)
+                    logger.warning(
+                        "Endpoint %d at %s:%s is in status %s",
+                        endpoint.id,
+                        endpoint.ip,
+                        endpoint.mgmt_port,
+                        endpoint.status,
+                    )
                     return False
         logger.debug("All endpoints are in normal status")
         return True
@@ -138,12 +142,9 @@ class HeartbeatManager(ThreadSafeSingleton):
             endpoints_snapshot = list(self._endpoints)
 
         # Check if within one minute after startup
-        if (
-            self._is_within_grace_period
-            and self._engine_status_thread_start_time is not None
-        ):
+        if self._is_within_grace_period and self._engine_status_thread_start_time is not None:
             elapsed_time = time.time() - self._engine_status_thread_start_time
-            self._is_within_grace_period = elapsed_time < 60
+            self._is_within_grace_period = elapsed_time < 120
 
         updated_endpoints = []
         client = None
@@ -161,26 +162,29 @@ class HeartbeatManager(ThreadSafeSingleton):
                         if detected_status != original_status:
                             logger.info(
                                 "Engine Server rank %d, status change from %s to %s ",
-                                item.id, original_status, detected_status
+                                item.id,
+                                original_status,
+                                detected_status,
                             )
                     except ValueError:
                         logger.error(
                             "Invalid status value '%s' from Engine Server %d: %s",
-                            status_value, item.id, engine_server_base_url
+                            status_value,
+                            item.id,
+                            engine_server_base_url,
                         )
                         detected_status = EndpointStatus.ABNORMAL
                 else:
                     logger.error(
                         "Invalid response format from Engine Server%d: %s: %s",
-                        item.id, engine_server_base_url, response
+                        item.id,
+                        engine_server_base_url,
+                        response,
                     )
                     detected_status = EndpointStatus.ABNORMAL
             except Exception as e:
                 if not self._is_within_grace_period:
-                    logger.error(
-                        "Failed to get engine server status from %s: %s",
-                        engine_server_base_url, e
-                    )
+                    logger.error("Failed to get engine server status from %s: %s", engine_server_base_url, e)
                 detected_status = EndpointStatus.ABNORMAL
             finally:
                 if client is not None:
@@ -190,14 +194,11 @@ class HeartbeatManager(ThreadSafeSingleton):
                         logger.error("Failed to close client: %s", e)
 
             # If within grace period and abnormal status detected, do not update status
-            if (
-                self._is_within_grace_period
-                and detected_status == EndpointStatus.ABNORMAL
-            ):
+            if self._is_within_grace_period and detected_status == EndpointStatus.ABNORMAL:
                 logger.debug(
-                    "Engine server %s status is abnormal within grace period, "
-                    "keeping original status: %s",
-                    engine_server_base_url, original_status
+                    "Engine server %s status is abnormal within grace period, keeping original status: %s",
+                    engine_server_base_url,
+                    original_status,
                 )
                 item.status = original_status
             else:
@@ -214,15 +215,9 @@ class HeartbeatManager(ThreadSafeSingleton):
                 with self._endpoint_lock:
                     # Check if any endpoint has abnormal status (only after grace period)
                     # Check actual endpoint status, not the reported status
-                    has_abnormal = any(
-                        item.status == EndpointStatus.ABNORMAL
-                        for item in self._endpoints
-                    )
-                    
-                    endpoint_status_list = {
-                        item.id: item.status
-                        for item in self._endpoints
-                    }
+                    has_abnormal = any(item.status == EndpointStatus.ABNORMAL for item in self._endpoints)
+
+                    endpoint_status_list = {item.id: item.status for item in self._endpoints}
 
                 # Build message and send request outside of lock
                 heartbeat_msg = HeartbeatMsg(
@@ -238,15 +233,11 @@ class HeartbeatManager(ThreadSafeSingleton):
                 with self._abnormal_count_lock:
                     if has_abnormal:
                         self._consecutive_abnormal_count += 1
-                        logger.warning(
-                            "Consecutive abnormal heartbeat count: %d/5",
-                            self._consecutive_abnormal_count
-                        )
+                        logger.warning("Consecutive abnormal heartbeat count: %d/5", self._consecutive_abnormal_count)
                         # Set suicide flag if reached 5 consecutive abnormal heartbeats
                         if self._consecutive_abnormal_count >= 5:
                             logger.error(
-                                "Reached 5 consecutive abnormal heartbeats, "
-                                "setting suicide flag for main to handle..."
+                                "Reached 5 consecutive abnormal heartbeats, setting suicide flag for main to handle..."
                             )
                             with self._suicide_lock:
                                 self._should_suicide = True
