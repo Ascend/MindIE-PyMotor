@@ -79,6 +79,7 @@ def resolve_config_paths(config_dir, user_config_path, env_config_path):
 
 def strip_instance_nums(config_dict):
     cleaned = json.loads(json.dumps(config_dict))
+    cleaned["motor_deploy_config"].pop(C.E_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.P_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.D_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.HYBRID_INSTANCES_NUM, None)
@@ -88,7 +89,8 @@ def strip_instance_nums(config_dict):
 def validate_only_instance_changed(current_config, baseline_config):
     if strip_instance_nums(current_config) != strip_instance_nums(baseline_config):
         raise ValueError("user_config changes detected beyond instance numbers. "
-                         "Only p_instances_num/d_instances_num/hybrid_instances_num can be modified for scaling.")
+                         "Only e_instances_num/p_instances_num/d_instances_num/hybrid_instances_num "
+                         "can be modified for scaling.")
 
 
 def validate_deploy_mode_consistency(deploy_config, baseline_config):

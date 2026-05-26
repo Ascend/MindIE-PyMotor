@@ -82,6 +82,23 @@ def mix_instances():
     return instances
 
 
+@pytest.fixture
+def encode_instances():
+    """Create encode (E) instances for testing."""
+    instances = []
+    for i in range(2):
+        instance = Instance(
+            job_name=f"encode_instance_{i+1}",
+            model_name="test_model",
+            id=i+8,
+            role=PDRole.ROLE_E,
+            status=InsStatus.ACTIVE,
+            parallel_config=ParallelConfig(dp_size=2)
+        )
+        instances.append(instance)
+    return instances
+
+
 def mock_create_client(address, tls_config=None, **kwargs):
     client = AsyncMock()
     client.base_url = f"http://{address}"
@@ -92,7 +109,7 @@ def mock_create_client(address, tls_config=None, **kwargs):
 
 
 @pytest.fixture
-async def scheduler_setup(prefill_instances, decode_instances, mix_instances):
+async def scheduler_setup(prefill_instances, decode_instances, mix_instances, encode_instances):
     """Setup scheduler with instances and endpoints."""
     config = CoordinatorConfig()
     instance_manager = InstanceManager(config)
@@ -102,7 +119,7 @@ async def scheduler_setup(prefill_instances, decode_instances, mix_instances):
     if all_existing_instances:
         await instance_manager.refresh_instances(EventType.DEL, all_existing_instances)
 
-    all_instances = prefill_instances + decode_instances + mix_instances
+    all_instances = prefill_instances + decode_instances + mix_instances + encode_instances
     await instance_manager.refresh_instances(EventType.DEL, all_instances)
     for instance in all_instances:
         endpoints = {}
@@ -122,7 +139,7 @@ async def scheduler_setup(prefill_instances, decode_instances, mix_instances):
     await instance_manager.refresh_instances(EventType.ADD, all_instances)
 
     # Fail fast if pool was not populated (e.g. CI missing asyncio_mode or different impl)
-    for role in (PDRole.ROLE_P, PDRole.ROLE_D):
+    for role in (PDRole.ROLE_P, PDRole.ROLE_D, PDRole.ROLE_E):
         pool = instance_manager.get_available_instances(role)
         assert len(pool) > 0, (
             f"scheduler_setup: get_available_instances({role}) is empty after ADD. "
@@ -211,6 +228,42 @@ async def test_request_processing_pd_separation_scenario(scheduler_setup):
     assert result
 
     assert selected_prefill_endpoint.workload.active_kv_cache == 0
+
+
+@pytest.mark.asyncio
+async def test_request_processing_e_scenario(scheduler_setup):
+    """Test E (encode) role processing similar to P/D scenarios."""
+    all_instances, instance_manager = scheduler_setup
+    scheduler = Scheduler(instance_provider=instance_manager, config=SchedulerType.LOAD_BALANCE)
+    load_balance_scheduler = scheduler.get_scheduling_policy()
+    request_length = 2
+    req_id = "test_request_e_1"
+
+    # select encode instance and endpoint
+    res = await scheduler.select_instance_and_endpoint(role=PDRole.ROLE_E)
+    assert res is not None, "select_instance_and_endpoint(ROLE_E) returned None."
+    selected_instance, selected_endpoint = res
+    assert selected_instance.role == PDRole.ROLE_E
+
+    # allocate encode workload
+    req_info = MagicMock()
+    req_info.req_len = request_length
+    workload_e = calculate_demand_workload(PDRole.ROLE_E, req_info)
+    result = await load_balance_scheduler.update_workload(
+        selected_instance.id, selected_endpoint.id, req_id,
+        WorkloadAction.ALLOCATION, workload_e
+    )
+    assert result
+    assert selected_endpoint.workload.active_tokens > 0 or selected_endpoint.workload.active_kv_cache >= 0
+
+    # release tokens if any allocated
+    release_tokens = Workload(active_tokens=-selected_endpoint.workload.active_tokens)
+    result = await load_balance_scheduler.update_workload(
+        selected_instance.id, selected_endpoint.id, req_id,
+        WorkloadAction.RELEASE_TOKENS, release_tokens
+    )
+    assert result
+    assert selected_endpoint.workload.active_tokens == 0
 
 
 @pytest.mark.asyncio
@@ -378,6 +431,13 @@ async def test_load_balance_policy_selection_logic(scheduler_setup):
     assert mix_instance is not None
     assert mix_instance.role == PDRole.ROLE_U
 
+    # also verify encode (E) selection
+    res_e = await scheduler.select_instance_and_endpoint(role=PDRole.ROLE_E)
+    assert res_e is not None, "select_instance_and_endpoint(ROLE_E) returned None."
+    encode_instance, _ = res_e
+    assert encode_instance is not None
+    assert encode_instance.role == PDRole.ROLE_E
+
     res_p2 = await scheduler.select_instance_and_endpoint(role=PDRole.ROLE_P)
     assert res_p2 is not None, "select_instance_and_endpoint(ROLE_P) returned None."
     _, endpoint = res_p2
@@ -414,6 +474,17 @@ async def test_round_robin_instance_selection(scheduler_setup):
     # verify that the round robin order is correct: 4, 5, 4, 5
     expected_decode_order = [4, 5, 4, 5]
     assert selected_decode_instances == expected_decode_order
+
+    # select 4 times for encode instances (ids 8,9)
+    selected_encode_instances = []
+    for _ in range(4):
+        instance, _ = await scheduler.select_instance_and_endpoint(role=PDRole.ROLE_E)
+        assert instance is not None
+        assert instance.role == PDRole.ROLE_E
+        selected_encode_instances.append(instance.id)
+
+    expected_encode_order = [8, 9, 8, 9]
+    assert selected_encode_instances == expected_encode_order
 
 
 @pytest.mark.asyncio
@@ -488,4 +559,6 @@ async def test_round_robin_edge_cases():
     assert result is None
 
     result = await empty_scheduler.select_instance_and_endpoint(role=PDRole.ROLE_D)
+    assert result is None
+    result = await empty_scheduler.select_instance_and_endpoint(role=PDRole.ROLE_E)
     assert result is None

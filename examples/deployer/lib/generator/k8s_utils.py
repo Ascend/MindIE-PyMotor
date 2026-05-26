@@ -335,6 +335,25 @@ def scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_
             yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{node_type}{index}.yaml")
             safe_exec_cmd(f"kubectl apply -f {yaml_path} -n {job_id}")
 
+def scale_engine_e_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path):
+    """Scale engine instances by type (p, d or u)."""
+    from lib.generator.engine import obtain_engine_e_instance_total
+    
+    job_id = deploy_config[C.CONFIG_JOB_ID]
+    total = obtain_engine_e_instance_total(deploy_config)
+    base = obtain_engine_e_instance_total(baseline_deploy_config)
+    if total < base:
+        logger.info(f"Scale-in {C.NODE_TYPE_E} instance, {base} -> {total}")
+        for index in reversed(range(total, base)):
+            yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{C.NODE_TYPE_E}{index}.yaml")
+            safe_exec_cmd(f"kubectl delete -f {yaml_path} -n {job_id}")
+            if os.path.exists(yaml_path):
+                os.remove(yaml_path)
+    if total > base:
+        logger.info(f"Scale-out {C.NODE_TYPE_E} instance, {base} -> {total}")
+        for index in range(base, total):
+            yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{C.NODE_TYPE_E}{index}.yaml")
+            safe_exec_cmd(f"kubectl apply -f {yaml_path} -n {job_id}")
 
 def elastic_distributed_engine_deploy(deploy_config, baseline_deploy_config, out_deploy_yaml_path):
     """Elastic distributed engine deployment - scale in/out engine instances."""
@@ -345,6 +364,8 @@ def elastic_distributed_engine_deploy(deploy_config, baseline_deploy_config, out
 
     scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, C.NODE_TYPE_P)
     scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path, C.NODE_TYPE_D)
+    if C.E_INSTANCES_NUM in deploy_config:
+        scale_engine_e_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path)
     logger.info("Engine scale done.")
 
 

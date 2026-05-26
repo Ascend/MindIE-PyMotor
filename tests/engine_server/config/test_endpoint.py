@@ -284,6 +284,40 @@ def test_deploy_config_load_with_role_union(pd_hybrid_engine_config_file):
     assert config.model_config.decode_parallel_config == config.model_config.prefill_parallel_config
 
 
+@pytest.fixture
+def encode_engine_config_file():
+    """Create a temporary JSON file with encode role config section."""
+    config = {
+        "motor_deploy_config": {},
+        "motor_engine_encode_config": {
+            "engine_type": "vllm",
+            "model_config": {
+                "model_name": "test-model-encode",
+                "model_path": "/path/to/encode_model",
+                "npu_mem_utils": 0.9,
+                "parallel_config": {"dp_size": 2, "tp_size": 1},
+            },
+            "engine_config": {"max_model_len": 2048},
+        }
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(config, f)
+        temp_path = os.path.realpath(f.name)
+    yield temp_path
+    try:
+        os.unlink(temp_path)
+    except FileNotFoundError:
+        pass
+
+
+def test_deploy_config_load_with_role_encode(encode_engine_config_file):
+    """Test DeployConfig.load with role=encode."""
+    config = DeployConfig.load(encode_engine_config_file, role="encode")
+    assert config.engine_type == "vllm"
+    assert config.model_config.model_name == "test-model-encode"
+    assert config.model_config.encode_parallel_config.dp_size == 2
+
+
 def test_deploy_config_load_with_health_check(simple_engine_config_file):
     """Test DeployConfig.load includes health_check_config"""
     with open(simple_engine_config_file) as f:
@@ -313,6 +347,14 @@ def test_deploy_config_get_parallel_config_decode(pd_engine_config_file):
     config = DeployConfig.load(pd_engine_config_file, role="decode")
     parallel = config.get_parallel_config("decode")
     assert parallel == config.model_config.decode_parallel_config
+
+
+def test_deploy_config_get_parallel_config_encode(simple_engine_config_file):
+    """Test DeployConfig.get_parallel_config for encode role"""
+    config = DeployConfig.load(simple_engine_config_file, role="encode")
+    parallel = config.get_parallel_config("encode")
+    assert parallel == config.model_config.encode_parallel_config
+    assert parallel.dp_size == 2
 
 
 def test_deploy_config_get_parallel_config_invalid_role(simple_engine_config_file):
@@ -602,6 +644,40 @@ def test_endpoint_config_load_deploy_config_updates_dp_rpc_port_decode(valid_con
         config.deploy_config = DeployConfig.load(path, role="decode")
         config.load_deploy_config()
         assert config.deploy_config.model_config.decode_parallel_config.dp_rpc_port == 9020
+    finally:
+        os.unlink(path)
+
+
+def test_endpoint_config_load_deploy_config_updates_dp_rpc_port_encode():
+    """Test load_deploy_config updates dp_rpc_port for encode role"""
+    encode_config = {
+        "motor_deploy_config": {},
+        "motor_engine_encode_config": {
+            "engine_type": "vllm",
+            "model_config": {
+                "model_name": "m",
+                "model_path": "/p",
+                "npu_mem_utils": 0.9,
+                "parallel_config": {"dp_size": 1, "dp_rpc_port": 9000},
+            },
+            "engine_config": {},
+        }
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(encode_config, f)
+        path = os.path.realpath(f.name)
+    try:
+        config = EndpointConfig(
+            host="127.0.0.1",
+            role="encode",
+            port=8000,
+            mgmt_port=9001,
+            config_path=path,
+            dp_rpc_port=9020,
+        )
+        config.deploy_config = DeployConfig.load(path, role="encode")
+        config.load_deploy_config()
+        assert config.deploy_config.model_config.encode_parallel_config.dp_rpc_port == 9020
     finally:
         os.unlink(path)
 
