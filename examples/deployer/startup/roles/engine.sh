@@ -57,7 +57,7 @@ pid=$!
 echo "pull up $ROLE instance"
 wait $pid
 exit_code=$?
-sleep 60000
+
 if [ $exit_code -ne 0 ]; then
     echo "Error: mindie daemon exited with code $exit_code"
     exit 1
