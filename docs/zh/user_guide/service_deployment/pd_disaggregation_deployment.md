@@ -275,7 +275,6 @@ examples/
       "kv_port": "20001",
       "engine_id": "0",
       "kv_rank": 0,
-      "kv_connector_module_path": "vllm_ascend.distributed.mooncake_layerwise_connector",
       "kv_connector_extra_config": {}
     }
   }

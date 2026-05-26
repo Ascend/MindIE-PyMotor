@@ -102,7 +102,6 @@ pyMotor开启tracing能力需修改env.json配置文件和user_config.json配置
        "kv_connector": "MooncakeLayerwiseConnector",
        "kv_buffer_device": "npu",
        "kv_role": "kv_consumer",
-       "kv_connector_module_path": "vllm_ascend.distributed.mooncake_layerwise_connector",
        "kv_connector_extra_config": {
          "use_ascend_direct": true
         }
@@ -131,7 +130,6 @@ pyMotor开启tracing能力需修改env.json配置文件和user_config.json配置
      "kv_connector": "MooncakeLayerwiseConnector",
      "kv_buffer_device": "npu",
      "kv_role": "kv_consumer",
-     "kv_connector_module_path": "vllm_ascend.distributed.mooncake_layerwise_connector",
      "kv_connector_extra_config": {
        "use_ascend_direct": true,
       }
