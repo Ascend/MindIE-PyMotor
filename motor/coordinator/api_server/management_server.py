@@ -104,6 +104,8 @@ class ManagementServer(BaseCoordinatorServer):
         )
         self._app_builder = AppBuilder(self.coordinator_config)
         self.management_app = self._app_builder.create_management_app(lifespan=self._lifespan)
+        self._readiness_was_ready: bool | None = None
+        self._readiness_last_503_result: ReadinessResult | None = None
         self._register_routes()
 
     @property
@@ -204,7 +206,7 @@ class ManagementServer(BaseCoordinatorServer):
         async def readiness_check(request: Request):
             # Note: If this returns ready=False (e.g. no required instances), K8s removes the pod from
             # the Service. Then the controller's POST /instances/refresh cannot reach this pod (deadlock).
-            logger.info("[Readiness] Probe received")
+            logger.debug("[Readiness] Probe received")
             try:
                 out = await self._readiness_probe.check()
             except HTTPException:
@@ -213,24 +215,52 @@ class ManagementServer(BaseCoordinatorServer):
                 logger.exception("[Readiness] Probe failed: %s", e)
                 raise e from e
 
-            logger.debug(
-                "[Standby] Readiness: result=%s is_ready=%s instances_status=%s",
-                out.result.value,
-                out.is_ready,
-                out.instance_readiness.value if out.instance_readiness else None,
-            )
+            instances_status = out.instance_readiness.value if out.instance_readiness else None
             if out.result in _READINESS_503:
-                logger.warning("[Readiness] result=%s, returning 503", out.result.value)
+                if out.result != self._readiness_last_503_result:
+                    self._readiness_last_503_result = out.result
+                    logger.warning(
+                        "[Readiness] Returning 503, result=%s. "
+                        "Check: daemon alive, master/standby role, role_heartbeat_interval_sec",
+                        out.result.value,
+                    )
+                self._readiness_was_ready = False
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_READINESS_503[out.result],
                 )
+
+            self._readiness_last_503_result = None
             msg = "Coordinator is master" if out.result == ReadinessResult.OK_MASTER else "Coordinator is ok"
-            logger.info(
-                "[Readiness] is_ready=%s instances_status=%s -> 200",
-                out.is_ready,
-                out.instance_readiness.value if out.instance_readiness else None,
-            )
+            # Log INFO/WARNING only on ready transitions; steady probes stay DEBUG.
+            prev_ready = self._readiness_was_ready
+            if out.is_ready:
+                if not prev_ready:
+                    logger.info(
+                        "[Readiness] Coordinator is ready. result=%s instances_status=%s",
+                        out.result.value,
+                        instances_status,
+                    )
+                else:
+                    logger.debug(
+                        "[Readiness] Coordinator remains ready. result=%s instances_status=%s",
+                        out.result.value,
+                        instances_status,
+                    )
+            else:
+                if prev_ready:
+                    logger.warning(
+                        "[Readiness] Coordinator is no longer ready. result=%s instances_status=%s",
+                        out.result.value,
+                        instances_status,
+                    )
+                else:
+                    logger.debug(
+                        "[Readiness] Coordinator is not ready yet. result=%s instances_status=%s",
+                        out.result.value,
+                        instances_status,
+                    )
+            self._readiness_was_ready = out.is_ready
             return _build_readiness_response(msg, out.is_ready)
 
         @self.management_app.post("/instances/refresh", response_model=RequestResponse)
