@@ -169,7 +169,7 @@ scale_p2d()：选择一个 P 实例，释放其占用的节点资源
 ### 3.3 关键设计点
 
 - **触发条件**：仅 Decode 角色实例，且故障等级为 L4 / L5 / L6（L5、L6 委托 L4 策略逻辑）。
-- **模式退化**：Decode 故障期间，Coordinator 调度层检测 `readiness == ONLY_PREFILL`，自动将路由模式回退为 `SINGLE_NODE`（参见 [PD 分离—实例就绪与回退](PD_disaggregation.md)）。此过程对业务无感知，推理请求正常处理，仅延迟增加。
+- **模式退化**：Decode 故障期间，Coordinator 调度层检测 `readiness == ONLY_PREFILL`，自动将路由模式回退为 `SINGLE_NODE`（参见 [PD 分离—实例就绪与回退](../PD_disaggregation.md)）。此过程对业务无感知，推理请求正常处理，仅延迟增加。
 - **模式恢复**：新 Decode 实例心跳上报就绪后，Coordinator 感知到 P/D 均可用，自动恢复 PD 分离路由。
 - **策略方向**：缩P保D 是单向的——只有 Decode 故障时才需要"借用" Prefill 的节点资源。Preifill 角色的 L4+ 故障不会触发此策略。
 - **策略代码**：[scale_p2d.py](https://gitcode.com/Ascend/MindIE-PyMotor/blob/master/motor/controller/fault_tolerance/strategy/scale_p2d.py)
@@ -286,5 +286,5 @@ FaultManager 感知故障清除 → 实例恢复 HEALTHY
 
 ## 6. 相关文档
 
-- [FaultManager 设计文档](../developer_guide/fault_tolerance/fault_manager_design.md)
-- [PD 分离特性说明](PD_disaggregation.md)
+- [FaultManager 设计文档](../../developer_guide/fault_tolerance/fault_manager_design.md)
+- [PD 分离特性说明](../PD_disaggregation.md)

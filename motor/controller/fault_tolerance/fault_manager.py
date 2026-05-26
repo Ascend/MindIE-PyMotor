@@ -18,14 +18,18 @@ from motor.config.controller import ControllerConfig
 from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.common.etcd.persistent_state import PersistentState
-from motor.common.resources import Instance, ReadOnlyInstance
+from motor.common.resources import ReadOnlyInstance
 from motor.common.etcd.etcd_client import EtcdClient
 from motor.controller.core import Observer, ObserverEvent, InstanceManager
 from motor.controller.fault_tolerance.strategy import generate_strategy_map
 from motor.controller.fault_tolerance.k8s.resource_monitor import ResourceMonitor
 from motor.controller.fault_tolerance.k8s.k8s_client import K8sClient
 from motor.controller.fault_tolerance.k8s.cluster_fault_codes import (
-    FaultInfo, FaultLevel, FaultType, SpecialFaultCode, NodeStatus
+    FaultInfo,
+    FaultLevel,
+    FaultType,
+    SpecialFaultCode,
+    NodeStatus,
 )
 
 
@@ -42,39 +46,42 @@ class NodeMetadata(BaseModel):
     And the `device_fulat_infos` is used to record the device faults
     of the node, if there is no device fault, it will be an empty dict.
     """
+
     pod_ip: str = Field(..., description="Pod IP address")
     node_name: str = Field(..., description="Kubernetes node name")
     instance_id: int = Field(..., description="Instance ID that this node belongs to")
     node_status: NodeStatus = Field(default=NodeStatus.READY, description="Node status")
-    fault_infos: dict[int, FaultInfo] = Field(default_factory=dict,
-                                              description="Fault information dictionary keyed by fault_code")
+    fault_infos: dict[int, FaultInfo] = Field(
+        default_factory=dict, description="Fault information dictionary keyed by fault_code"
+    )
 
 
 class InstanceMetadata(BaseModel):
     """
     Instance metadata for fault tolerance management.
-    
+
     When an instance's nodes are faulty, we need to trigger
     the recovery function, we record the current strategy,
     strategy level and fault code. if the instance is healthy,
     we should try to stop the strategy.
     """
+
     instance_id: int = Field(..., description="Instance ID")
     fault_level: FaultLevel = Field(default=FaultLevel.HEALTHY, description="Current instance fault level")
     fault_code: int = Field(default=0x0, description="Fault code that trigger the current strategy")
-    
+
     # Non-serializable fields (excluded from serialization)
     lock: Any = Field(default=None, exclude=True)
     # StrategyBase instance, using Any to avoid requiring arbitrary_types_allowed
     strategy: Any = Field(default=None, exclude=True)
-    
+
     @model_validator(mode='after')
     def init_lock(self):
         """Initialize lock if not provided"""
         if self.lock is None:
             self.lock = threading.Lock()
         return self
-    
+
     def model_dump(self, **kwargs) -> dict:
         """Override model_dump to exclude non-serializable fields"""
         return super().model_dump(exclude={'lock', 'strategy'}, **kwargs)
@@ -154,9 +161,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
             self.stop_event.clear()
 
         self.ft_strategy_center_thread = threading.Thread(
-            target=self._ft_strategy_center,
-            daemon=True,
-            name="FaultToleranceStrategyCenter"
+            target=self._ft_strategy_center, daemon=True, name="FaultToleranceStrategyCenter"
         )
 
         # Try to restore data from ETCD, if failed, it will start with empty state.
@@ -175,7 +180,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         logger.info("FaultManager started.")
 
     def is_alive(self) -> bool:
-        """ Check if the fault manager threads are alive """
+        """Check if the fault manager threads are alive"""
         return self.ft_strategy_center_thread is not None and self.ft_strategy_center_thread.is_alive()
 
     def stop(self) -> None:
@@ -194,7 +199,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         logger.info("FaultManager stopped.")
 
     def update_config(self, config: ControllerConfig) -> None:
-        """ Update config for fault manager, only invoked by config watcher when config changed """
+        """Update config for fault manager, only invoked by config watcher when config changed"""
         with self.config_lock:
             self.config = config
 
@@ -267,11 +272,15 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     data=fault_data,
                     version=next_version,
                     timestamp=current_time,
-                    checksum=""  # Will be calculated
+                    checksum="",  # Will be calculated
                 )
                 persistent_state.checksum = persistent_state.calculate_checksum()
-                logger.debug("Persisting fault manager data - calculated checksum: %s, version: %s, timestamp: %s",
-                             persistent_state.checksum, next_version, current_time)
+                logger.debug(
+                    "Persisting fault manager data - calculated checksum: %s, version: %s, timestamp: %s",
+                    persistent_state.checksum,
+                    next_version,
+                    current_time,
+                )
 
                 # Convert PersistentState to dict for etcd storage
                 dict_data = {"state": persistent_state.model_dump()}
@@ -297,11 +306,13 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 return True
 
             logger.info("Restoring fault manager data from ETCD")
-            
+
             persistent_state = persistent_states.get("state")
             if persistent_state is None:
-                logger.warning("Expected 'state' key not found in persistent states, found keys: %s",
-                             list(persistent_states.keys()))
+                logger.warning(
+                    "Expected 'state' key not found in persistent states, found keys: %s",
+                    list(persistent_states.keys()),
+                )
                 return False
 
             if not isinstance(persistent_state, PersistentState):
@@ -330,8 +341,9 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     self.instances[ins_metadata.instance_id] = ins_metadata
                     logger.debug("Restored instance %s", ins_id_str)
 
-            logger.info("Successfully restored fault manager data: %d nodes, %d instances",
-                        len(self.nodes), len(self.instances))
+            logger.info(
+                "Successfully restored fault manager data: %d nodes, %d instances", len(self.nodes), len(self.instances)
+            )
             return True
         except Exception as e:
             logger.error("Error restoring fault manager data: %s", e)
@@ -343,8 +355,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         if event == ObserverEvent.INSTANCE_INITIAL:
             with self.lock:
                 if instance.id in self.instances:
-                    logger.debug("Instance %d already exists in fault manager, skipping add operation.",
-                                 instance.id)
+                    logger.debug("Instance %d already exists in fault manager, skipping add operation.", instance.id)
                     return
 
             self._sync_instance_nodes(instance)
@@ -370,7 +381,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
     def update_instances(self, instances: list[ReadOnlyInstance]) -> None:
         """
-        Update fault manager with existing instances, this func will be invoked 
+        Update fault manager with existing instances, this func will be invoked
         when fault manager is restarted and needs to catch up with existing instances.
         """
         logger.info("Updating fault manager with %d instances", len(instances))
@@ -380,7 +391,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
             self._sync_instance_nodes(instance)
 
     def _sync_instance_nodes(self, instance: ReadOnlyInstance) -> None:
-        """ Sync internal node metadata for a given instance based on its current node managers.
+        """Sync internal node metadata for a given instance based on its current node managers.
         - Resolves node_name from pod_ip via Kubernetes
         - For existing instances:
           - Removes nodes that are no longer present
@@ -426,7 +437,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         instance_id: int,
         update_instance_id: bool = False,
     ) -> tuple[NodeMetadata, bool]:
-        """ Ensure node metadata exists, creating or updating as needed.
+        """Ensure node metadata exists, creating or updating as needed.
         Returns:
             tuple[NodeMetadata, bool]: (node_metadata, is_newly_created)
         """
@@ -437,8 +448,9 @@ class FaultManager(ThreadSafeSingleton, Observer):
             if update_instance_id:
                 existing_node.instance_id = instance_id
             if old_pod_ip != pod_ip:
-                logger.info("Updated node %s pod_ip from %s to %s for instance %d",
-                            node_name, old_pod_ip, pod_ip, instance_id)
+                logger.info(
+                    "Updated node %s pod_ip from %s to %s for instance %d", node_name, old_pod_ip, pod_ip, instance_id
+                )
             return existing_node, False
         else:
             new_node = NodeMetadata(
@@ -456,11 +468,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         current_node_names: set[str],
     ) -> None:
         """Sync nodes for an existing instance: remove, update pod_ip, add, and manage monitors."""
-        existing_nodes = {
-            node_name: node
-            for node_name, node in self.nodes.items()
-            if node.instance_id == instance.id
-        }
+        existing_nodes = {node_name: node for node_name, node in self.nodes.items() if node.instance_id == instance.id}
         existing_node_names = set(existing_nodes.keys())
 
         # Remove nodes that are no longer in the instance
@@ -472,9 +480,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
         # Update existing nodes and add new nodes
         for pod_ip, node_name in pod_to_node_name.items():
-            node_metadata, is_new = self._ensure_node_metadata(
-                node_name, pod_ip, instance.id, update_instance_id=False
-            )
+            node_metadata, is_new = self._ensure_node_metadata(node_name, pod_ip, instance.id, update_instance_id=False)
             self.nodes[node_name] = node_metadata
             if is_new:
                 self._create_resource_monitor_for_node(node_name)
@@ -486,9 +492,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
         node_metadatas: dict[str, NodeMetadata] = {}
         for pod_ip, node_name in pod_to_node_name.items():
-            node_metadata, _ = self._ensure_node_metadata(
-                node_name, pod_ip, instance.id, update_instance_id=True
-            )
+            node_metadata, _ = self._ensure_node_metadata(node_name, pod_ip, instance.id, update_instance_id=True)
             node_metadatas[node_name] = node_metadata
 
         self.instances[instance.id] = ins_metadata
@@ -500,7 +504,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
             self._create_resource_monitor_for_node(node_name)
 
     def _create_resource_monitor_for_node(self, node_name: str) -> None:
-        """ Create a Resource monitor for a specific Kubernetes node """
+        """Create a Resource monitor for a specific Kubernetes node"""
         with self.config_lock:
             namespace = self.configmap_namespace
             configmap_prefix = self.configmap_prefix
@@ -509,23 +513,28 @@ class FaultManager(ThreadSafeSingleton, Observer):
             # Check if monitor already exists and is running with same configuration
             if node_name in self.resource_monitors:
                 existing_monitor = self.resource_monitors[node_name]
-                
+
                 # Early return if monitor is alive and configuration matches
                 if existing_monitor.is_alive():
-                    config_matches = (existing_monitor.namespace == namespace
-                                     and existing_monitor.configmap_name_prefix == configmap_prefix)
+                    config_matches = (
+                        existing_monitor.namespace == namespace
+                        and existing_monitor.configmap_name_prefix == configmap_prefix
+                    )
                     if config_matches:
-                        logger.debug("Resource monitor for node %s already exists and is running "
-                                   "with same configuration, skipping recreation", node_name)
+                        logger.debug(
+                            "Resource monitor for node %s already exists and is running "
+                            "with same configuration, skipping recreation",
+                            node_name,
+                        )
                         return
                     # Configuration changed, need to stop and recreate
-                    logger.info("Resource monitor configuration changed for node %s, "
-                              "stopping existing monitor", node_name)
+                    logger.info(
+                        "Resource monitor configuration changed for node %s, stopping existing monitor", node_name
+                    )
                     existing_monitor.stop_monitoring()
                 else:
                     # Monitor exists but not alive, will recreate
-                    logger.debug("Resource monitor for node %s exists but not alive, "
-                               "will recreate", node_name)
+                    logger.debug("Resource monitor for node %s exists but not alive, will recreate", node_name)
 
         logger.info("Creating Resource monitor for node %s", node_name)
 
@@ -543,7 +552,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
         resource_monitor.start_monitoring()
 
     def _stop_resource_monitor_for_node(self, node_name: str) -> None:
-        """ Stop Resource monitor for a specific node """
+        """Stop Resource monitor for a specific node"""
         with self.resource_monitors_lock:
             if node_name in self.resource_monitors:
                 monitor = self.resource_monitors[node_name]
@@ -552,7 +561,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 logger.info("Stopped Resource monitor for node %s", node_name)
 
     def _handle_fault_info_update(self, fault_infos: list[FaultInfo], node_name: str) -> None:
-        """ Process the node's fault information update from ResourceMonitor """
+        """Process the node's fault information update from ResourceMonitor"""
         # Get node metadata
         node_metadata = None
         with self.lock:
@@ -564,9 +573,16 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
         for idx, info in enumerate(fault_infos, start=1):
             npu_segment = f", NPU: {info.npu_name}" if info.npu_name else ""
-            logger.info("Fault[%d/%d] detected - Type: %s%s, Code: 0x%x, Level: %s(%s)",
-                        idx, len(fault_infos), info.fault_type.value, npu_segment,
-                        info.fault_code, info.fault_level.name, info.origin_fault_level.value)
+            logger.info(
+                "Fault[%d/%d] detected - Type: %s%s, Code: 0x%x, Level: %s(%s)",
+                idx,
+                len(fault_infos),
+                info.fault_type.value,
+                npu_segment,
+                info.fault_code,
+                info.fault_level.name,
+                info.origin_fault_level.value,
+            )
         # Update fault infos: preserve node_reboot faults (managed by node_change_handler)
         node_reboot_fault = node_metadata.fault_infos.get(SpecialFaultCode.NODE_REBOOT)
         node_reboot_key = int(SpecialFaultCode.NODE_REBOOT)
@@ -581,14 +597,18 @@ class FaultManager(ThreadSafeSingleton, Observer):
         if node_reboot_fault:
             node_metadata.fault_infos[node_reboot_key] = node_reboot_fault
 
-        logger.info("Updated node %s with %d fault infos (preserved node_reboot: %s)",
-                    node_name, len(fault_infos), node_reboot_fault is not None)
+        logger.info(
+            "Updated node %s with %d fault infos (preserved node_reboot: %s)",
+            node_name,
+            len(fault_infos),
+            node_reboot_fault is not None,
+        )
 
         # Refresh instance fault levels for the node that may have been updated
         self._refresh_instance_fault_level(node_metadata.instance_id)
 
     def _handle_node_status_update(self, status: NodeStatus, node_name: str) -> None:
-        """ Process Node status update from ResourceMonitor.  """
+        """Process Node status update from ResourceMonitor."""
         logger.info("Processing Node status update: %s -> %s", node_name, status)
 
         # Update node status
@@ -611,7 +631,7 @@ class FaultManager(ThreadSafeSingleton, Observer):
                         fault_type=FaultType.NODE_UNHEALTHY,
                         npu_name="",  # Empty for node faults
                         fault_code=SpecialFaultCode.NODE_REBOOT,
-                        fault_level=FaultLevel.L6
+                        fault_level=FaultLevel.L6,
                     )
                     self.nodes[node_name].fault_infos[node_reboot_key] = node_reboot_fault
 
@@ -671,18 +691,18 @@ class FaultManager(ThreadSafeSingleton, Observer):
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
         if enable_persistence and not self.persist_data():
-            logger.warning("Failed to persist fault manager data to ETCD after "
-                            "instance fault level refresh for instance %d", instance_id)
+            logger.warning(
+                "Failed to persist fault manager data to ETCD after instance fault level refresh for instance %d",
+                instance_id,
+            )
 
     def _update_highest_fault_level(
-        self,
-        instance_nodes: list[NodeMetadata], 
-        instance_metadata: InstanceMetadata
+        self, instance_nodes: list[NodeMetadata], instance_metadata: InstanceMetadata
     ) -> None:
-        """ Update the highest fault level among all nodes in an instance.
-            Args:
-                instance_nodes: List of node metadata belonging to the instance
-                instance_metadata: Instance metadata to update
+        """Update the highest fault level among all nodes in an instance.
+        Args:
+            instance_nodes: List of node metadata belonging to the instance
+            instance_metadata: Instance metadata to update
         """
         highest_fault_level = FaultLevel.HEALTHY
         highest_fault_info = None
@@ -697,9 +717,12 @@ class FaultManager(ThreadSafeSingleton, Observer):
         if instance_metadata.fault_level != highest_fault_level:
             instance_metadata.fault_level = highest_fault_level
             instance_metadata.fault_code = int(highest_fault_info.fault_code) if highest_fault_info else 0x0
-            logger.info("Updated instance %d fault level to %s with code %s",
-                        instance_metadata.instance_id, highest_fault_level,
-                        hex(instance_metadata.fault_code) if instance_metadata.fault_code else '0x0')
+            logger.info(
+                "Updated instance %d fault level to %s with code %s",
+                instance_metadata.instance_id,
+                highest_fault_level,
+                hex(instance_metadata.fault_code) if instance_metadata.fault_code else '0x0',
+            )
 
     def _eval_node_status(self, node_name: str) -> FaultInfo | None:
         with self.lock:
@@ -709,8 +732,12 @@ class FaultManager(ThreadSafeSingleton, Observer):
             logger.error("Node not found for node_name: %s", node_name)
             return None
 
-        logger.debug("Found node metadata for node_name %s: node_status=%s, fault_count=%d",
-                     node_name, node_metadata.node_status, len(node_metadata.fault_infos))
+        logger.debug(
+            "Found node metadata for node_name %s: node_status=%s, fault_count=%d",
+            node_name,
+            node_metadata.node_status,
+            len(node_metadata.fault_infos),
+        )
 
         # Check faults for all issues (including node_reboot faults)
         if len(node_metadata.fault_infos) == 0:
@@ -725,9 +752,12 @@ class FaultManager(ThreadSafeSingleton, Observer):
                 highest_fault_level = fault_info.fault_level
                 target_fault_info = fault_info
 
-        logger.debug("Node %s highest fault level: %s, fault_code: %s",
-                     node_name, highest_fault_level,
-                     f"0x{int(target_fault_info.fault_code):08x}" if target_fault_info else "None")
+        logger.debug(
+            "Node %s highest fault level: %s, fault_code: %s",
+            node_name,
+            highest_fault_level,
+            f"0x{int(target_fault_info.fault_code):08x}" if target_fault_info else "None",
+        )
         return target_fault_info
 
     def _ft_strategy_center(self) -> None:
@@ -771,16 +801,24 @@ class FaultManager(ThreadSafeSingleton, Observer):
         with ins_metadata.lock:
             # Use highest fault level and fault code to generate the new strategy for this instance
             fault_level, fault_code = ins_metadata.fault_level, ins_metadata.fault_code
-            logger.debug("Instance %d current state: fault_level=%s, fault_code=0x%08x, has_strategy=%s",
-                         ins_id, fault_level, fault_code, ins_metadata.strategy is not None)
+            logger.debug(
+                "Instance %d current state: fault_level=%s, fault_code=0x%08x, has_strategy=%s",
+                ins_id,
+                fault_level,
+                fault_code,
+                ins_metadata.strategy is not None,
+            )
 
             new_strategy_cls = self.strategies[fault_level](fault_code, ins_id, self.config)
             current_strategy = ins_metadata.strategy
             current_cls = current_strategy.__class__ if current_strategy is not None else None
 
-            logger.debug("Instance %d strategy evaluation: current_cls=%s, new_cls=%s",
-                         ins_id, current_cls.__name__ if current_cls else None,
-                         new_strategy_cls.__name__ if new_strategy_cls else None)
+            logger.debug(
+                "Instance %d strategy evaluation: current_cls=%s, new_cls=%s",
+                ins_id,
+                current_cls.__name__ if current_cls else None,
+                new_strategy_cls.__name__ if new_strategy_cls else None,
+            )
 
             # Check if the new strategy is different from the current strategy
             if new_strategy_cls is not None:
@@ -790,9 +828,12 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     is_upgrade = True
                 else:
                     if new_strategy_cls != current_cls:
-                        logger.info("Instance %d: Strategy changed from %s to %s, stopping old strategy",
-                                    ins_id, current_cls.__name__ if current_cls else "None",
-                                    new_strategy_cls.__name__)
+                        logger.info(
+                            "Instance %d: Strategy changed from %s to %s, stopping old strategy",
+                            ins_id,
+                            current_cls.__name__ if current_cls else "None",
+                            new_strategy_cls.__name__,
+                        )
                         current_strategy.stop()
                         ins_metadata.strategy = None
                         is_upgrade = True
@@ -801,16 +842,24 @@ class FaultManager(ThreadSafeSingleton, Observer):
 
                 if is_upgrade:
                     new_strategy = new_strategy_cls()
-                    logger.info("Instance %d: Starting new strategy %s with fault level %s and code 0x%08x",
-                                ins_id, new_strategy_cls.__name__, fault_level, fault_code)
+                    logger.info(
+                        "Instance %d: Starting new strategy %s with fault level %s and code 0x%08x",
+                        ins_id,
+                        new_strategy_cls.__name__,
+                        fault_level,
+                        fault_code,
+                    )
                     self.executor.submit(new_strategy.execute, ins_id)
                     ins_metadata.strategy = new_strategy
 
             # Check if the current strategy is finished, if it is finished, reset the relative state.
             if ins_metadata.strategy is not None:
                 if ins_metadata.strategy.is_finished():
-                    logger.info("Instance %d: Strategy %s finished, resetting instance state",
-                                ins_id, ins_metadata.strategy.__class__.__name__)
+                    logger.info(
+                        "Instance %d: Strategy %s finished, resetting instance state",
+                        ins_id,
+                        ins_metadata.strategy.__class__.__name__,
+                    )
                     ins_metadata.strategy = None
                     ins_metadata.fault_level = FaultLevel.HEALTHY
                     ins_metadata.fault_code = 0x0
@@ -819,17 +868,47 @@ class FaultManager(ThreadSafeSingleton, Observer):
                     with self.config_lock:
                         enable_persistence = self.etcd_config.enable_etcd_persistence
                     if enable_persistence and not self.persist_data():
-                        logger.warning("Failed to persist fault manager data to ETCD after "
-                                       "strategy completion for instance %d", ins_id)
+                        logger.warning(
+                            "Failed to persist fault manager data to ETCD after strategy completion for instance %d",
+                            ins_id,
+                        )
                 else:
                     # New strategy and have unfinished strategy will both reach here.
-                    logger.debug("Instance %d: Updating fault state to level=%s, code=0x%08x",
-                                 ins_id, fault_level, fault_code)
+                    logger.debug(
+                        "Instance %d: Updating fault state to level=%s, code=0x%08x", ins_id, fault_level, fault_code
+                    )
                     ins_metadata.fault_level = fault_level
                     ins_metadata.fault_code = fault_code
 
+    def get_node_fault_levels(self, instance_id: int) -> dict[str, FaultLevel]:
+        """Return the highest fault level per node for a given instance.
+
+        Args:
+            instance_id: The instance whose nodes to query.
+
+        Returns:
+            A dict mapping node_name to its highest FaultLevel.
+            Nodes with no faults are reported as FaultLevel.HEALTHY.
+            Returns an empty dict if the instance is unknown.
+        """
+        with self.lock:
+            if instance_id not in self.instances:
+                return {}
+
+            result: dict[str, FaultLevel] = {}
+            for node_name, node_metadata in self.nodes.items():
+                if node_metadata.instance_id != instance_id:
+                    continue
+                highest = FaultLevel.HEALTHY
+                for fault_info in node_metadata.fault_infos.values():
+                    if fault_info.fault_level > highest:
+                        highest = fault_info.fault_level
+                result[node_name] = highest
+
+            return result
+
     def _get_next_version(self) -> int:
-        """ Get next data version for persistence """
+        """Get next data version for persistence"""
         with self._version_lock:
             self._data_version += 1
             return self._data_version

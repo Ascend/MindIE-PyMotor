@@ -8,7 +8,7 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-""" Test cases are organized according to the following 7 logical blocks:
+"""Test cases are organized according to the following 7 logical blocks:
 1. Initialization
 2. Persistence and Recovery
 3. Start and Update Methods
@@ -17,23 +17,26 @@
 6. Instance and node status Updating
 7. Strategy Center Processing
 """
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-from motor.common.resources.instance import Instance, NodeManagerInfo
+from motor.common.resources.instance import Instance, InsStatus, NodeManagerInfo
 from motor.config.controller import ControllerConfig
 from motor.controller.core import ObserverEvent
-from motor.controller.fault_tolerance.fault_manager import (
-    FaultManager, NodeMetadata, InstanceMetadata
-)
+from motor.controller.fault_tolerance.fault_manager import FaultManager, NodeMetadata, InstanceMetadata
 from motor.controller.fault_tolerance.k8s.cluster_fault_codes import (
-    NodeStatus, FaultLevel, FaultType, FaultInfo, SpecialFaultCode,
+    NodeStatus,
+    FaultLevel,
+    FaultType,
+    FaultInfo,
+    SpecialFaultCode,
 )
 
 # Test constants
 TEST_IPS = ["192.168.1.1", "192.168.1.2", "192.168.1.99"]
 TEST_PORT = "8080"
-TEST_FAULT_CODES = [0x1234, 0x2000, 0x3000, 0x3001, 0x4000, 0x00f1fef5]
+TEST_FAULT_CODES = [0x1234, 0x2000, 0x3000, 0x3001, 0x4000, 0x00F1FEF5]
 
 
 def FI(*, fault_type, npu_name, fault_code, fault_level):
@@ -52,18 +55,12 @@ FAULT_DEVICE_L1_0x1000 = FI(
 FAULT_DEVICE_L2_0x1000 = FI(
     fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x1000, fault_level=FaultLevel.L2
 )
-FAULT_DEVICE_L2 = FI(
-    fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x2000, fault_level=FaultLevel.L2
-)
-FAULT_DEVICE_L3 = FI(
-    fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x2000, fault_level=FaultLevel.L3
-)
+FAULT_DEVICE_L2 = FI(fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x2000, fault_level=FaultLevel.L2)
+FAULT_DEVICE_L3 = FI(fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x2000, fault_level=FaultLevel.L3)
 FAULT_SWITCH_L2 = FI(
     fault_type=FaultType.CARD_NETWORK_UNHEALTHY, npu_name="switch0", fault_code=0x2000, fault_level=FaultLevel.L2
 )
-FAULT_NODE_L3 = FI(
-    fault_type=FaultType.NODE_UNHEALTHY, npu_name="", fault_code=0x3000, fault_level=FaultLevel.L3
-)
+FAULT_NODE_L3 = FI(fault_type=FaultType.NODE_UNHEALTHY, npu_name="", fault_code=0x3000, fault_level=FaultLevel.L3)
 FAULT_CM_DEVICE_L3_0x1234 = FI(
     fault_type=FaultType.CARD_UNHEALTHY, npu_name="npu0", fault_code=0x1234, fault_level=FaultLevel.L3
 )
@@ -113,6 +110,7 @@ def mock_etcd_client():
 def setup_test_environment():
     """Setup and teardown for each test"""
     from motor.common.utils.singleton import ThreadSafeSingleton
+
     # Clear singleton instances before each test
     if FaultManager in ThreadSafeSingleton._instances:
         fault_manager = ThreadSafeSingleton._instances[FaultManager]
@@ -193,6 +191,7 @@ def mock_instance_manager(mock_instance):
 # 1. Initialization
 # =============================================================================
 
+
 def test_fault_manager_initialization(fault_manager):
     """Test FaultManager initialization with default config"""
     assert fault_manager.config is not None
@@ -234,6 +233,7 @@ def test_fault_manager_singleton_behavior():
 # =============================================================================
 # 2. Persistence and Recovery
 # =============================================================================
+
 
 def test_persist_data_success(fault_manager_with_instances):
     """Test successful data persistence to ETCD"""
@@ -297,11 +297,12 @@ def test_persist_data_exception_handling(fault_manager_with_instances):
     """Test data persistence exception handling"""
     manager = fault_manager_with_instances
 
-    with patch.object(manager.etcd_client, 'persist_data',
-                      side_effect=Exception("ETCD connection error")) as mock_persist:
+    with patch.object(
+        manager.etcd_client, 'persist_data', side_effect=Exception("ETCD connection error")
+    ) as mock_persist:
         result = manager.persist_data()
 
-        assert result is False # Verify persist_data failure
+        assert result is False  # Verify persist_data failure
 
 
 def test_persist_data_empty_data(fault_manager):
@@ -313,12 +314,12 @@ def test_persist_data_empty_data(fault_manager):
 
     with patch.object(manager.etcd_client, 'persist_data', return_value=True) as mock_persist:
         result = manager.persist_data()
-        assert result is True # Verify persist_data success
+        assert result is True  # Verify persist_data success
 
         call = mock_persist.call_args
         stored_data = call[0][1]
 
-        assert 'state' in stored_data # Verify fault_manager field
+        assert 'state' in stored_data  # Verify fault_manager field
         persistent_state_data = stored_data['state']
         assert 'data' in persistent_state_data
 
@@ -335,6 +336,7 @@ def test_persist_data_empty_data(fault_manager):
 def test_restore_data_success(fault_manager):
     """Test successful data restoration from ETCD"""
     from motor.common.etcd.persistent_state import PersistentState
+
     manager = fault_manager
     fault_data = {
         'nodes': {
@@ -353,23 +355,18 @@ def test_restore_data_success(fault_manager):
                 },
             )
         },
-        'instances': {"1": _etcd_instance_entry(instance_id=1, fault_level=FaultLevel.HEALTHY, fault_code=0x0)}
+        'instances': {"1": _etcd_instance_entry(instance_id=1, fault_level=FaultLevel.HEALTHY, fault_code=0x0)},
     }
 
-    persistent_state = PersistentState(
-        data=fault_data,
-        version=1,
-        timestamp=1234567890.0,
-        checksum=""
-    )
+    persistent_state = PersistentState(data=fault_data, version=1, timestamp=1234567890.0, checksum="")
     persistent_state.checksum = persistent_state.calculate_checksum()
 
     with patch.object(manager.etcd_client, 'restore_data', return_value={"state": persistent_state}) as mock_restore:
         result = manager.restore_data()
 
-        assert result is True # Verify restore_data success
+        assert result is True  # Verify restore_data success
 
-        assert len(manager.nodes) == 1 # Verify nodes restored
+        assert len(manager.nodes) == 1  # Verify nodes restored
         assert "node_0" in manager.nodes
 
         node = manager.nodes["node_0"]
@@ -394,7 +391,7 @@ def test_restore_data_none_data(fault_manager):
 
     with patch.object(manager.etcd_client, 'restore_data', return_value=None) as mock_restore:
         result = manager.restore_data()
-        assert result is True # Verify restore_data success
+        assert result is True  # Verify restore_data success
 
         assert len(manager.nodes) == 0
         assert len(manager.instances) == 0
@@ -404,16 +401,18 @@ def test_restore_data_etcd_failure(fault_manager):
     """Test data restoration when ETCD operations fail"""
     manager = fault_manager
 
-    with patch.object(manager.etcd_client, 'restore_data',
-                      side_effect=Exception("ETCD connection error")) as mock_restore:
+    with patch.object(
+        manager.etcd_client, 'restore_data', side_effect=Exception("ETCD connection error")
+    ) as mock_restore:
         result = manager.restore_data()
 
-        assert result is False # Verify restore_data failure
+        assert result is False  # Verify restore_data failure
 
 
 def test_restore_data_corrupted_data(fault_manager):
     """Test data restoration with corrupted PersistentState data"""
     from motor.common.etcd.persistent_state import PersistentState
+
     manager = fault_manager
     # Create corrupted PersistentState with invalid checksum
     corrupted_fault_data = {
@@ -426,22 +425,23 @@ def test_restore_data_corrupted_data(fault_manager):
                 fault_infos={},
             )
         },
-        'instances': {"1": _etcd_instance_entry(instance_id=1, fault_level=FaultLevel.HEALTHY, fault_code=0x0)}
+        'instances': {"1": _etcd_instance_entry(instance_id=1, fault_level=FaultLevel.HEALTHY, fault_code=0x0)},
     }
     corrupted_state = PersistentState(
         data=corrupted_fault_data,
         version=1,
         timestamp=1234567890.0,
-        checksum="invalid_checksum"  # Invalid checksum
+        checksum="invalid_checksum",  # Invalid checksum
     )
     with patch.object(manager.etcd_client, 'restore_data', return_value={"state": corrupted_state}) as mock_restore:
         result = manager.restore_data()
-        assert result is False # Verify restore_data failure
+        assert result is False  # Verify restore_data failure
 
 
 # =============================================================================
 # 3. Start and Update Methods
 # =============================================================================
+
 
 def test_fault_manager_start_with_persistence_enabled(fault_manager):
     """Test starting FaultManager with persistence enabled"""
@@ -452,11 +452,9 @@ def test_fault_manager_start_with_persistence_enabled(fault_manager):
             fault_manager.start()
 
             mock_thread.assert_called_once_with(
-                target=fault_manager._ft_strategy_center,
-                daemon=True,
-                name="FaultToleranceStrategyCenter"
+                target=fault_manager._ft_strategy_center, daemon=True, name="FaultToleranceStrategyCenter"
             )
-            mock_restore.assert_called_once() # Verify restore_data was called
+            mock_restore.assert_called_once()  # Verify restore_data was called
             mock_thread.return_value.start.assert_called_once()
 
 
@@ -469,9 +467,7 @@ def test_fault_manager_start_with_persistence_disabled(fault_manager):
             fault_manager.start()
 
             mock_thread.assert_called_once_with(
-                target=fault_manager._ft_strategy_center,
-                daemon=True,
-                name="FaultToleranceStrategyCenter"
+                target=fault_manager._ft_strategy_center, daemon=True, name="FaultToleranceStrategyCenter"
             )
             mock_restore.assert_not_called()
             mock_thread.return_value.start.assert_called_once()
@@ -487,9 +483,7 @@ def test_fault_manager_start_restore_data_failed(fault_manager):
                 fault_manager.start()
 
                 mock_thread.assert_called_once_with(
-                    target=fault_manager._ft_strategy_center,
-                    daemon=True,
-                    name="FaultToleranceStrategyCenter"
+                    target=fault_manager._ft_strategy_center, daemon=True, name="FaultToleranceStrategyCenter"
                 )
                 mock_restore.assert_called_once()
                 mock_logger.warning.assert_called_once_with(
@@ -529,12 +523,12 @@ def test_update_instance_initial(fault_manager, mock_instance):
     mock_instance.get_node_managers.return_value = [
         NodeManagerInfo(pod_ip="192.168.1.1", port="80880"),
     ]
-    
+
     with patch.object(fault_manager, "k8s_client") as mock_k8s_client:
         mock_k8s_client.get_node_hostname_by_pod_ip.return_value = "node_0"
         with patch.object(fault_manager, '_create_resource_monitor_for_node'):
             fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
-    
+
     assert mock_instance.id in fault_manager.instances
     assert len(fault_manager.nodes) > 0
 
@@ -543,13 +537,11 @@ def test_update_instance_removed(fault_manager, mock_instance):
     """Test update method with INSTANCE_REMOVED event"""
     mock_instance.id = 1
     fault_manager.instances[1] = InstanceMetadata(instance_id=1)
-    fault_manager.nodes["node_0"] = NodeMetadata(
-        pod_ip="192.168.1.1", node_name="node_0", instance_id=1
-    )
-    
+    fault_manager.nodes["node_0"] = NodeMetadata(pod_ip="192.168.1.1", node_name="node_0", instance_id=1)
+
     with patch.object(fault_manager, '_stop_resource_monitor_for_node'):
         fault_manager.update(mock_instance, ObserverEvent.INSTANCE_REMOVED)
-    
+
     assert 1 not in fault_manager.instances
     assert "node_0" not in fault_manager.nodes
 
@@ -567,8 +559,10 @@ def test_handle_instance_initial_new_instance(fault_manager, mock_instance):
         "192.168.1.1": "node_0",
         "192.168.1.2": "node_1",
     }
-    with patch.object(fault_manager, "k8s_client") as mock_k8s_client, \
-         patch.object(fault_manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+    with (
+        patch.object(fault_manager, "k8s_client") as mock_k8s_client,
+        patch.object(fault_manager, '_create_resource_monitor_for_node') as mock_create_monitor,
+    ):
         mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
         fault_manager.update(mock_instance, ObserverEvent.INSTANCE_INITIAL)
 
@@ -616,7 +610,7 @@ def test_handle_instance_initial_preserves_fault_info(fault_manager):
         node_name="node_0",
         instance_id=999,  # Different instance_id to test update
         node_status=NodeStatus.READY,
-        fault_infos={FAULT_DEVICE_L2_0x1000.fault_code: FAULT_DEVICE_L2_0x1000}  # This should be preserved
+        fault_infos={FAULT_DEVICE_L2_0x1000.fault_code: FAULT_DEVICE_L2_0x1000},  # This should be preserved
     )
 
     with fault_manager.lock:
@@ -679,6 +673,7 @@ def test_handle_instance_removed_nonexistent_instance(fault_manager):
 # 4. Dynamic Configuration Update
 # =============================================================================
 
+
 def test_update_config():
     """Test update_config method updates configuration and recreates ETCD client"""
     # Create FaultManager with mocked dependencies
@@ -706,8 +701,7 @@ def test_update_config():
         assert manager.config.etcd_config.etcd_host == "new-etcd-host"
         assert manager.config.etcd_config.etcd_port == 2380
         assert manager.config.etcd_config.etcd_timeout == 30.0
-        mock_etcd_class.assert_called_once_with(etcd_config=new_config.etcd_config,
-                                                tls_config=config.etcd_tls_config)
+        mock_etcd_class.assert_called_once_with(etcd_config=new_config.etcd_config, tls_config=config.etcd_tls_config)
 
 
 def test_update_config_with_configmap_changes():
@@ -715,16 +709,8 @@ def test_update_config_with_configmap_changes():
     manager = FaultManager(ControllerConfig())
     ins_metadata = InstanceMetadata(instance_id=1)
     manager.instances[1] = ins_metadata
-    manager.nodes["10.0.0.1"] = NodeMetadata(
-        pod_ip="192.168.1.1",
-        node_name="node_0",
-        instance_id=1
-    )
-    manager.nodes["10.0.0.2"] = NodeMetadata(
-        pod_ip="192.168.1.2",
-        node_name="node_1",
-        instance_id=1
-    )
+    manager.nodes["10.0.0.1"] = NodeMetadata(pod_ip="192.168.1.1", node_name="node_0", instance_id=1)
+    manager.nodes["10.0.0.2"] = NodeMetadata(pod_ip="192.168.1.2", node_name="node_1", instance_id=1)
     mock_monitor1, mock_monitor2 = MagicMock(), MagicMock()
     manager.resource_monitors.update({"node_0": mock_monitor1, "node_1": mock_monitor2})
 
@@ -732,8 +718,10 @@ def test_update_config_with_configmap_changes():
     new_config.fault_tolerance_config.configmap_prefix = "new-prefix"
     new_config.fault_tolerance_config.configmap_namespace = "new-namespace"
 
-    with patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor, \
-         patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
+    with (
+        patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor,
+        patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger,
+    ):
         manager.update_config(new_config)
 
         assert (manager.configmap_prefix, manager.configmap_namespace) == ("new-prefix", "new-namespace")
@@ -789,13 +777,21 @@ def test_update_instances(fault_manager):
         inst.get_node_managers.return_value = [NodeManagerInfo(**node) for node in nodes]
         return inst
 
-    mock_instance1 = mk_instance(1, "job1", [
-        {"pod_ip": "192.168.1.1", "port": "8080"},
-        {"pod_ip": "192.168.1.2", "port": "8080"},
-    ])
-    mock_instance2 = mk_instance(2, "job2", [
-        {"pod_ip": "192.168.1.3", "port": "8080"},
-    ])
+    mock_instance1 = mk_instance(
+        1,
+        "job1",
+        [
+            {"pod_ip": "192.168.1.1", "port": "8080"},
+            {"pod_ip": "192.168.1.2", "port": "8080"},
+        ],
+    )
+    mock_instance2 = mk_instance(
+        2,
+        "job2",
+        [
+            {"pod_ip": "192.168.1.3", "port": "8080"},
+        ],
+    )
 
     # Mapping from pod_ip to node_name used in this test
     pod_to_node = {
@@ -806,8 +802,10 @@ def test_update_instances(fault_manager):
     }
 
     # Test 1: Add new instances
-    with patch.object(manager, 'k8s_client') as mock_k8s_client, \
-         patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+    with (
+        patch.object(manager, 'k8s_client') as mock_k8s_client,
+        patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor,
+    ):
         mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
         manager.update_instances([mock_instance1, mock_instance2])
 
@@ -825,9 +823,11 @@ def test_update_instances(fault_manager):
         NodeManagerInfo(pod_ip="192.168.1.1", port="8080"),
         NodeManagerInfo(pod_ip="192.168.1.4", port="8080"),
     ]
-    with patch.object(manager, 'k8s_client') as mock_k8s_client, \
-         patch.object(manager, '_stop_resource_monitor_for_node') as mock_stop_monitor, \
-         patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor:
+    with (
+        patch.object(manager, 'k8s_client') as mock_k8s_client,
+        patch.object(manager, '_stop_resource_monitor_for_node') as mock_stop_monitor,
+        patch.object(manager, '_create_resource_monitor_for_node') as mock_create_monitor,
+    ):
         mock_k8s_client.get_node_hostname_by_pod_ip.side_effect = lambda ip: pod_to_node.get(ip)
         manager.update_instances([mock_instance1])
 
@@ -848,6 +848,7 @@ def test_update_instances(fault_manager):
 # =============================================================================
 # 5. Resource Monitoring and Update
 # =============================================================================
+
 
 def test_create_resource_monitor_for_node(fault_manager):
     """Test creating Resource monitor for a node"""
@@ -888,7 +889,13 @@ def test_stop_resource_monitor_for_node(fault_manager):
         assert "node_0" not in fault_manager.resource_monitors
 
 
-@pytest.mark.parametrize("fault", [FAULT_CM_DEVICE_L3_0x1234, FAULT_CM_SWITCH_L2_0x5678,],)
+@pytest.mark.parametrize(
+    "fault",
+    [
+        FAULT_CM_DEVICE_L3_0x1234,
+        FAULT_CM_SWITCH_L2_0x5678,
+    ],
+)
 def test_handle_configmap_update_with_faults_parametrized(fault_manager, fault):
     """Test handling ConfigMap update with device/switch faults (parametrized)."""
     node_name = "node_0"
@@ -909,13 +916,12 @@ def test_handle_configmap_update_with_faults_parametrized(fault_manager, fault):
 # 6. Instance and Node status Updating
 # =============================================================================
 
+
 def test_handle_node_status_update_adds_node_reboot_fault_with_L6(fault_manager):
     """Test that node NOT_READY adds a NODE_REBOOT fault with level L6"""
     # Setup: Add a node to the manager
     node_name = "node_0"
-    fault_manager.nodes[node_name] = NodeMetadata(
-        pod_ip="192.168.1.1", node_name=node_name, instance_id=1
-    )
+    fault_manager.nodes[node_name] = NodeMetadata(pod_ip="192.168.1.1", node_name=node_name, instance_id=1)
     fault_manager._handle_node_status_update(NodeStatus.NOT_READY, node_name)
 
     # Verify NODE_REBOOT fault exists and has level L6
@@ -930,9 +936,7 @@ def test_refresh_instance_fault_level_instance_not_found(fault_manager):
     with patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
         fault_manager._refresh_instance_fault_level(999)
 
-        mock_logger.warning.assert_called_once_with(
-            "Instance %d not found, skipping fault level refresh", 999
-        )
+        mock_logger.warning.assert_called_once_with("Instance %d not found, skipping fault level refresh", 999)
 
 
 def test_refresh_instance_fault_level_instance_not_found(fault_manager_with_instances):
@@ -942,9 +946,7 @@ def test_refresh_instance_fault_level_instance_not_found(fault_manager_with_inst
     with patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
         manager._refresh_instance_fault_level(999)
 
-        mock_logger.warning.assert_called_once_with(
-            "Instance %d not found, skipping fault level refresh", 999
-        )
+        mock_logger.warning.assert_called_once_with("Instance %d not found, skipping fault level refresh", 999)
 
 
 def test_refresh_instance_fault_level_no_device_faults(fault_manager_with_instances):
@@ -953,8 +955,10 @@ def test_refresh_instance_fault_level_no_device_faults(fault_manager_with_instan
     instance = manager.instances[1]
     instance.fault_level = FaultLevel.L3  # Set to unhealthy initially
 
-    with patch('motor.controller.fault_tolerance.fault_manager.InstanceManager') as mock_im_class, \
-         patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger:
+    with (
+        patch('motor.controller.fault_tolerance.fault_manager.InstanceManager') as mock_im_class,
+        patch('motor.controller.fault_tolerance.fault_manager.logger') as mock_logger,
+    ):
         mock_im = MagicMock()
         mock_im_class.return_value = mock_im
 
@@ -995,15 +999,17 @@ def test_refresh_instance_fault_level_with_device_faults(fault_manager_with_inst
                 mock_im.separate_instance.assert_called_once_with(1)
 
                 mock_logger.info.assert_called_once_with(
-                    "Updated instance %d fault level to %s with code %s",
-                    1, FaultLevel.L3, hex(0x2000)
+                    "Updated instance %d fault level to %s with code %s", 1, FaultLevel.L3, hex(0x2000)
                 )
 
 
-@pytest.mark.parametrize("is_separated,expect_recover", [
-    (True, True),   # Instance is separated, should call recover_instance
-    (False, False)  # Instance is not separated, should not call recover_instance
-])
+@pytest.mark.parametrize(
+    "is_separated,expect_recover",
+    [
+        (True, True),  # Instance is separated, should call recover_instance
+        (False, False),  # Instance is not separated, should not call recover_instance
+    ],
+)
 def test_refresh_instance_fault_level_with_l2_faults(fault_manager_with_instances, is_separated, expect_recover):
     """Test _refresh_instance_fault_level when instance has L2 level faults"""
     manager = fault_manager_with_instances
@@ -1038,8 +1044,7 @@ def test_refresh_instance_fault_level_with_l2_faults(fault_manager_with_instance
                     mock_im.recover_instance.assert_not_called()
 
                 mock_logger.info.assert_called_once_with(
-                    "Updated instance %d fault level to %s with code %s",
-                    1, FaultLevel.L2, hex(0x2000)
+                    "Updated instance %d fault level to %s with code %s", 1, FaultLevel.L2, hex(0x2000)
                 )
 
 
@@ -1137,6 +1142,7 @@ def test_eval_node_status_single_device_fault(fault_manager_with_instances):
 # 7. Strategy Center Processing
 # =============================================================================
 
+
 def test_ft_strategy_center_initialization(fault_manager):
     """Test fault tolerance strategy center initialization"""
     # The strategy center thread should be initialized
@@ -1169,19 +1175,25 @@ def test_process_instance_strategy_with_unhealthy_instance(fault_manager_with_in
     # Set instance 1 to unhealthy state with L4 fault level
     manager.instances[1].fault_level = FaultLevel.L4
 
-    # Mock InstanceManager to return a decode instance for L4 strategy lookup
     with patch('motor.controller.core.instance_manager.InstanceManager') as mock_im_class:
         mock_im = MagicMock()
         mock_im_class.return_value = mock_im
         mock_instance = MagicMock()
         mock_instance.role = "decode"
+        mock_instance.status = InsStatus.INACTIVE
+        mock_instance.job_name = "decode-1"
+        mock_instance.id = 1
+        mock_instance.get_node_managers.return_value = []
         mock_im.get_instance.return_value = mock_instance
         manager.config.fault_tolerance_config.enable_scale_p2d = True
 
-        # Process instance strategy - this should set up a strategy for L4 faults
-        manager._process_instance_strategy(1)
+        with patch(
+            'motor.controller.fault_tolerance.strategy.scale_p2d.InstanceManager',
+            mock_im_class,
+        ):
+            manager._process_instance_strategy(1)
 
-        # Check that a strategy was set for the instance (L4 decode instance should get ScaleP2DStrategy)
+        # L4 decode instance should get ScaleP2DStrategy while recovery is in progress
         assert manager.instances[1].strategy is not None
         assert manager.instances[1].fault_level == FaultLevel.L4
 
