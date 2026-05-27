@@ -106,6 +106,27 @@ def get_deploy_mode_from_config(deploy_config):
     return mode
 
 
+def _pick_mgmt_service(docs: list[dict]) -> dict | None:
+    """Pick the management Service (port 1026) from a list of YAML docs.
+
+    When the coordinator template defines multiple Services (infer, mgmt, obs),
+    the first Service in document order may not be the management one.
+    Select by port (1026) so the COORDINATOR_SERVICE FQDN resolves to the
+    correct ClusterIP that serves /readiness and /instances/refresh.
+    Falls back to the first Service if none exposes port 1026.
+    """
+    for doc in docs:
+        if doc.get(C.KIND) == C.SERVICE:
+            for port_entry in doc.get("spec", {}).get("ports", []):
+                if port_entry.get("port") == 1026 or port_entry.get("targetPort") == 1026:
+                    return doc
+    # Fallback: first Service (backward-compatible with single-service templates)
+    for doc in docs:
+        if doc.get(C.KIND) == C.SERVICE:
+            return doc
+    return None
+
+
 def init_service_domain_name(paths, deploy_config):
     controller_data = load_yaml(paths["controller_input_yaml"], False)
     coordinator_data = load_yaml(paths["coordinator_input_yaml"], False)
@@ -119,11 +140,7 @@ def init_service_domain_name(paths, deploy_config):
             controller_service_data = doc
             break
 
-    coordinator_service_data = None
-    for doc in coordinator_data:
-        if doc.get(C.KIND) == C.SERVICE:
-            coordinator_service_data = doc
-            break
+    coordinator_service_data = _pick_mgmt_service(coordinator_data)
 
     kv_pull_service_data = None
     for doc in kv_pool_data:

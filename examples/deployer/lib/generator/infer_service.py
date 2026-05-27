@@ -269,7 +269,20 @@ def init_infer_service_domain_name(infer_service_template_yaml, deploy_config):
         services = role.get(C.SERVICES, [])
         if not services:
             return None
-        service_name = services[0].get(C.NAME, "")
+        # Pick the management service (port 1026) so the FQDN resolves to the
+        # correct ClusterIP for /readiness and /instances/refresh, even when
+        # infer or obs Services appear first in the role's services list.
+        service = None
+        for svc in services:
+            for port_entry in svc.get("spec", {}).get("ports", []):
+                if port_entry.get("port") == 1026 or port_entry.get("targetPort") == 1026:
+                    service = svc
+                    break
+            if service is not None:
+                break
+        if service is None:
+            service = services[0]
+        service_name = service.get(C.NAME, "")
         role_name_val = role.get(C.NAME, role_name)
         full_service_name = f"{service_name}-{infer_name}-0-{role_name_val}"
         return f"{full_service_name}.{namespace}.svc.cluster.local"
