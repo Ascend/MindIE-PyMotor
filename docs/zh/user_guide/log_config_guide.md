@@ -20,8 +20,8 @@ pyMotor开启日志持久化需修改user_config.json配置文件后，通过dep
     "logging_config": {
       "log_level": "INFO",
       "log_max_line_length": 8192,
-      "log_format": "%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s",
-      "log_date_format": "%Y-%m-%d %H:%M:%S",
+      "log_format": "(%(processName)s pid=%(process)d) %(levelname)s %(asctime)s [%(name)s][%(fileinfo)s:%(lineno)d] %(message)s",
+      "log_date_format": "%m-%d %H:%M:%S",
       "host_log_dir": "/root/ascend/log/motor",
       "log_rotation_size": 10,
       "log_rotation_count": 10,
@@ -38,8 +38,8 @@ logging_config配置项说明：
 
 - `log_level`：日志级别，可选：`DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`，默认为`INFO`
 - `log_max_line_length`：日志行最大长度，默认为8192
-- `log_format`：日志格式，默认为`%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s`
-- `log_date_format`：日志时间格式，默认为`%Y-%m-%d %H:%M:%S`
+- `log_format`：日志格式，默认为`(%(processName)s pid=%(process)d) %(levelname)s %(asctime)s [%(name)s][%(fileinfo)s:%(lineno)d] %(message)s`
+- `log_date_format`：日志时间格式，默认为`%m-%d %H:%M:%S`
 - `host_log_dir`：日志保存目录，默认为`/root/ascend/log/motor`，持久化到该文件夹。
 - `log_rotation_size`：单个日志文件最大值，默认10，单位为MB，超过此大小则进行日志轮转
 - `log_rotation_count`：日志文件最大数量，默认10个（压缩日志同样生效），超过此数量则进行日志轮转

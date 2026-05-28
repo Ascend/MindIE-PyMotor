@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 
+from motor.common.logger.formatter import ColoredFormatter, NewLineFormatter
 from motor.common.logger.logger_handler import CompressedRotatingFileHandler
 from motor.config.log_config import LoggingConfig
 
@@ -25,38 +26,35 @@ _logged_modules = set()
 hostname = os.getenv('HOSTNAME', 'unknown')
 env_log_dir = os.getenv('MOTOR_LOG_PATH')
 
+_MODULE_LOGGER_NAME = "common.logger"
 
-class ProcessNameFilter(logging.Filter):
-    """Inject process_name into LogRecord so format can use %(process_name)s."""
+# motor.engine_server.* uses a single logger bucket; other top-level packages use two levels.
+_SINGLE_BUCKET_COMPONENTS = frozenset({"engine_server"})
+
+
+class ProcessContextFilter(logging.Filter):
+    """Inject process name into LogRecord for format placeholders."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.processName = multiprocessing.current_process().name
         return True
 
 
-class MaxLengthFormatter(logging.Formatter):
-    """
-    Formatter that limits log message length to prevent performance issues.
-    """
+# Backward-compatible alias
+ProcessNameFilter = ProcessContextFilter
 
-    def __init__(
-        self,
-        fmt=None,
-        max_length=None,
-        datefmt=None,
-        style='%'
-    ):
-        # If max_length is not provided, get it from config
-        if max_length is None:
-            config = LoggingConfig()
-            max_length = config.log_max_line_length
-        super().__init__(fmt=fmt, datefmt=datefmt, style=style)
+
+class MaxLengthFormatter(logging.Formatter):
+    """Wrap a formatter and cap output line length."""
+
+    def __init__(self, inner: logging.Formatter, max_length: int):
+        super().__init__()
+        self.inner = inner
         self.max_length = max_length
 
-    def format(self, record):
-        msg = super().format(record)
-        # Escape special characters and limit length
-        msg = repr(msg)[1:-1]  # Remove quotes added by repr()
+    def format(self, record: logging.LogRecord) -> str:
+        msg = self.inner.format(record)
+        msg = repr(msg)[1:-1]
         if len(msg) > self.max_length:
             return msg[:self.max_length] + '...'
         return msg
@@ -86,6 +84,46 @@ class ApiAccessFilter(logging.Filter):
         return True
 
 
+def _module_logger() -> logging.Logger:
+    return logging.getLogger(_MODULE_LOGGER_NAME)
+
+
+def _resolve_logger_name(name: str) -> str:
+    if not name.startswith("motor."):
+        return name
+    parts = name.split('.')
+    if len(parts) < 2:
+        return name
+    component = parts[1]
+    if component in _SINGLE_BUCKET_COMPONENTS:
+        return component
+    if len(parts) >= 3:
+        return f"{parts[1]}.{parts[2]}"
+    return component
+
+
+def _use_color() -> bool:
+    if os.environ.get('NO_COLOR'):
+        return False
+    color_flag = os.environ.get('MOTOR_LOGGING_COLOR')
+    if color_flag == '0':
+        return False
+    if color_flag == '1':
+        return True
+    return hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+
+
+def _build_formatter(config: LoggingConfig, *, color: bool) -> MaxLengthFormatter:
+    use_relpath = config.log_level.upper() == 'DEBUG'
+    base_cls = ColoredFormatter if color else NewLineFormatter
+    inner = base_cls(
+        config.log_format,
+        datefmt=config.log_date_format,
+        use_relpath=use_relpath,
+    )
+    return MaxLengthFormatter(inner, config.log_max_line_length)
+
+
 def get_logger(
     name: str = __name__,
     level: int | None = None
@@ -110,12 +148,7 @@ def get_logger(
     if level is None:
         level = getattr(logging, config.log_level.upper(), logging.INFO)
 
-    log_name = name
-    if name.startswith("motor."):
-        parts = name.split('.')
-        if len(parts) >= 2:
-            log_name = parts[1]
-
+    log_name = _resolve_logger_name(name)
     root_logger = logging.getLogger()
     logger = logging.getLogger(log_name)
 
@@ -150,22 +183,23 @@ def _ensure_root_logger_configured(config: LoggingConfig, log_dir: str | None) -
     # Configure root logger with handlers
     root_logger.setLevel(level)
 
-    # Console handler
+    process_filter = ProcessContextFilter()
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
-    console_handler.addFilter(ProcessNameFilter())
-    formatter = MaxLengthFormatter(
-        config.log_format,
-        max_length=config.log_max_line_length,
-        datefmt=config.log_date_format
-    )
-    console_handler.setFormatter(formatter)
+    console_handler.addFilter(process_filter)
+    console_handler.setFormatter(_build_formatter(config, color=_use_color()))
     root_logger.addHandler(console_handler)
+
+    file_formatter = _build_formatter(config, color=False)
 
     # File handler (optional)
     if log_dir:
-        # Ensure log directory exists
-        logging.info("Internal logs of pod will be saved to %s, will mounted to host %s", log_dir, config.host_log_dir)
+        _module_logger().info(
+            "Internal logs of pod will be saved to %s, will mounted to host %s",
+            log_dir,
+            config.host_log_dir,
+        )
 
         # Get log_dir from pod name prefix, remove random suffix
         parts = hostname.split('-')
@@ -178,28 +212,25 @@ def _ensure_root_logger_configured(config: LoggingConfig, log_dir: str | None) -
             try:
                 Path(module_log_dir).mkdir(parents=True, exist_ok=True)
             except Exception:
-                # If directory creation fails, skip file logging
-                logging.error(f"Failed to create log directory: {module_log_dir}")
-                pass
+                _module_logger().error("Failed to create log directory: %s", module_log_dir)
         if os.path.exists(module_log_dir):
             try:
                 log_file = os.path.join(module_log_dir, f"{hostname}_{os.getpid()}.log")
 
                 rotate_handler = CompressedRotatingFileHandler(
                     filename=log_file,
-                    maxBytes=config.log_rotation_size * 1024 * 1024,  # Convert mb to bytes
+                    maxBytes=config.log_rotation_size * 1024 * 1024,
                     backupCount=config.log_rotation_count,
                     compress=config.log_compress,
                     compress_level=config.log_compress_level,
                     max_total_size=config.log_max_total_size * 1024 * 1024,
                     cleanup_interval=config.log_cleanup_interval
                 )
-                rotate_handler.setFormatter(formatter)
+                rotate_handler.addFilter(process_filter)
+                rotate_handler.setFormatter(file_formatter)
                 root_logger.addHandler(rotate_handler)
             except Exception:
-                # If file logging fails, continue with console only
-                logging.error("Failed to configure log handler")
-                pass
+                _module_logger().error("Failed to configure log handler")
 
 
 def reconfigure_logging(log_config: LoggingConfig) -> None:
@@ -225,7 +256,7 @@ def reconfigure_logging(log_config: LoggingConfig) -> None:
     root_logger = logging.getLogger()
 
     # Remove existing handlers and reconfigure
-    for handler in root_logger.handlers[:]:  # Create a copy of the list to avoid modification issues
+    for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
 
     # Reconfigure root logger with new settings
@@ -240,5 +271,4 @@ def reconfigure_logging(log_config: LoggingConfig) -> None:
         logger_obj = logging.getLogger(name)
         logger_obj.setLevel(new_level)
 
-    # Log the reconfiguration (using root logger to avoid import issues)
-    logging.info(f"Logging reconfigured with level: {log_config.log_level}")
+    _module_logger().info("Logging reconfigured with level: %s", log_config.log_level)

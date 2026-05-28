@@ -147,11 +147,12 @@ def test_logging_config_defaults(config_data):
     assert config.logging_config.log_level == "INFO"
     assert config.logging_config.log_max_line_length == 8192
     assert config.logging_config.host_log_dir is not None
-    # Default format includes [proc:%(process_name)s] for multi-process logging
+    # Default format aligned with vLLM field order; engine_server uses single module bucket
     assert config.logging_config.log_format == (
-        '%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d][proc:%(processName)s]  %(message)s'
+        '(%(processName)s pid=%(process)d) %(levelname)s %(asctime)s '
+        '[%(name)s][%(fileinfo)s:%(lineno)d] %(message)s'
     )
-    assert config.logging_config.log_date_format == '%Y-%m-%d %H:%M:%S'
+    assert config.logging_config.log_date_format == '%m-%d %H:%M:%S'
 
 
 @pytest.mark.parametrize("invalid_config,expected_error", [
