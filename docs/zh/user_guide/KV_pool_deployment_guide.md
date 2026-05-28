@@ -40,11 +40,15 @@ pyMotor开启KV池化能力只需修改user_config.json配置文件后，通过d
   },
   "motor_engine_prefill_config": {
     "engine_type": "vllm",
-    "model_config": {
-      "..."
-    },
     "engine_config": {
-      "...",
+      "served_model_name": "...",
+      "model": "...",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 1,
+      "tensor_parallel_size": 1,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "kv_transfer_config": {
         "kv_connector": "MultiConnector",
         "kv_role": "kv_producer",
@@ -74,11 +78,15 @@ pyMotor开启KV池化能力只需修改user_config.json配置文件后，通过d
   },
   "motor_engine_decode_config": {
     "engine_type": "vllm",
-    "model_config": {
-      "..."
-    },
     "engine_config": {
-      "...",
+      "served_model_name": "...",
+      "model": "...",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 1,
+      "tensor_parallel_size": 1,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "kv_transfer_config": {
         "kv_connector": "MultiConnector",
         "kv_role": "kv_consumer",

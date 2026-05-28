@@ -23,7 +23,8 @@ class BaseConfigResolver:
     When both define the same parameter with different values, a warning is logged.
     """
 
-    _MAPPING: dict[str, str] = {}
+    _GENERIC_KEY_VARIANTS: dict[str, tuple[str, ...]] = {}
+    _PARALLEL_KEY_VARIANTS: dict[str, tuple[str, ...]] = {}
     _warned_conflict_keys: set[str] = set()
 
     def __init__(self, engine_section: dict[str, Any]):
@@ -45,8 +46,8 @@ class BaseConfigResolver:
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a resolved value. Checks engine_config first, falls back to model_config."""
-        engine_key = self._MAPPING.get(key, key)
-        engine_val = self._engine_cfg.get(engine_key)
+        variants = self._GENERIC_KEY_VARIANTS.get(key, (key,))
+        engine_val = self._get_engine_key(*variants)
         model_val = self._model_cfg.get(key)
 
         self._warn_conflict(key, engine_val, model_val)
@@ -65,6 +66,26 @@ class BaseConfigResolver:
 
     def get_npu_mem_utils(self, default: float = 0.9) -> float:
         return self.get("npu_mem_utils", default)
+
+    def get_enable_multi_endpoints(self, default: bool = True) -> bool:
+        """Get enable_multi_endpoints, defaulting per engine type."""
+        return bool(self._engine_cfg.get("enable_multi_endpoints", default))
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_engine_key(self, *keys: str) -> Any:
+        """Try multiple key variants from engine_config, returning the first match.
+
+        Used to normalize underscore/hyphen differences in parallel config keys
+        (e.g. ``data_parallel_size`` vs ``data-parallel-size``).
+        """
+        for key in keys:
+            val = self._engine_cfg.get(key)
+            if val is not None:
+                return val
+        return None
 
     def get_parallel_config(self) -> dict[str, Any]:
         """Get resolved parallel configuration as a dict.
@@ -108,11 +129,21 @@ class BaseConfigResolver:
         return dp * self._compute_local_world_size(config)
 
     def _resolve_engine_parallel_keys(self) -> dict[str, Any]:
-        """Override in adapters to map engine-native keys to Motor-internal keys.
+        """Map engine-native keys to Motor-internal keys via _PARALLEL_KEY_VARIANTS.
 
-        Returns a dict of {motor_internal_key: value} resolved from engine_config.
+        Each entry maps an internal key (e.g. ``dp_size``) to a tuple of
+        engine_config key variants (e.g. ``("data_parallel_size",
+        "data-parallel-size")``). The first matching variant wins.
+
+        Override in subclasses for engine-specific keys that need custom
+        resolution logic beyond simple key mapping.
         """
-        return {}
+        result: dict[str, Any] = {}
+        for internal_key, variants in self._PARALLEL_KEY_VARIANTS.items():
+            val = self._get_engine_key(*variants)
+            if val is not None:
+                result[internal_key] = val
+        return result
 
     def has_model_config(self) -> bool:
         """Check if model_config block exists (for deprecation detection)."""
@@ -136,56 +167,48 @@ class BaseConfigResolver:
 class VLLMConfigResolver(BaseConfigResolver):
     """Adapter: maps internal keys to vLLM-native engine_config keys."""
 
-    _MAPPING = {
-        "model_name": "served_model_name",
-        "model_path": "model",
-        "npu_mem_utils": "gpu_memory_utilization",
+    _GENERIC_KEY_VARIANTS = {
+        "model_name": ("served_model_name", "served-model-name"),
+        "model_path": ("model",),
+        "npu_mem_utils": ("gpu_memory_utilization", "gpu-memory-utilization"),
     }
 
-    def _resolve_engine_parallel_keys(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        ec = self._engine_cfg
-
-        if "data_parallel_size" in ec:
-            result["dp_size"] = ec["data_parallel_size"]
-        if "tensor_parallel_size" in ec:
-            result["tp_size"] = ec["tensor_parallel_size"]
-        if "pipeline_parallel_size" in ec:
-            result["pp_size"] = ec["pipeline_parallel_size"]
-        if "prefill_context_parallel_size" in ec:
-            result["pcp_size"] = ec["prefill_context_parallel_size"]
-        if "data_parallel_rpc_port" in ec:
-            result["dp_rpc_port"] = ec["data_parallel_rpc_port"]
-        if "enable_expert_parallel" in ec:
-            result["enable_ep"] = ec["enable_expert_parallel"]
-        if "cp_kv_cache_interleave_size" in ec:
-            result["cp_kv_cache_interleave_size"] = ec["cp_kv_cache_interleave_size"]
-
-        return result
+    _PARALLEL_KEY_VARIANTS = {
+        "dp_size": ("data_parallel_size", "data-parallel-size"),
+        "tp_size": ("tensor_parallel_size", "tensor-parallel-size"),
+        "pp_size": ("pipeline_parallel_size", "pipeline-parallel-size"),
+        "pcp_size": ("prefill_context_parallel_size", "prefill-context-parallel-size"),
+        "dp_rpc_port": ("data_parallel_rpc_port", "data-parallel-rpc-port"),
+        "enable_ep": ("enable_expert_parallel", "enable-expert-parallel"),
+        "cp_kv_cache_interleave_size": ("cp_kv_cache_interleave_size", "cp-kv-cache-interleave-size"),
+    }
 
 
 class SGLangConfigResolver(BaseConfigResolver):
     """Adapter: maps internal keys to SGLang-native engine_config keys."""
 
-    _MAPPING = {
-        "model_name": "served-model-name",
-        "model_path": "model-path",
-        "npu_mem_utils": "mem-fraction-static",
+    _GENERIC_KEY_VARIANTS = {
+        "model_name": ("served-model-name", "served_model_name"),
+        "model_path": ("model-path", "model"),
+        "npu_mem_utils": ("mem-fraction-static", "mem_fraction_static"),
     }
 
+    _PARALLEL_KEY_VARIANTS = {
+        "dp_size": ("dp-size", "dp_size"),
+        "tp_size": ("tp-size", "tp_size"),
+        "pp_size": ("pp-size", "pp_size"),
+    }
+
+    def get_enable_multi_endpoints(self, default: bool = True) -> bool:
+        return bool(self._engine_cfg.get("enable_multi_endpoints", False))
+
     def _resolve_engine_parallel_keys(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        ec = self._engine_cfg
+        result = super()._resolve_engine_parallel_keys()
 
-        if "dp-size" in ec:
-            result["dp_size"] = ec["dp-size"]
-        if "tp-size" in ec:
-            result["tp_size"] = ec["tp-size"]
-        if "pp-size" in ec:
-            result["pp_size"] = ec["pp-size"]
-
-        cp_size = ec.get("context-parallel-size")
-        cp_enabled = ec.get("enable-prefill-context-parallel", False)
+        cp_size = self._get_engine_key("context-parallel-size", "context_parallel_size")
+        cp_enabled = self._get_engine_key(
+            "enable-prefill-context-parallel", "enable_prefill_context_parallel"
+        ) or False
         if cp_size and cp_enabled:
             result["pcp_size"] = cp_size
 

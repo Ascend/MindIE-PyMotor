@@ -8,7 +8,7 @@
     "p_pod_npu_num": 8,
     "d_pod_npu_num": 8,
     "image_name": "mindie-motor-vllm:kv_and_tracing-r0.17.0rc1-800I-A2-py311-lts-aarch64-traton",
-    "job_id": "mindie-16ji",
+    "job_id": "mindie-motor",
     "hardware_type": "800I_A2",
     "env_path": "./conf/env.json",
     "weight_mount_path": "/data01/models/",
@@ -64,7 +64,6 @@
         "kv_port": "21001",
         "engine_id": "0",
         "kv_rank": 0,
-        "kv_connector_module_path": "vllm_ascend.distributed.mooncake_connector",
         "kv_connector_extra_config": {
           "use_ascend_direct": true
         }
@@ -120,7 +119,6 @@
         "kv_port": "21001",
         "engine_id": "0",
         "kv_rank": 0,
-        "kv_connector_module_path": "vllm_ascend.distributed.mooncake_connector",
         "kv_connector_extra_config": {
           "use_ascend_direct": true
         }

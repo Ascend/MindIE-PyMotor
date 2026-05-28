@@ -17,7 +17,6 @@
   },
   "motor_engine_union_config": {
     "engine_type": "vllm",
-    "enable_multi_endpoints": true,
     "engine_config": {
       "served_model_name": "qwen3-8B",
       "model": "/mnt/weight/qwen3_8B",
@@ -25,8 +24,9 @@
       "data_parallel_size": 1,
       "tensor_parallel_size": 1,
       "pipeline_parallel_size": 1,
-      "data_parallel_rpc_port": 9000,
       "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
+      "enforce-eager": true,
       "max_model_len": 2048
     }
   }

@@ -83,20 +83,37 @@ pyMotor开启tracing能力需修改env.json配置文件和user_config.json配置
   },
   "motor_engine_prefill_config": {
     "engine_type": "vllm",
-    "model_config": {
-      "model_name": "qwen3-8B",
-      "model_path": "/mnt/weight/qwen3_8B",
-      "npu_mem_utils": 0.9,
-      "prefill_parallel_config": {
-        "dp_size": 2,
-        "tp_size": 2,
-        "pp_size": 1,
-        "enable_ep": false,
-        "dp_rpc_port": 9000,
-        "world_size": 4
-      }
-    },
     "engine_config": {
+      "served_model_name": "qwen3-8B",
+      "model": "/mnt/weight/qwen3_8B",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 2,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
+      "otlp-traces-endpoint": "http://xx.xx.xx.xx:4318/v1/traces",
+      "kv_transfer_config": {
+       "kv_connector": "MooncakeLayerwiseConnector",
+       "kv_buffer_device": "npu",
+       "kv_role": "kv_producer",
+       "kv_connector_extra_config": {
+         "use_ascend_direct": true
+        }
+      }
+    }
+  },
+  "motor_engine_decode_config": {
+    "engine_type": "vllm",
+    "engine_config": {
+      "served_model_name": "qwen3-8B",
+      "model": "/mnt/weight/qwen3_8B",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 2,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "otlp-traces-endpoint": "http://xx.xx.xx.xx:4318/v1/traces",
       "kv_transfer_config": {
        "kv_connector": "MooncakeLayerwiseConnector",
@@ -107,39 +124,12 @@ pyMotor开启tracing能力需修改env.json配置文件和user_config.json配置
         }
       }
     }
-  },
-  "motor_engine_decode_config": {
-    "engine_type": "vllm",
-    "model_config": {
-      "model_name": "qwen3-8B",
-      "model_path": "/mnt/weight/qwen3_8B",
-      "npu_mem_utils": 0.9,
-      "prefill_parallel_config": {
-        "dp_size": 2,
-        "tp_size": 2,
-        "pp_size": 1,
-        "enable_ep": false,
-        "dp_rpc_port": 9000,
-        "world_size": 4
-      }
-    }
-  },
-  "engine_config": {
-    "otlp-traces-endpoint": "http://xx.xx.xx.xx:4318/v1/traces",
-    "kv_transfer_config": {
-     "kv_connector": "MooncakeLayerwiseConnector",
-     "kv_buffer_device": "npu",
-     "kv_role": "kv_consumer",
-     "kv_connector_extra_config": {
-       "use_ascend_direct": true,
-      }
-    }
   }
 }
 ```
 
-- 需要在`motor_coordinator_config`下新增`tracer_config`,`tracer_config`下的`endpoint`配置为开启tracing能力必填，填写内容根据env.json中的 `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`配置，可选： `http://xx.xx.xx.xx:4318/v1/traces`或`grpc://xx.xx.xx.xx:4317`
-- `motor_engine_prefill_env`、`motor_engine_decode_env`下新增`otlp-traces-endpoint`配置，填写方法同`endpoint`
+- 需要在`motor_coordinator_config`下新增`tracer_config`，`tracer_config`下的`endpoint`配置为开启tracing能力必填，填写内容根据env.json中的 `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`配置，可选： `http://xx.xx.xx.xx:4318/v1/traces`或`grpc://xx.xx.xx.xx:4317`
+- `motor_engine_prefill_config`、`motor_engine_decode_config`的`engine_config`下新增`otlp-traces-endpoint`配置，填写方法同`endpoint`
 
 ### 部署服务
 

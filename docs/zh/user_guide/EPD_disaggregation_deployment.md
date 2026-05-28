@@ -75,20 +75,15 @@ PyMotor部署EPD分离只需修改user_config.json配置文件后，通过deploy
   "motor_engine_encode_config": {
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
-    "enable_multi_endpoints": true,
-    "model_config": {
-      "model_name": "qwen3",
-      "model_path": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
-      "npu_mem_utils": 0.9,
-      "prefill_parallel_config": {
-        "dp_size": 1,
-        "tp_size": 2,
-        "pp_size": 1,
-        "enable_ep": false,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
+      "served_model_name": "qwen3",
+      "model": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 1,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "enforce_eager": true,
       "no-enable-prefix-caching": true,
       "seed": 1024,
@@ -105,20 +100,15 @@ PyMotor部署EPD分离只需修改user_config.json配置文件后，通过deploy
   "motor_engine_prefill_config": {
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
-    "enable_multi_endpoints": true,
-    "model_config": {
-      "model_name": "qwen3",
-      "model_path": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
-      "npu_mem_utils": 0.9,
-      "prefill_parallel_config": {
-        "dp_size": 1,
-        "tp_size": 2,
-        "pp_size": 1,
-        "enable_ep": false,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
+      "served_model_name": "qwen3",
+      "model": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 1,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "seed": 1024,
       "max_model_len": 128000,
       "trust-remote-code": true,
@@ -144,20 +134,15 @@ PyMotor部署EPD分离只需修改user_config.json配置文件后，通过deploy
   "motor_engine_decode_config": {
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
-    "enable_multi_endpoints": true,
-    "model_config": {
-      "model_name": "qwen3",
-      "model_path": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
-      "npu_mem_utils": 0.9,
-      "prefill_parallel_config": {
-        "dp_size": 1,
-        "tp_size": 2,
-        "pp_size": 1,
-        "enable_ep": false,
-        "dp_rpc_port": 9000
-      }
-    },
     "engine_config": {
+      "served_model_name": "qwen3",
+      "model": "/mnt/weight/Qwen3-VL-30B-A3B-Instruct",
+      "gpu_memory_utilization": 0.9,
+      "data_parallel_size": 1,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "enable_expert_parallel": false,
+      "data_parallel_rpc_port": 9000,
       "seed": 1024,
       "max_model_len": 128000,
       "trust-remote-code": true,

@@ -137,31 +137,27 @@ class SingleContainerNodemanagerConfig:
         prefill_parallel_config = prefill_resolver.get_parallel_config()
         decode_parallel_config = decode_resolver.get_parallel_config()
         e_dp_size = encode_parallel_config.get(DP, 1)
-        e_tp_size = encode_parallel_config.get(TP, 1)
-        e_pp_size = encode_parallel_config.get(PP, 1)
         p_dp_size = prefill_parallel_config.get(DP, 1)
-        p_tp_size = prefill_parallel_config.get(TP, 1)
-        p_pp_size = prefill_parallel_config.get(PP, 1)
         d_dp_size = decode_parallel_config.get(DP, 1)
-        d_tp_size = decode_parallel_config.get(TP, 1)
-        d_pp_size = decode_parallel_config.get(PP, 1)
+        e_world_size = encode_parallel_config.get("world_size", 0)
+        p_world_size = prefill_parallel_config["world_size"]
+        d_world_size = decode_parallel_config["world_size"]
 
         index = int(Env.index)
 
         d_node_manager_port_offset = p_instances_num * p_dp_size + index
         d_base_port_offset = (p_instances_num * p_dp_size + index * d_dp_size) * 2
-        d_device_offset = (p_instances_num * p_dp_size * p_tp_size * p_pp_size + 
-                            index * d_dp_size * d_tp_size * d_pp_size)
+        d_device_offset = p_instances_num * p_world_size + index * d_world_size
 
         e_node_manager_port_offset = d_instances_num * d_dp_size + d_node_manager_port_offset
         e_base_port_offset = d_base_port_offset + e_dp_size
-        e_device_offset = d_device_offset + e_dp_size * e_tp_size * e_pp_size
+        e_device_offset = d_device_offset + e_world_size
 
         if Env.role == 'prefill':
             config.node_manager_port_offset = index
             config.base_port_offset = index * d_dp_size * 2
-            config.device_offset = index * p_dp_size * p_tp_size * p_pp_size
-            config.device_num = p_dp_size * p_tp_size * p_pp_size
+            config.device_offset = index * p_world_size
+            config.device_num = p_world_size
             kv_port_offset = config.device_offset
             lookup_rpc_port_offset = index
             dp_rpc_port_offset = index
@@ -169,7 +165,7 @@ class SingleContainerNodemanagerConfig:
             config.node_manager_port_offset = d_node_manager_port_offset
             config.base_port_offset = d_base_port_offset
             config.device_offset = d_device_offset
-            config.device_num = d_dp_size * d_tp_size * d_pp_size
+            config.device_num = d_world_size
             kv_port_offset = config.device_offset
             lookup_rpc_port_offset = p_instances_num + index
             dp_rpc_port_offset = p_instances_num + index
@@ -177,7 +173,7 @@ class SingleContainerNodemanagerConfig:
             config.node_manager_port_offset = e_node_manager_port_offset
             config.base_port_offset = e_base_port_offset
             config.device_offset = e_device_offset
-            config.device_num = e_dp_size * e_tp_size * e_pp_size
+            config.device_num = e_world_size
             kv_port_offset = config.device_offset
             lookup_rpc_port_offset = index
             dp_rpc_port_offset = index
@@ -299,8 +295,7 @@ class NodeManagerConfig:
 
         if Env.role in ("encode", "prefill", "decode", "union", "both"):
             config_data[BASIC_CONFIG_KEY]["parallel_config"] = resolver.get_parallel_config()
-            enable_multi_endpoints = engine_config.get(ENABLE_MULTI_ENDPOINTS_KEY, True)
-            config_data[BASIC_CONFIG_KEY][ENABLE_MULTI_ENDPOINTS_KEY] = enable_multi_endpoints
+            config_data[BASIC_CONFIG_KEY][ENABLE_MULTI_ENDPOINTS_KEY] = resolver.get_enable_multi_endpoints()
         
         _update_tls_config([MGMT_TLS_CONFIG], config_data, user_cfg)
         

@@ -17,7 +17,6 @@
   "motor_engine_prefill_config": {
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
-    "enable_multi_endpoints": true,
     "engine_config": {
       "served_model_name": "qwen3-8B",
       "model": "/mnt/weight/qwen3_8B",
@@ -44,7 +43,6 @@
   "motor_engine_decode_config": {
     "engine_type": "vllm",
     "motor_nodemanger_config": {},
-    "enable_multi_endpoints": true,
     "engine_config": {
       "served_model_name": "qwen3-8B",
       "model": "/mnt/weight/qwen3_8B",

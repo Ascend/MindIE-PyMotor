@@ -434,6 +434,11 @@ def test_generate_endpoint_ports_with_cp_prefill():
     NodeManagerConfig._generate_endpoint_ports(config)
 
     # prefill with cp=2 needs cp*tp*pp = 4 devices/endpoint => 8 devices gives 2 endpoints
+    assert config.endpoint_config.endpoint_num == 2
+    assert len(config.endpoint_config.service_ports) == 2
+    assert len(config.endpoint_config.mgmt_ports) == 2
+
+
 @patch.dict('os.environ', {'ROLE': 'both'})
 def test_from_json_loads_union_config_for_hybrid():
     """Test NodeManagerConfig loads union engine config for PD hybrid."""

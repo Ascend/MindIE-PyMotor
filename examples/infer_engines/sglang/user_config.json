@@ -8,7 +8,7 @@
     "p_pod_npu_num": 2,
     "d_pod_npu_num": 2,
     "image_name": "sglang:cann8.3.rc2-910b-release1225",
-    "job_id": "mindie-lhb",
+    "job_id": "mindie-motor",
     "hardware_type": "800I_A2",
     "weight_mount_path": "/mnt/weight/",
     "deploy_mode": "multi_deployment"
@@ -49,7 +49,6 @@
   },
   "motor_engine_prefill_config": {
     "engine_type": "sglang",
-    "enable_multi_endpoints": false,
     "engine_config": {
       "served-model-name": "qwen3-8B",
       "model-path": "/mnt/share/weight/Qwen3-8B",
@@ -76,7 +75,6 @@
   },
   "motor_engine_decode_config": {
     "engine_type": "sglang",
-    "enable_multi_endpoints": false,
     "engine_config": {
       "served-model-name": "qwen3-8B",
       "model-path": "/mnt/share/weight/Qwen3-8B",
