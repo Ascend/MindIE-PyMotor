@@ -226,6 +226,8 @@ class RateLimitConfig:
     """Rate limiting configuration class"""
 
     enable_rate_limit: bool = False
+    provider: str = "simple"
+
     max_requests: int = 1000
     window_size: int = 60
     scope: str = "global"
@@ -233,6 +235,7 @@ class RateLimitConfig:
     error_message: str = "too many requests, please try again later"
     error_status_code: int = 429
 
+    olc_config_path: str = ""
 
 @dataclass
 class ApiConfig:
@@ -539,6 +542,23 @@ class CoordinatorConfig:
 
         if not (100 <= self.rate_limit_config.error_status_code <= 599):
             self._errors.append("error_status_code must be in range 100-599")
+
+        if self.rate_limit_config.provider not in ("simple", "olc"):
+            self._errors.append(
+                f"rate_limit_config.provider must be 'simple' or 'olc', "
+                f"got '{self.rate_limit_config.provider}'"
+            )
+
+        if self.rate_limit_config.enable_rate_limit and self.rate_limit_config.provider == "olc":
+            if not self.rate_limit_config.olc_config_path:
+                self._errors.append(
+                    "rate_limit_config.olc_config_path is required when provider is 'olc'"
+                )
+            elif not os.path.isdir(self.rate_limit_config.olc_config_path):
+                self._errors.append(
+                    f"rate_limit_config.olc_config_path does not exist: "
+                    f"{self.rate_limit_config.olc_config_path}"
+                )
 
         # Validate Prometheus metrics configuration
         self._validate_positive_number(self.prometheus_metrics_config.reuse_time, "reuse_time")

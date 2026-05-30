@@ -14,6 +14,7 @@ Inference plane: Worker subprocess only; provides /v1/completions, /v1/chat/comp
 
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -34,7 +35,6 @@ from motor.coordinator.api_server.app_builder import AppBuilder
 from motor.common.http.http_client import HTTPClientPool
 from motor.coordinator.models.constants import OpenAIField
 from motor.coordinator.models.request import RequestType
-from motor.coordinator.domain import InstanceReadiness
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.coordinator.router.dispatch import handle_request, handle_metaserver_request
 from motor.coordinator.tracer.tracing import TracerManager
@@ -206,6 +206,24 @@ class InferenceServer(BaseCoordinatorServer):
         if not rate_limit_config.enable_rate_limit:
             logger.info("Rate limiting is disabled")
             return
+
+        if rate_limit_config.provider == "olc":
+            try:
+                path = rate_limit_config.olc_config_path
+                os.environ['OLC_CONFIG_PATH'] = path
+                from olc.adapters.fastapi import OlcFastAPIAdapter, OlcAdapterConfig
+                adapter_config = OlcAdapterConfig(tag_extractor=self._extract_tags_from_request)
+                self._inference_app.add_middleware(OlcFastAPIAdapter, adapter_config)
+                logger.info(
+                    "Olc limit setup succeeded, config path: %s", path
+                )
+            except Exception as e:
+                logger.error("Using simple rate limit, Failed to create olc limit middleware: %s", e, exc_info=True)
+                self.build_simple_rate_limit(rate_limit_config)
+        else:
+            self.build_simple_rate_limit(rate_limit_config)
+
+    def build_simple_rate_limit(self, rate_limit_config: RateLimitConfig | None = None) -> None:
         try:
             middleware = create_simple_rate_limit_middleware(
                 app=self._inference_app,
@@ -221,13 +239,22 @@ class InferenceServer(BaseCoordinatorServer):
                 error_status_code=rate_limit_config.error_status_code,
             )
             logger.info(
-                "Rate limiting enabled: max_requests=%s/%ss",
+                "Create simple limit: max_requests=%s/%ss",
                 rate_limit_config.max_requests,
                 rate_limit_config.window_size,
             )
         except Exception as e:
-            logger.error("Failed to setup rate limiting: %s", e, exc_info=True)
+            logger.error("Failed to create simple rate limit: %s", e, exc_info=True)
             raise
+
+    @staticmethod
+    def _extract_tags_from_request(request: Request) -> dict:
+        # "Extract tags from the request; the tag names are defined in olc.bean.dimension."
+        dimension_dict = {}
+        dimension_dict["URL"] = request.url.path
+        dimension_dict["Method"] = request.method
+        dimension_dict["IP"] = request.client.host if request.client else "unknown"
+        return dimension_dict
 
     def _make_on_instance_refreshed(self):
         """Create on_instance_refreshed callback: cleanup and warmup HTTP pool on instance change."""
@@ -264,12 +291,13 @@ class InferenceServer(BaseCoordinatorServer):
         self._infer_ssl_config = new_config.infer_tls_config
         rlc = new_config.rate_limit_config
         if self._rate_limit_middleware is not None:
-            self._rate_limit_middleware.update_config(
-                skip_paths=rlc.skip_paths,
-                error_message=rlc.error_message,
-                error_status_code=rlc.error_status_code,
-                enabled=rlc.enable_rate_limit,
-            )
+            if isinstance(self._rate_limit_middleware, SimpleRateLimitMiddleware):
+                self._rate_limit_middleware.update_config(
+                    skip_paths=rlc.skip_paths,
+                    error_message=rlc.error_message,
+                    error_status_code=rlc.error_status_code,
+                    enabled=rlc.enable_rate_limit,
+                )
 
     def _get_scheduler_client(self):
         """Return SchedulerClient used for scheduling (select_and_allocate, get_available_instances, etc.)."""
