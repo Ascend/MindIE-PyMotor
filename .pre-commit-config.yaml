@@ -7,7 +7,7 @@ ci:
   autoupdate_schedule: monthly
 
 repos:
-  # pre-commit 基础检查
+  # Basic pre-commit checks
   - repo: https://gitcode.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -15,14 +15,14 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
-        exclude: mkdocs\.yml$  # !!python/name: 标签不兼容 safe_load
+        exclude: mkdocs\.yml$  # !!python/name: tags incompatible with safe_load
       - id: check-added-large-files
       - id: check-merge-conflict
       - id: detect-private-key
       - id: check-json
 
-  # -------------------------- Python 核心检查 --------------------------
-  # Ruff：指定读取 pre-commit/pyproject.toml
+  # ---------- Python core checks ----------
+  # Ruff: use pre-commit/pyproject.toml
   - repo: https://gitcode.com/gh_mirrors/ru/ruff-pre-commit
     rev: v0.14.14
     hooks:
@@ -33,7 +33,7 @@ repos:
         args: ["--config", "pre-commit/pyproject.toml"]
         types: [python]
 
-  # codespell
+  # codespell: doc/config spelling only; code spelling handled by typos
   - repo: https://gitcode.com/gh_mirrors/co/codespell
     rev: v2.4.1
     hooks:
@@ -45,7 +45,7 @@ repos:
             "*.toml,*.py,*.cpp,*.hpp,*.c,*.h",
           ]
 
-  # pylint：指定 pre-commit/pyproject.toml
+  # pylint: use pre-commit/pyproject.toml
   - repo: https://gitcode.com/gh_mirrors/pyl/pylint
     rev: v4.0.5
     hooks:
@@ -55,12 +55,12 @@ repos:
         args: ["--rcfile=pre-commit/pyproject.toml"]
         verbose: false
 
-  # Bandit：指定 pre-commit/pyproject.toml
+  # Bandit: use pre-commit/pyproject.toml
   - repo: https://gitcode.com/gh_mirrors/ba/bandit
     rev: 1.9.4
     hooks:
       - id: bandit
-        name: bandit (Python 安全漏洞检查)
+        name: bandit (Python security vulnerability check)
         types: [python]
         args: [
           "--config=pre-commit/pyproject.toml",
@@ -74,13 +74,25 @@ repos:
       - id: typos
         args: ["--force-exclude", "--config", "pre-commit/typos.toml"]
 
-  #--------------- C++ 核心检查 ---------------------------------------------
+  # C++ core checks
   - repo: https://gitcode.com/pre-commit-clang/mirrors-clang-format
     rev: v18.1.8
     hooks:
       - id: clang-format
         files: \.(c|h|cpp|hpp|cc|hh|cxx|hxx)$
         args:
-          - "--style=file"  # 读取 .clang-format 文件
+          - "--style=file"  # read .clang-format
           - "--verbose"
           - "-i"
+
+  # Log quality: basic checks on motor/ production code (incremental; warnings do not block by default)
+  - repo: local
+    hooks:
+      - id: log-quality-basic
+        name: log quality basic check
+        entry: pre-commit/check_log_quality.py --incremental
+        language: python
+        types: [python]
+        files: ^motor/
+        exclude: ^motor/.*/tests/
+        pass_filenames: true

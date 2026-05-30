@@ -7,6 +7,7 @@ pydantic>=1.8.0
 msgspec>=0.18.0
 requests>=2.31.0
 httpx>=0.24.0
+httpx2>=2.0.0
 pytest-asyncio>=0.21
 pyOpenSSL>=21.0.0
 watchdog>=3.0.0
