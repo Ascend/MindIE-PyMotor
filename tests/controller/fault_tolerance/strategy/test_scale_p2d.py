@@ -27,7 +27,7 @@ import pytest
 from motor.common.resources import InsStatus, NodeManagerInfo, PDRole
 from motor.common.resources.instance import Instance
 from motor.controller.fault_tolerance.fault_manager import FaultManager
-from motor.controller.fault_tolerance.k8s.cluster_fault_codes import FaultLevel
+from motor.controller.fault_tolerance.fault_types import FaultLevel
 from motor.controller.fault_tolerance.strategy.scale_p2d import (
     RecoveryContext,
     RecoveryState,

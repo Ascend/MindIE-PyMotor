@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -12,10 +10,8 @@
 
 import signal
 import time
-import argparse
 import os
 import sys
-from typing import Optional
 
 from motor.common.logger import get_logger
 from motor.node_manager.api_server.node_manager_api import NodeManagerAPI
@@ -26,7 +22,7 @@ from motor.node_manager.core.heartbeat_manager import HeartbeatManager
 from motor.common.utils.config_watcher import ConfigWatcher
 from motor.common.utils.env import Env
 
-logger = get_logger("motor.node_manager.main")
+logger = get_logger(__name__)
 
 
 modules = []
@@ -54,6 +50,14 @@ def on_config_updated() -> None:
     global config
     logger.info("Configuration reloaded, printing updated summary:")
     log_config_summary()
+
+    for module in modules:
+        if hasattr(module, 'update_config'):
+            try:
+                module.update_config(config)
+                logger.info(f"Updated configuration for {type(module).__name__}")
+            except Exception as e:
+                logger.error(f"Failed to update configuration for {type(module).__name__}: {e}")
 
 
 def init_all_modules(config_path: str | None = None) -> None:

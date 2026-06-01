@@ -16,7 +16,7 @@ from motor.controller.fault_tolerance.strategy import StrategyBase
 logger = get_logger(__name__)
 
 
-class LingquNetworkRecoverStrategy(StrategyBase):
+class TokenReinferenceStrategy(StrategyBase):
     def __init__(self) -> None:
         super().__init__()
     
@@ -25,4 +25,4 @@ class LingquNetworkRecoverStrategy(StrategyBase):
             pass
     
     def stop(self) -> None:
-        logger.info("Lingqu Network Recover strategy can not be stopped.")
+        logger.info("Token Reinference strategy can not be stopped.")

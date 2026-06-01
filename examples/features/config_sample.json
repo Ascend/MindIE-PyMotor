@@ -94,7 +94,7 @@
       "configmap_prefix": "mindx-dl-deviceinfo-",
       "k8s_cert_path": "",
       "enable_scale_p2d": true,
-      "enable_lingqu_network_recover": true
+      "enable_token_reinference": true
     },
     "observability_config": {
       "observability_enable": false,
@@ -235,5 +235,11 @@
     "_errors": [],
     "worker_index": null,
     "worker_metaserver_port": null
+  },
+  "motor_nodemanger_config": {
+    "fault_tolerance_config": {
+      "enable_fault_tolerance": false,
+      "zmq_pub_port": 0
+    }
   }
 }

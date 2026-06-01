@@ -22,7 +22,7 @@ pyMotor修改user_config.json配置文件后，通过deploy.py脚本即可完成
     "fault_tolerance_config": {
       "enable_fault_tolerance": false,
       "enable_scale_p2d": true,
-      "enable_lingqu_network_recover": true
+      "enable_token_reinference": true
     },
     "api_config": {
       "controller_api_port": 2026

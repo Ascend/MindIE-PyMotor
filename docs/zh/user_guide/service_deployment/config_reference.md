@@ -141,7 +141,7 @@
 | enable_fault_tolerance | bool | 是否启用故障自愈（高级 RAS）。可选：`true` / `false`。默认：`false` |
 | strategy_center_check_internal | int | 策略中心轮询间隔（秒）。默认：`1` |
 | enable_scale_p2d | bool | 是否启用 P2D 弹性扩缩容。可选：`true` / `false`。默认：`false` |
-| enable_lingqu_network_recover | bool | 是否启用灵衢网络故障恢复。可选：`true` / `false`。默认：`false` |
+| enable_token_reinference | bool | 是否启用Token Reinference 故障恢复。可选：`true` / `false`。默认：`false` |
 
 ### 2.7 standby_config
 

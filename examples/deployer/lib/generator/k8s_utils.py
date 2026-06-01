@@ -220,8 +220,11 @@ def extract_resources(data):
 
 
 def extract_rbac_resources(docs):
-    """Extract RBAC resources (ServiceAccount, ClusterRoleBinding) from YAML docs"""
-    return [doc for doc in docs if doc and doc.get(C.KIND) in (C.SERVICE_ACCOUNT, C.CLUSTER_ROLE_BINDING)]
+    """Extract RBAC resources (ServiceAccount, ClusterRole, ClusterRoleBinding) from YAML docs"""
+    return [
+        doc for doc in docs
+        if doc and doc.get(C.KIND) in (C.SERVICE_ACCOUNT, "ClusterRole", C.CLUSTER_ROLE_BINDING)
+    ]
 
 
 def set_rbac_namespace(rbac_resources, namespace):
@@ -229,7 +232,14 @@ def set_rbac_namespace(rbac_resources, namespace):
     for rbac_resource in rbac_resources:
         if rbac_resource.get(C.KIND) == C.SERVICE_ACCOUNT:
             rbac_resource[C.METADATA][C.NAMESPACE] = namespace
+        elif rbac_resource.get(C.KIND) == "ClusterRole":
+            rbac_resource[C.METADATA][C.NAME] = f"{rbac_resource[C.METADATA][C.NAME]}-{namespace}"
         elif rbac_resource.get(C.KIND) == C.CLUSTER_ROLE_BINDING:
+            rbac_resource[C.METADATA][C.NAME] = f"{rbac_resource[C.METADATA][C.NAME]}-{namespace}"
+            # Update roleRef to reference the namespace-scoped ClusterRole name
+            role_ref = rbac_resource.get("roleRef")
+            if role_ref:
+                role_ref[C.NAME] = f"{role_ref[C.NAME]}-{namespace}"
             if C.SUBJECTS in rbac_resource:
                 for subject in rbac_resource[C.SUBJECTS]:
                     if subject.get(C.KIND) == C.SERVICE_ACCOUNT:

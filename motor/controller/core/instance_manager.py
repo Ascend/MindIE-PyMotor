@@ -470,21 +470,44 @@ class InstanceManager(ThreadSafeSingleton):
         """
         try:
             instance = self.get_instance(instance_id)
-            if instance is not None and instance.id in self.forced_separated_instances:
+            if instance is None:
+                logger.warning("No instance found for instance ID %d", instance_id)
+                return
+
+            # Check if a newer instance with the same job_name already exists (stale instance)
+            newer_instance = self._find_newer_instance_by_job_name(instance.job_name, instance.id)
+            if newer_instance is not None:
+                logger.info(
+                    "Instance %s (id:%d) is stale — newer instance %s (id:%d) already exists, "
+                    "removing from forced separation without recovery",
+                    instance.job_name, instance.id,
+                    newer_instance.job_name, newer_instance.id,
+                )
+                with self.ins_lock:
+                    self.forced_separated_instances.discard(instance.id)
+                return
+
+            if instance.id in self.forced_separated_instances:
                 # Remove from forced separated set to allow natural heartbeat recovery
                 with self.ins_lock:
                     self.forced_separated_instances.discard(instance.id)
                 logger.info("Successfully recovered instance %s (id:%d)", instance.job_name, instance.id)
-            elif instance is not None:
+            else:
                 logger.warning(
                     "Instance %s (id:%d) is not in forced separated list, no need to recover",
                     instance.job_name,
                     instance.id,
                 )
-            else:
-                logger.warning("No instance found for instance ID %d", instance_id)
         except Exception as e:
             logger.error("Error recovering instance %d: %s", instance_id, e)
+
+    def _find_newer_instance_by_job_name(self, job_name: str, current_id: int) -> Instance | None:
+        """Find an instance with the same job_name but a higher instance_id."""
+        with self.ins_lock:
+            for instance in self.instances.values():
+                if instance.job_name == job_name and instance.id > current_id:
+                    return instance
+        return None
 
     def has_instance_by_job_name(self, job_name: str) -> bool:
         """Check if instance exists by job name"""

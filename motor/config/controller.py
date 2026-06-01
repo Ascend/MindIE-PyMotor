@@ -105,7 +105,7 @@ class FaultToleranceConfig:
 
     # scale and recovery strategy configuration
     enable_scale_p2d: bool = True  # Enable/disable scale p2d strategy
-    enable_lingqu_network_recover: bool = True  # Enable/disable lingqu network recovery strategy
+    enable_token_reinference: bool = True  # Enable/disable token reinference strategy
 
 
 @dataclass
@@ -379,7 +379,7 @@ class ControllerConfig:
         enable_fault_tolerance = self.fault_tolerance_config.enable_fault_tolerance
         enable_scale_p2d = (self.fault_tolerance_config.enable_scale_p2d
                             and enable_fault_tolerance)
-        enable_lingqu_network_recover = (self.fault_tolerance_config.enable_lingqu_network_recover
+        enable_token_reinference = (self.fault_tolerance_config.enable_token_reinference
                                          and enable_fault_tolerance)
         enable_observability = self.observability_config.observability_enable
         master_standby_check_interval = self.standby_config.master_standby_check_interval
@@ -414,7 +414,7 @@ class ControllerConfig:
             "  High Availability:\n"
             f"    ├─ Advanced RAS:         {'Enabled' if enable_fault_tolerance else 'Disabled'}\n"
             f"    │   ├─ Scale P2D:        {'Enabled' if enable_scale_p2d else 'Disabled'}\n"
-            f"    │   └─ Lingqu Recover:   {'Enabled' if enable_lingqu_network_recover else 'Disabled'}\n"
+            f"    │   └─ Token Reinference:   {'Enabled' if enable_token_reinference else 'Disabled'}\n"
             f"    ├─ ETCD:\n"
             f"    │   ├─ Persistence:      {'Enabled' if self.etcd_config.enable_etcd_persistence else 'Disabled'}\n"
             f"    │   ├─ Host:             {self.etcd_config.etcd_host}\n"

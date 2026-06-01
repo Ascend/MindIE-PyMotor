@@ -31,6 +31,8 @@ from motor.controller.api_client import NodeManagerApiClient
 from motor.controller.observability.observability import Observability
 from motor.controller.core.instance_assembler import InstanceAssembler
 from motor.controller.core.instance_manager import InstanceManager
+from motor.controller.fault_tolerance.fault_manager import FaultManager
+from motor.controller.fault_tolerance.fault_types import FaultInfo
 from motor.controller.observability.inventory.inventory_collector import InventoryCollector
 
 logger = get_logger(__name__)
@@ -73,6 +75,7 @@ class ControllerAPI:
 
         # Observability API configuration
         self.enable_observability_api = config.observability_config.observability_enable
+        self.enable_fault_tolerance = config.fault_tolerance_config.enable_fault_tolerance
         self.observability_api_host = host if host is not None else config.api_config.controller_api_host
         self.observability_api_port = config.api_config.observability_api_port
         self.observability_tls_config = config.observability_tls_config
@@ -139,8 +142,9 @@ class ControllerAPI:
         # Note: API server configuration cannot be updated while running
         # Only update the extracted config fields for future use
         with self.config_lock:
-            # Observability API configuration update
+            # Observability API and fault tolerance configuration update
             self.enable_observability_api = config.observability_config.observability_enable
+            self.enable_fault_tolerance = config.fault_tolerance_config.enable_fault_tolerance
 
             logger.info("ControllerAPI configuration updated (runtime changes may require restart)")
 
@@ -211,6 +215,7 @@ class ControllerAPI:
             "/controller/register": logging.INFO,
             "/controller/reregister": logging.INFO,
             "/controller/terminate_instance": logging.INFO,
+            "/controller/report_software_fault": logging.INFO,
             "/observability/add_alarm": logging.INFO,
             "/startup": logging.ERROR,
             "/readiness": logging.ERROR,
@@ -231,6 +236,8 @@ class ControllerAPI:
         app.add_api_route("/liveness", self._liveness, methods=get_methods)
 
         app.add_api_route("/observability/add_alarm", self._add_alarm, methods=post_methods)
+
+        app.add_api_route("/controller/report_software_fault", self._report_software_fault, methods=post_methods)
 
         return app
 
@@ -405,6 +412,51 @@ class ControllerAPI:
         except Exception as e:
             logger.error("Failed to add alarms: %s", e)
             raise_internal_error(f"Internal server error: {str(e)}")
+
+    async def _report_software_fault(self, request: Request) -> dict:
+        """Receive software fault reports from NodeManagers at node granularity.
+
+        Request body:
+        {
+            "exception_type": "RuntimeError",
+            "exception_message": "engine crashed",
+            "engine_id": 1,
+            "engine_status": 1,
+            "pod_ip": "192.168.1.1",
+            "additional_info": {}
+        }
+        """
+        if not self.enable_fault_tolerance:
+            return format_success_response(message="Fault tolerance is not enabled")
+
+        body = await request.json()
+        try:
+            exception_message = body.get("exception_message", "")
+            engine_id = body.get("engine_id")
+            engine_status = body.get("engine_status")
+            pod_ip = body.get("pod_ip", "")
+            additional_info = body.get("additional_info")
+
+            if engine_id is None or engine_status is None:
+                return raise_internal_error("Missing required fields: engine_id, engine_status")
+            if not pod_ip:
+                return raise_internal_error("Missing required field: pod_ip")
+
+            exc = RuntimeError(exception_message or "")
+            fault_info = FaultInfo.from_exception(
+                exception=exc,
+                engine_id=int(engine_id),
+                engine_status=int(engine_status),
+                additional_info=additional_info,
+            )
+
+            FaultManager().report_software_fault(fault_info, pod_ip=pod_ip)
+            return format_success_response(message="Software fault reported successfully")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Failed to report software fault: %s, body: %s", e, body)
+            return raise_internal_error(f"Internal server error: {str(e)}")
 
     def _create_observability_app(self) -> FastAPI:
         app = FastAPI(lifespan=self._observability_api_lifespan)

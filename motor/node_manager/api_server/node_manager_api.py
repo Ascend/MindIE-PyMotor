@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -53,7 +51,7 @@ thread_semaphore = asyncio.Semaphore(MAX_CONCURRENT_THREADS)
 
 @app.post("/node-manager/start")
 async def start_instance(request: Request):
-    """ post instance and role info """
+    """post instance and role info"""
     try:
         payload = await request.json()
         start_msg = StartCmdMsg(**payload)
@@ -64,26 +62,32 @@ async def start_instance(request: Request):
                 parsed_ok = await asyncio.to_thread(engine_manager.parse_start_cmd, start_msg)
             except Exception as inner_err:
                 logger.error("Failed to parse start command: %s", inner_err)
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail="Invalid start command payload") from inner_err
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start command payload"
+                ) from inner_err
 
         if not parsed_ok:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="Start command validation failed")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Start command validation failed"
+            )
 
         try:
-            await asyncio.to_thread(Daemon().pull_engine,
-                                    PDRole(start_msg.role),
-                                    start_msg.endpoints,
-                                    start_msg.instance_id,
-                                    start_msg.master_dp_ip)
+            await asyncio.to_thread(
+                Daemon().pull_engine,
+                PDRole(start_msg.role),
+                start_msg.endpoints,
+                start_msg.instance_id,
+                start_msg.master_dp_ip,
+            )
         except Exception as pull_err:
             logger.error("Failed to pull engine: %s", pull_err)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Failed to start engine server") from pull_err
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to start engine server"
+            ) from pull_err
 
         HeartbeatManager().update_endpoint(start_msg)
         HeartbeatManager().start()
+        engine_manager.start()
         return {}
 
     except HTTPException as http_err:
@@ -91,8 +95,9 @@ async def start_instance(request: Request):
     except Exception as err:
         # Catch other unexpected exceptions to avoid returning unfriendly internal errors
         logger.error("Unexpected error: %s", err)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="An internal server error occurred") from err
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An internal server error occurred"
+        ) from err
 
 
 @app.post("/node-manager/stop")
@@ -107,8 +112,7 @@ async def stop_instance(request: Request):
     except Exception as err:
         logger.error("Failed to stop engines via daemon: %s", err)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to stop engine processes"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to stop engine processes"
         ) from err
 
 
@@ -124,8 +128,7 @@ async def get_instance_status():
     except Exception as err:
         logger.error("Failed to check endpoints status: %s", err)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to check endpoints status"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to check endpoints status"
         ) from err
 
 
@@ -157,10 +160,10 @@ class NodeManagerAPI:
     def wait_until_ready(timeout: float = None) -> bool:
         """
         Wait until the NodeManagerAPI server is ready.
-        
+
         Args:
             timeout: Maximum time to wait in seconds. None means wait indefinitely.
-            
+
         Returns:
             True if the server is ready, False if timeout occurred.
         """

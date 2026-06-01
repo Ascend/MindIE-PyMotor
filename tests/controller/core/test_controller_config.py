@@ -608,7 +608,7 @@ def create_test_config(config_path: str, log_level: str = "INFO"):
             "enable_fault_tolerance": True,
             "strategy_center_check_interval": 1,
             "enable_scale_p2d": True,
-            "enable_lingqu_network_recover": True
+            "enable_token_reinference": True
         }
     }
 

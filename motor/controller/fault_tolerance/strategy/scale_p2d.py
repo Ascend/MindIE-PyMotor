@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -17,7 +16,7 @@ from motor.common.logger import get_logger
 from motor.controller.fault_tolerance.strategy import StrategyBase
 from motor.controller.core.instance_manager import InstanceManager
 from motor.common.resources import Instance, PDRole, InsStatus
-from motor.controller.fault_tolerance.k8s.cluster_fault_codes import FaultLevel
+from motor.controller.fault_tolerance.fault_types import FaultLevel
 from motor.controller.api_client.node_manager_api_client import NodeManagerApiClient
 
 logger = get_logger(__name__)

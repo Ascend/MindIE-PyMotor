@@ -22,7 +22,10 @@ from motor.common.utils.env import Env
 from motor.common.utils.patch_check import safe_open
 from motor.common.logger import get_logger, reconfigure_logging
 from motor.config.config_utils import (
-    ConfigKey, save_config_to_json, _update_tls_config, MGMT_TLS_CONFIG,
+    ConfigKey,
+    save_config_to_json,
+    _update_tls_config,
+    MGMT_TLS_CONFIG,
 )
 from motor.config.log_config import LoggingConfig
 
@@ -47,7 +50,7 @@ CONNECTORS_KEY = "connectors"
 KV_PORT_KEY = "kv_port"
 LOOPUP_RPC_PORT_KEY = "lookup_rpc_port"
 SERVER_LIST = "server_list"
-DEVICE = 'device'
+DEVICE = "device"
 HARDWARE_TYPE_KEY = "hardware_type"
 MODEL_NAME_KEY = "model_name"
 ENABLE_MULTI_ENDPOINTS_KEY = "enable_multi_endpoints"
@@ -88,6 +91,7 @@ class BasicConfig:
 @dataclass
 class APIConfig:
     """API configuration class"""
+
     # http config
     pod_ip: str | None = field(default_factory=lambda: Env.pod_ip or "127.0.0.1")
     node_manager_port: int = 1026
@@ -95,7 +99,6 @@ class APIConfig:
 
 @dataclass
 class EndpointConfig:
-
     # EngineServer's number
     endpoint_num: int = 0
 
@@ -117,11 +120,12 @@ class SingleContainerNodemanagerConfig:
     dp_rpc_port: int | None = None
 
     @classmethod
-    def from_json(cls, user_config_data: dict[str, Any]) -> 'SingleContainerNodemanagerConfig':
+    def from_json(cls, user_config_data: dict[str, Any]) -> "SingleContainerNodemanagerConfig":
         config = cls()
-        deploy_mode = user_config_data.get('motor_coordinator_config', {}).get(
-            "scheduler_config", {}).get('deploy_mode', '')
-        if not deploy_mode == 'pd_disaggregation_single_container' or not Env.role or Env.index is None:
+        deploy_mode = (
+            user_config_data.get("motor_coordinator_config", {}).get("scheduler_config", {}).get("deploy_mode", "")
+        )
+        if not deploy_mode == "pd_disaggregation_single_container" or not Env.role or Env.index is None:
             return config
 
         config.single_container_flag = True
@@ -193,8 +197,16 @@ class SingleContainerNodemanagerConfig:
 
 
 @dataclass
+class NodeManagerFaultToleranceConfig:
+    """Fault tolerance configuration for NodeManager"""
+
+    enable_fault_tolerance: bool = False
+    zmq_pub_port: int = 0
+
+
+@dataclass
 class NodeManagerConfig:
-    """ Global configuration singleton for node manager """
+    """Global configuration singleton for node manager"""
 
     # Configuration sections
     api_config: APIConfig = field(default_factory=APIConfig)
@@ -203,6 +215,7 @@ class NodeManagerConfig:
     basic_config: BasicConfig = field(default_factory=BasicConfig)
     logging_config: LoggingConfig = field(default_factory=LoggingConfig)
     single_container_config: SingleContainerNodemanagerConfig = field(default_factory=SingleContainerNodemanagerConfig)
+    fault_tolerance_config: NodeManagerFaultToleranceConfig = field(default_factory=NodeManagerFaultToleranceConfig)
 
     # Internal fields
     config_path: str | None = field(default=None, init=False)
@@ -211,7 +224,7 @@ class NodeManagerConfig:
     def __post_init__(self):
         """Validate configuration after initialization"""
         # Set internal paths with defaults only if not already set (e.g., by from_json)
-        if not hasattr(self, 'config_path') or self.config_path is None:
+        if not hasattr(self, "config_path") or self.config_path is None:
             self.config_path = Env.user_config_path or Env.config_path
 
         # Set last modified time if config file exists
@@ -225,7 +238,7 @@ class NodeManagerConfig:
         self.validate_config()
 
     @classmethod
-    def from_json(cls, config_path: str | None = None) -> 'NodeManagerConfig':
+    def from_json(cls, config_path: str | None = None) -> "NodeManagerConfig":
         """Load configuration from user_config.json"""
         if config_path is None:
             config_path = Env.user_config_path or Env.config_path
@@ -279,13 +292,13 @@ class NodeManagerConfig:
         
         if not engine_config_key or engine_config_key not in user_cfg:
             return user_cfg
-        
+
         engine_config = user_cfg[engine_config_key]
         if "motor_nodemanger_config" in engine_config:
             config_data = engine_config.get("motor_nodemanger_config", {})
         else:
             config_data = {}
-        
+
         if BASIC_CONFIG_KEY not in config_data:
             config_data[BASIC_CONFIG_KEY] = {}
         
@@ -298,12 +311,13 @@ class NodeManagerConfig:
             config_data[BASIC_CONFIG_KEY][ENABLE_MULTI_ENDPOINTS_KEY] = resolver.get_enable_multi_endpoints()
         
         _update_tls_config([MGMT_TLS_CONFIG], config_data, user_cfg)
-        
+
         return config_data
 
     @classmethod
-    def _update_from_config_data(cls, config: 'NodeManagerConfig', cfg: dict[str, Any]):
+    def _update_from_config_data(cls, config: "NodeManagerConfig", cfg: dict[str, Any]):
         """Update configuration from config JSON data"""
+
         # Helper function to update config object from dict
         def update_config_from_dict(config_obj, config_dict):
             """Update configuration object fields from dictionary, only for existing keys"""
@@ -318,8 +332,11 @@ class NodeManagerConfig:
         if "api_config" in cfg:
             update_config_from_dict(config.api_config, cfg["api_config"])
 
-        if 'mgmt_tls_config' in cfg:
-            update_config_from_dict(config.mgmt_tls_config, cfg['mgmt_tls_config'])
+        if "mgmt_tls_config" in cfg:
+            update_config_from_dict(config.mgmt_tls_config, cfg["mgmt_tls_config"])
+
+        if "fault_tolerance_config" in cfg:
+            update_config_from_dict(config.fault_tolerance_config, cfg["fault_tolerance_config"])
 
         if "endpoint_config" in cfg:
             update_config_from_dict(config.endpoint_config, cfg["endpoint_config"])
@@ -347,7 +364,7 @@ class NodeManagerConfig:
             raise ValueError("Invalid role value from environment") from e
 
     @classmethod
-    def _set_device_count_from_config(cls, config: 'NodeManagerConfig', raw: dict | None):
+    def _set_device_count_from_config(cls, config: "NodeManagerConfig", raw: dict | None):
         """
         Set device count from config based on role.
         For prefill role, use p_pod_npu_num.
@@ -369,7 +386,7 @@ class NodeManagerConfig:
                 cls._set_device_count_for_normal_mode(config, raw)
 
             cls._generate_endpoint_ports(config)
-            
+
         except Exception as e:
             logger.error("Failed to get device count from config: %s", e)
             config.basic_config.device_num = 0
@@ -378,7 +395,7 @@ class NodeManagerConfig:
             config.endpoint_config.mgmt_ports = []
 
     @classmethod
-    def _set_device_count_for_single_container(cls, config: 'NodeManagerConfig'):
+    def _set_device_count_for_single_container(cls, config: "NodeManagerConfig"):
         """Set device count for single container mode using parallel_config.world_size"""
         device_count = config.basic_config.parallel_config.world_size
         if device_count > 0:
@@ -389,7 +406,7 @@ class NodeManagerConfig:
             config.basic_config.device_num = config.single_container_config.device_num or 0
 
     @classmethod
-    def _set_device_count_for_normal_mode(cls, config: 'NodeManagerConfig', raw: dict):
+    def _set_device_count_for_normal_mode(cls, config: "NodeManagerConfig", raw: dict):
         """Set device count for normal mode using motor_deploy_config"""
         deploy_config = raw["motor_deploy_config"]
         if Env.role == "encode":
@@ -402,7 +419,7 @@ class NodeManagerConfig:
             device_count = deploy_config.get("hybrid_pod_npu_num", 0)
         else:
             device_count = 0
-        
+
         if device_count > 0:
             logger.info("Using %d devices from config for role %s", device_count, Env.role)
             config.basic_config.device_num = device_count
@@ -411,7 +428,7 @@ class NodeManagerConfig:
             config.basic_config.device_num = 0
 
     @classmethod
-    def _generate_endpoint_ports(cls, config: 'NodeManagerConfig'):
+    def _generate_endpoint_ports(cls, config: "NodeManagerConfig"):
         """
         Calculate endpoint number based on tensor parallel & pipeline parallel config.
         Example: tp=2, pp=4 => 8 devices per pod
@@ -420,10 +437,7 @@ class NodeManagerConfig:
         devices_per_dp = config.basic_config.parallel_config.local_world_size
 
         # only enable multi endpoints should check device count
-        if (
-            (config.basic_config.enable_multi_endpoints and config.basic_config.device_num < devices_per_dp)
-            or dp < 1
-        ):
+        if (config.basic_config.enable_multi_endpoints and config.basic_config.device_num < devices_per_dp) or dp < 1:
             raise ValueError(
                 f"Device count ({config.basic_config.device_num}) must bigger than "
                 f"or equal to devices per dp ({devices_per_dp}) "
@@ -435,12 +449,10 @@ class NodeManagerConfig:
         else:
             config.endpoint_config.endpoint_num = min(dp, config.basic_config.device_num // devices_per_dp)
         config.endpoint_config.service_ports = [
-            str(config.endpoint_config.base_port + i * 2)
-            for i in range(config.endpoint_config.endpoint_num)
+            str(config.endpoint_config.base_port + i * 2) for i in range(config.endpoint_config.endpoint_num)
         ]
         config.endpoint_config.mgmt_ports = [
-            str(config.endpoint_config.base_port + i * 2 + 1)
-            for i in range(config.endpoint_config.endpoint_num)
+            str(config.endpoint_config.base_port + i * 2 + 1) for i in range(config.endpoint_config.endpoint_num)
         ]
 
         logger.info(
@@ -470,7 +482,7 @@ class NodeManagerConfig:
             errors.append("heartbeat_interval_seconds must be greater than 0")
 
         # Validate logging configuration
-        valid_log_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+        valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
         if self.logging_config.log_level.upper() not in valid_log_levels:
             errors.append(f"log_level must be one of: {', '.join(valid_log_levels)}")
 
@@ -500,7 +512,7 @@ class NodeManagerConfig:
 
             # Update current configuration
             for field_name in self.__dataclass_fields__:
-                if field_name not in ['config_path', 'last_modified']:
+                if field_name not in ["config_path", "last_modified"]:
                     setattr(self, field_name, getattr(new_config, field_name))
 
             self.last_modified = current_mtime
@@ -521,12 +533,12 @@ class NodeManagerConfig:
         config_dict = asdict(self)
 
         # Handle BaseModel objects that can't be serialized by asdict
-        if hasattr(self.basic_config.parallel_config, 'model_dump'):
-            config_dict['basic_config']['parallel_config'] = self.basic_config.parallel_config.model_dump()
+        if hasattr(self.basic_config.parallel_config, "model_dump"):
+            config_dict["basic_config"]["parallel_config"] = self.basic_config.parallel_config.model_dump()
 
         # Remove internal fields that shouldn't be in the output
-        config_dict.pop('config_path', None)
-        config_dict.pop('last_modified', None)
+        config_dict.pop("config_path", None)
+        config_dict.pop("last_modified", None)
 
         return config_dict
 
