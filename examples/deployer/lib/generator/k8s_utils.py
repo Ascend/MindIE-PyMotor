@@ -106,7 +106,7 @@ def get_deploy_mode_from_config(deploy_config):
     return mode
 
 
-def _pick_mgmt_service(docs: list[dict]) -> dict | None:
+def _pick_mgmt_service(docs: list[dict]):
     """Pick the management Service (port 1026) from a list of YAML docs.
 
     When the coordinator template defines multiple Services (infer, mgmt, obs),
