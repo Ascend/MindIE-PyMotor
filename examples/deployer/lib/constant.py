@@ -106,9 +106,21 @@ PRIVILEGED = "privileged"
 
 HARDWARE_TYPE_800I_A2 = "800I_A2"
 HARDWARE_TYPE_800I_A3 = "800I_A3"
+HARDWARE_TYPE_950I_A5 = ["350-Atlas-8", "350-Atlas-16", "350-Atlas-4p-8", "350-Atlas-4p-16", "850-Atlas-8p-8", "850-SuperPod-Atlas-8", "950-SuperPod-Atlas-8"]
+ACCELERATOR_A5 = "huawei-npu"
+ACCELERATOR_910 = "huawei-Ascend910"
 ACCELERATOR_TYPE = "accelerator-type"
+ACCELERATOR = "accelerator"
 ACCELERATOR_TYPE_910B = "module-910b-8"
 ACCELERATOR_TYPE_A3 = "module-a3-16"
+
+ENABLE_PD_HETEROGENEOUS = "enable_pd_heterogeneous"
+PD_HETEROGENEOUS_LABEL_KEY = "pd_heterogeneous_label_key"
+PD_HETEROGENEOUS_PREFILL_LABEL_VALUE = "pd_heterogeneous_prefill_label_value"
+PD_HETEROGENEOUS_DECODE_LABEL_VALUE = "pd_heterogeneous_decode_label_value"
+DEFAULT_PD_HETEROGENEOUS_LABEL_KEY = "card_type"
+DEFAULT_PD_HETEROGENEOUS_PREFILL_VALUE = "Ascend950PR"
+DEFAULT_PD_HETEROGENEOUS_DECODE_VALUE = "Ascend950DT"
 
 CONTAINERS = "containers"
 IMAGE = "image"

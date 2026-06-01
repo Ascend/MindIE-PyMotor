@@ -9,6 +9,7 @@
 # See the Mulan PSL v2 for more details.
 import json
 import os
+import subprocess
 
 import lib.constant as C
 from lib.utils import logger
@@ -137,3 +138,105 @@ def validate_pd_hybrid_config(user_config):
     scheduler_config = user_config.get(C.MOTOR_COORDINATOR_CONFIG, {}).get("scheduler_config", {})
     if scheduler_config.get("deploy_mode") != "single_node":
         raise ValueError("PD hybrid config requires motor_coordinator_config.scheduler_config.deploy_mode=single_node.")
+
+
+def _get_pd_heterogeneous_config(deploy_config):
+    """Extract PD heterogeneous config from deploy_config, returns None if disabled."""
+    if deploy_config.get(C.ENABLE_PD_HETEROGENEOUS) is not True:
+        return None
+    label_key = deploy_config.get(
+        C.PD_HETEROGENEOUS_LABEL_KEY, C.DEFAULT_PD_HETEROGENEOUS_LABEL_KEY
+    )
+    prefill_value = deploy_config.get(
+        C.PD_HETEROGENEOUS_PREFILL_LABEL_VALUE, C.DEFAULT_PD_HETEROGENEOUS_PREFILL_VALUE
+    )
+    decode_value = deploy_config.get(
+        C.PD_HETEROGENEOUS_DECODE_LABEL_VALUE, C.DEFAULT_PD_HETEROGENEOUS_DECODE_VALUE
+    )
+    return {
+        "label_key": label_key,
+        "prefill_value": prefill_value,
+        "decode_value": decode_value,
+    }
+
+
+def _get_hardware_node_labels(hardware_type):
+    """Extract nodeSelector labels determined by hardware_type.
+
+    Returns dict of label key-value pairs. Raises ValueError for unknown types.
+    """
+    if hardware_type == C.HARDWARE_TYPE_800I_A2:
+        return {C.ACCELERATOR: C.ACCELERATOR_910, C.ACCELERATOR_TYPE: C.ACCELERATOR_TYPE_910B}
+    if hardware_type == C.HARDWARE_TYPE_800I_A3:
+        return {C.ACCELERATOR: C.ACCELERATOR_910, C.ACCELERATOR_TYPE: C.ACCELERATOR_TYPE_A3}
+    if hardware_type in C.HARDWARE_TYPE_950I_A5:
+        return {C.ACCELERATOR: C.ACCELERATOR_A5, C.ACCELERATOR_TYPE: hardware_type}
+    known = [C.HARDWARE_TYPE_800I_A2, C.HARDWARE_TYPE_800I_A3, *C.HARDWARE_TYPE_950I_A5]
+    raise ValueError(
+        f"Unknown hardware_type '{hardware_type}'. "
+        f"Supported values: {known}"
+    )
+
+
+def _validate_node_labels_exist(labels, node_desc):
+    """Assert that at least one node in the cluster matches ALL given labels (AND).
+
+    Args:
+        labels: dict of label key -> value that must all be present on a single node.
+        node_desc: human-readable description for error messages (e.g. "prefill(P)").
+    """
+    if not labels:
+        return
+    label_selector = ",".join(f"{k}={v}" for k, v in labels.items())
+    try:
+        result = subprocess.run(
+            ["kubectl", "get", "nodes", "-l", label_selector, "-o", "name"],
+            capture_output=True, text=True
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to query cluster nodes for {node_desc} with labels {labels}: {e}"
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"kubectl get nodes failed for {node_desc} with labels {labels}. "
+            f"stderr: {result.stderr.strip()}"
+        )
+
+    nodes = [line for line in result.stdout.strip().split("\n") if line]
+    if not nodes:
+        raise RuntimeError(
+            f"No node in cluster matches nodeSelector for {node_desc}: {labels}. "
+            f"Please ensure suitable nodes are labeled correctly."
+        )
+
+    logger.info(
+        f"Node selector validated for {node_desc}: {labels} -> {len(nodes)} node(s) found"
+    )
+
+
+def validate_node_selectors(deploy_config):
+    """Validate that cluster nodes exist for every nodeSelector combination to be used.
+
+    Always validates base hardware labels (accelerator-type, accelerator).
+    When PD heterogeneous deployment is enabled, additionally validates the
+    combined prefill/decode labels per node type.
+    """
+    hardware_type = deploy_config.get(C.HARDWARE_TYPE)
+    base_labels = _get_hardware_node_labels(hardware_type)
+
+    pd_config = _get_pd_heterogeneous_config(deploy_config)
+
+    if pd_config is not None:
+        label_key = pd_config["label_key"]
+        prefill_labels = {**base_labels, label_key: pd_config["prefill_value"]}
+        decode_labels = {**base_labels, label_key: pd_config["decode_value"]}
+        _validate_node_labels_exist(prefill_labels, "prefill(P)")
+        _validate_node_labels_exist(decode_labels, "decode(D)")
+        logger.info(
+            f"PD heterogeneous node selectors validated: "
+            f"prefill -> {prefill_labels}, decode -> {decode_labels}"
+        )
+    else:
+        _validate_node_labels_exist(base_labels, "engine")

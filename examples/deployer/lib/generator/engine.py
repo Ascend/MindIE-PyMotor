@@ -119,6 +119,36 @@ def apply_node_selector_by_hardware(pod_spec, hardware_type):
         pod_spec[C.NODE_SELECTOR][C.ACCELERATOR_TYPE] = C.ACCELERATOR_TYPE_910B
     elif hardware_type == C.HARDWARE_TYPE_800I_A3:
         pod_spec[C.NODE_SELECTOR][C.ACCELERATOR_TYPE] = C.ACCELERATOR_TYPE_A3
+    elif hardware_type in C.HARDWARE_TYPE_950I_A5:
+        pod_spec[C.NODE_SELECTOR][C.ACCELERATOR_TYPE] = hardware_type
+        pod_spec[C.NODE_SELECTOR][C.ACCELERATOR] = C.ACCELERATOR_A5
+
+
+def apply_pd_heterogeneous_node_selector(pod_spec, deploy_config, node_type):
+    if deploy_config.get(C.ENABLE_PD_HETEROGENEOUS) is not True:
+        return
+    label_key = deploy_config.get(
+        C.PD_HETEROGENEOUS_LABEL_KEY, C.DEFAULT_PD_HETEROGENEOUS_LABEL_KEY
+    )
+    label_value_map = {
+        C.NODE_TYPE_P: deploy_config.get(
+            C.PD_HETEROGENEOUS_PREFILL_LABEL_VALUE, C.DEFAULT_PD_HETEROGENEOUS_PREFILL_VALUE
+        ),
+        C.NODE_TYPE_D: deploy_config.get(
+            C.PD_HETEROGENEOUS_DECODE_LABEL_VALUE, C.DEFAULT_PD_HETEROGENEOUS_DECODE_VALUE
+        ),
+    }
+    if node_type in label_value_map:
+        pod_spec[C.NODE_SELECTOR][label_key] = label_value_map[node_type]
+        logger.info(
+            f"Applied PD heterogeneous node selector: "
+            f"node_type={node_type}, {label_key}={label_value_map[node_type]}"
+        )
+    else:
+        logger.warning(
+            f"PD heterogeneous enabled but unexpected node_type={node_type}, "
+            f"expected one of {list(label_value_map.keys())}, node selector not applied"
+        )
 
 
 def set_engine_node_selector(deployment_data, deploy_config, node_type):
@@ -127,6 +157,7 @@ def set_engine_node_selector(deployment_data, deploy_config, node_type):
     pod_spec = deployment_data[C.SPEC][C.TEMPLATE][C.SPEC]
     pod_spec[C.NODE_SELECTOR] = pod_spec.get(C.NODE_SELECTOR, {})
     apply_node_selector_by_hardware(pod_spec, hardware_type)
+    apply_pd_heterogeneous_node_selector(pod_spec, deploy_config, node_type)
 
 
 def set_weight_mount(pod_spec, container, weight_mount_path):

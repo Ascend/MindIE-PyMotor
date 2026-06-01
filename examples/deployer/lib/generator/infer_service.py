@@ -20,7 +20,8 @@ from lib.generator.k8s_utils import (
     extract_rbac_resources, apply_sp_block_annotation
 )
 from lib.generator.engine import (
-    build_engine_env_items, set_container_npu, apply_node_selector_by_hardware, set_weight_mount
+    build_engine_env_items, set_container_npu, apply_node_selector_by_hardware, set_weight_mount,
+    apply_pd_heterogeneous_node_selector
 )
 from lib.generator.kv_pool import normalize_kv_cache_pool_config, gen_kv_pool_env
 from lib.generator.kv_conductor import normalize_kv_conductor_config
@@ -110,10 +111,14 @@ def _configure_coordinator_role(infer_doc, user_config):
         set_container_env(container, coordinator_env)
 
 
-def _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, npu_key):
+def _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, npu_key, role_name=None):
     hardware_type = deploy_config.get(C.HARDWARE_TYPE, C.HARDWARE_TYPE_800I_A2)
     pod_spec[C.NODE_SELECTOR] = pod_spec.get(C.NODE_SELECTOR, {})
     apply_node_selector_by_hardware(pod_spec, hardware_type)
+    if role_name:
+        node_type = {C.ROLE_PREFILL: C.NODE_TYPE_P, C.ROLE_DECODE: C.NODE_TYPE_D}.get(role_name)
+        if node_type:
+            apply_pd_heterogeneous_node_selector(pod_spec, deploy_config, node_type)
 
     if hardware_type == C.HARDWARE_TYPE_800I_A3:
         # CRD uses StatefulSet; MindCluster sp-block differs from Deployment (see engine.py multi_deployment)
@@ -157,7 +162,7 @@ def _configure_engine_role(infer_doc, user_config, infer_name, role_name):
     set_container_npu(container, npu_num)
     weight_path = deploy_config.get(C.WEIGHT_MOUNT_PATH, C.DEFAULT_WEIGHT_MOUNT_PATH)
     set_weight_mount(pod_spec, container, weight_path)
-    _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, npu_key)
+    _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, npu_key, role_name)
 
 
 def _set_role_primary_service_port(role, service_port):

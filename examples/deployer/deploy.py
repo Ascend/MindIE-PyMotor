@@ -32,7 +32,8 @@ from lib.generator.infer_service import (
 from lib.generator.mf_store import generate_yaml_mf_store
 from lib.config_validator import (
     validate_deploy_mode_consistency, validate_deploy_mode_value,
-    validate_only_instance_changed, resolve_config_paths, validate_pd_hybrid_config
+    validate_only_instance_changed, resolve_config_paths, validate_pd_hybrid_config,
+    validate_node_selectors
 )
 
 
@@ -207,6 +208,9 @@ def deploy_services(user_config, env_config_path, dry_run=False):
 
     if k8s_utils.g_kv_pool_enabled and k8s_utils.g_kv_conductor_enabled:
         update_shell_add_kv_patch()
+
+    if deploy_mode_arg != C.DEPLOY_MODE_SINGLE_CONTAINER and not dry_run:
+        validate_node_selectors(deploy_config)
 
     k8s_utils.g_generate_yaml_list = []
     paths = get_deploy_paths()
