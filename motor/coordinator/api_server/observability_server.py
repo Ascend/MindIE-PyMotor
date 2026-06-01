@@ -29,9 +29,28 @@ from motor.coordinator.api_server.base_server import BaseCoordinatorServer
 from motor.coordinator.api_server.app_builder import AppBuilder
 from motor.coordinator.metrics.metrics_collector import MetricsCollector
 from motor.coordinator.scheduler.runtime import SchedulerConnectionManager
-from motor.coordinator.domain.instance_manager import InstanceManager, TYPE_OBS
+from motor.common.resources.instance import Instance
 
 logger = get_logger(__name__)
+
+
+class _SchedulerInstanceProvider:
+    """Expose the live instance view to MetricsCollector in the Obs process.
+
+    The Obs process has no /instances/refresh handler to feed a local
+    InstanceManager, so it reads instances from the scheduler client, which
+    subscribes to the scheduler's instance-change pub and keeps the cache fresh.
+    """
+
+    def __init__(self, connection: SchedulerConnectionManager):
+        self._connection = connection
+
+    async def get_all_instances(self) -> tuple[dict[int, Instance], dict[int, Instance]]:
+        client = self._connection.get_client()
+        if client is None:
+            return {}, {}
+        available = await client.get_available_instances(None)
+        return available, {}
 
 
 class ObservabilityServer(BaseCoordinatorServer):
@@ -50,13 +69,13 @@ class ObservabilityServer(BaseCoordinatorServer):
         super().__init__(config)
         self._daemon_pid = daemon_pid
 
-        # Own InstanceManager (same view as scheduling, TYPE_OBS)
-        self._instance_manager = InstanceManager(config, typename=TYPE_OBS)
-        self._scheduler_connection = SchedulerConnectionManager(config)
+        # Connect to the scheduler the same way Inference/Mgmt servers do, so the
+        # client subscribes to the scheduler's instance-change pub and keeps a live view.
+        self._scheduler_connection = SchedulerConnectionManager.from_config(config)
+        self._instance_provider = _SchedulerInstanceProvider(self._scheduler_connection)
         self._app_builder = AppBuilder(config)
         self.observability_app = self._app_builder.create_observability_app(lifespan=self._lifespan)
         self._register_routes()
-        return None
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
@@ -64,7 +83,7 @@ class ObservabilityServer(BaseCoordinatorServer):
         await self._scheduler_connection.connect()
         try:
             MetricsCollector().set_event_loop(asyncio.get_running_loop())
-            MetricsCollector().set_scheduler_provider(lambda: self._instance_manager)
+            MetricsCollector().set_scheduler_provider(lambda: self._instance_provider)
             MetricsCollector().start()
         except Exception as e:
             logger.warning("Ignored error setting up metrics collector: %s", e)

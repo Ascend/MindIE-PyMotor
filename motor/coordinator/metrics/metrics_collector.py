@@ -9,14 +9,15 @@
 # See the Mulan PSL v2 for more details.
 
 import asyncio
+import math
 import re
 import time
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import Counter
-from typing import Any
 from collections.abc import Callable
+from typing import Any
 
 from motor.common.resources.instance import Instance
 from motor.common.resources import PDRole
@@ -78,9 +79,12 @@ class MetricsCollector(ThreadSafeSingleton):
         # Initial metrics state
         self._inactive_instance_metrics_aggregate: list[Metric] = []
         self._instance_metrics_cached: dict[int, dict[str, list[Metric]]] = {}
-        self._last_metrics: str = ""
-        self._last_instance_metrics: dict[int, list[Metric]] = {}
-        self._last_instance_roles: dict[int, str] = {}
+        self._last_collects: dict[int, dict[str, Any]] = {}
+
+        self._collects_version: int = 0
+        self._caches: dict[str, Any] = {}
+        self._cache_version: int = -1
+        self._serialize_lock = threading.Lock()
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -125,90 +129,106 @@ class MetricsCollector(ThreadSafeSingleton):
             self._deploy_config = config.deploy_config
         logger.info("MetricsCollector configuration updated")
 
-    def get_metrics(self, metrics_type: str = "full", role: str | None = None) -> str:
+    def get_metrics(
+        self,
+        metrics_type: str = "full",
+        role: str | None = None,
+    ) -> str:
         """
         Unified metrics retrieval with type selection.  All types return Prometheus text.
 
-        :param metrics_type: "full" (default), "instance", or "role"
+        :param metrics_type: "full" (default), "instance", "role", "dp", or "node"
         :param role: when metrics_type is "role", filter to a specific role (e.g. "prefill", "decode")
         :returns: Prometheus text
         """
-        if metrics_type == "instance":
-            return self._format_instance_metrics()
-        if metrics_type == "role":
-            role_metrics = self._build_role_metrics()
-            if role:
-                return role_metrics.get(role, "")
-            return "\n".join(role_metrics.values())
         with self._lock:
-            return self._last_metrics
-
-    def _snapshot_instance_state(self) -> tuple[dict, dict]:
-        with self._lock:
-            return dict(self._last_instance_metrics), dict(self._last_instance_roles)
+            version = self._collects_version
+            collects = self._last_collects
+        with self._serialize_lock:
+            if self._cache_version != version:
+                self._caches = {}
+                self._cache_version = version
+            if metrics_type == "instance":
+                if "instance" not in self._caches:
+                    self._caches["instance"] = self._generate_instance_metrics(collects)
+                return self._caches["instance"]
+            if metrics_type == "role":
+                if "role" not in self._caches:
+                    self._caches["role"] = self._generate_role_metrics(collects)
+                if role:
+                    return self._caches["role"].get(role, "")
+                return "\n".join(self._caches["role"].values())
+            if metrics_type == "dp":
+                if "dp" not in self._caches:
+                    self._caches["dp"] = self._generate_dp_metrics(collects)
+                return self._caches["dp"]
+            if metrics_type == "node":
+                if "node" not in self._caches:
+                    self._caches["node"] = self._generate_node_metrics(collects)
+                return self._caches["node"]
+            if "full" not in self._caches:
+                self._caches["full"] = self._generate_full_metrics(collects)
+            return self._caches["full"]
 
     @classmethod
-    def _inject_labels(cls, metric: Metric, **labels: str) -> Metric:
+    def _inject_labels(
+        cls,
+        metric: Metric,
+        **labels: str,
+    ) -> Metric:
         extra = ",".join(f'{k}="{v}"' for k, v in labels.items())
         result = metric.copy()
         result.label = [
-            l.replace("{", "{" + extra + ",") if "{" in l else l + "{" + extra + "}"
-            for l in metric.label
+            lbl.replace("{", "{" + extra + ",") if "{" in lbl else lbl + "{" + extra + "}" for lbl in metric.label
         ]
         return result
 
-    def _format_instance_metrics(self) -> str:
-        instance_metrics, instance_roles = self._snapshot_instance_state()
+    def _generate_instance_metrics(
+        self,
+        collects: dict[int, dict[str, Any]],
+    ) -> str:
+        instance_metrics = self._aggregate_collects_by_instance(collects)
         if not instance_metrics:
             return ""
-
         all_metrics: list[Metric] = []
         for ins_id, metrics_list in instance_metrics.items():
-            role = instance_roles.get(ins_id, "unknown")
+            role = collects.get(ins_id, {}).get("role", "unknown")
             for m in metrics_list:
                 all_metrics.append(self._inject_labels(m, instance_id=str(ins_id), role=role))
         return self._format_prometheus(all_metrics)
 
-    def _build_role_metrics(self) -> dict[str, str]:
-        instance_metrics, instance_roles = self._snapshot_instance_state()
-
-        role_metrics: dict[str, list[list[Metric]]] = {}
+    def _generate_role_metrics(
+        self,
+        collects: dict[int, dict[str, Any]],
+    ) -> dict[str, str]:
+        instance_metrics = self._aggregate_collects_by_instance(collects)
+        role_groups: dict[str, list[list[Metric]]] = {}
         for ins_id, metrics_list in instance_metrics.items():
-            role = instance_roles.get(ins_id, "unknown")
-            if role not in role_metrics:
-                role_metrics[role] = []
-            role_metrics[role].append(metrics_list)
+            role = collects.get(ins_id, {}).get("role", "unknown")
+            role_groups.setdefault(role, []).append(metrics_list)
 
         result: dict[str, str] = {}
-        for role, metrics_lists in role_metrics.items():
+        for role, metrics_lists in role_groups.items():
             aggregated = self._aggregate_metrics(metrics_lists)
             if aggregated:
                 labeled = [self._inject_labels(m, role=role) for m in aggregated]
                 result[role] = self._format_prometheus(labeled)
-
         return result
 
     def _update_metrics_thread(self) -> None:
         while not self._stop_event.is_set():
-            metrics, instance_metrics, instance_roles = self._collect_and_aggregate()
-            with self._lock:
-                if metrics and instance_metrics:
-                    self._last_metrics = metrics
-                    self._last_instance_metrics = instance_metrics
-                    self._last_instance_roles = instance_roles
+            collects = self._collect_metrics()
+            if collects is not None:
+                with self._lock:
+                    self._last_collects = collects
+                    self._collects_version += 1
             with self._config_lock:
                 reuse_time = self._prometheus_metrics_config.reuse_time
             time.sleep(reuse_time)
 
-    def _collect_and_aggregate(self) -> tuple[str, dict[str, list[Metric]], dict[int, str]]:
-        """Get and Aggregate metrics."""
-
+    def _collect_metrics(self) -> dict[int, dict[str, Any]] | None:
         available_instances, unavailable_instances = self._get_available_instances()
         self._clear_inactive_metrics(unavailable_instances)
-
-        instance_roles: dict[int, str] = {}
-        for ins_id, ins in available_instances.items():
-            instance_roles[ins_id] = ins.role
 
         # Step 1: get instances/endpoints info and get all endpoints metrics text.
         collects = self._fetch_instance_metrics(available_instances)
@@ -216,23 +236,26 @@ class MetricsCollector(ThreadSafeSingleton):
         # Step 2: parse metrics text to format data for all instances/endpoints.
         if not self._parse_metrics(collects):
             logger.error("[Metrics] Parse vllm server metrics failed.")
-            return "", {}, instance_roles
+            return None
 
-        # Step 3: for each instance, aggreagte metrics of all endpoints.
-        self._aggregate_metrics_by_instance(collects)
+        return collects
 
-        # Step 4: aggreagte metrics of all instances.
-        aggregate = self._aggregate_metrics_all_instance(collects)
-
-        # Step 5: add coordinator metrics
-        self._add_coordinator_metrics(aggregate, available_instances)
-
-        # Step 6: serialize and return to handler.
-        return (
-            self._format_prometheus(aggregate),
-            self._collect_instance_metrics(collects),
-            instance_roles,
-        )
+    def _aggregate_collects_by_instance(
+        self,
+        collects: dict[int, dict[str, Any]],
+    ) -> dict[int, list[Metric]]:
+        """Non-destructively aggregate endpoints per instance from raw collects."""
+        instance_metrics: dict[int, list[Metric]] = {}
+        for ins_id, ins_data in collects.items():
+            if not isinstance(ins_data, dict) or "endpoints" not in ins_data:
+                continue
+            aggr_input = []
+            for pod_info in ins_data["endpoints"].values():
+                if self.METRICS_KEY in pod_info:
+                    aggr_input.append(pod_info[self.METRICS_KEY])
+            if aggr_input:
+                instance_metrics[ins_id] = self._aggregate_metrics(aggr_input)
+        return instance_metrics
 
     def _get_available_instances(self) -> tuple[dict[int, Instance], dict[int, Instance]]:
         loop = self._loop
@@ -325,7 +348,10 @@ class MetricsCollector(ThreadSafeSingleton):
         return metric_array
 
     @staticmethod
-    def _parse_metric_help(metric: Metric, line: str) -> bool:
+    def _parse_metric_help(
+        metric: Metric,
+        line: str,
+    ) -> bool:
         parts = line.split()
         if len(parts) >= 4 and parts[0] == "#" and parts[1] == "HELP":
             metric.name = parts[2]
@@ -335,7 +361,10 @@ class MetricsCollector(ThreadSafeSingleton):
         return False
 
     @staticmethod
-    def _parse_metric_type(metric: Metric, line: str) -> bool:
+    def _parse_metric_type(
+        metric: Metric,
+        line: str,
+    ) -> bool:
         parts = line.split()
         if len(parts) == 4 and parts[0] == "#" and parts[1] == "TYPE":
             try:
@@ -348,7 +377,11 @@ class MetricsCollector(ThreadSafeSingleton):
         return False
 
     @classmethod
-    def _parse_metric_body_block(cls, metric: Metric, line: str) -> bool:
+    def _parse_metric_body_block(
+        cls,
+        metric: Metric,
+        line: str,
+    ) -> bool:
         parts = line.split()
         if len(parts) != 2:
             logger.error("[Metrics] Parse metric body failed.")
@@ -367,7 +400,10 @@ class MetricsCollector(ThreadSafeSingleton):
             return False
         return True
 
-    def _fetch_instance_metrics(self, available_instances: dict[int, Instance]) -> dict[int, dict[str, dict[int, str]]]:
+    def _fetch_instance_metrics(
+        self,
+        available_instances: dict[int, Instance],
+    ) -> dict[int, dict[str, dict[int, str]]]:
         """Get instances/endpoints info and get all endpoints metrics text.
 
         :param available_instances: alive instances
@@ -389,6 +425,7 @@ class MetricsCollector(ThreadSafeSingleton):
         for ins_info in available_instances.values():
             collect = self._fetch_endpoint_metrics(ins_info)
             if collect:
+                collect["role"] = ins_info.role
                 collects[ins_info.id] = collect
 
         return collects
@@ -415,7 +452,10 @@ class MetricsCollector(ThreadSafeSingleton):
                 metrics_str = EngineServerApiClient.query_metrics(f"{en_info.ip}:{en_info.mgmt_port}")
                 if not metrics_str:
                     return {}
-                collect["endpoints"][en_info.id] = {"metrics_str": metrics_str}
+                collect["endpoints"][en_info.id] = {
+                    "metrics_str": metrics_str,
+                    "pod_ip": en_info.ip,
+                }
 
         return collect
 
@@ -489,9 +529,9 @@ class MetricsCollector(ThreadSafeSingleton):
         """Copy metric; if gauge, zero out values (inactive instances contribute 0)."""
         if metric.type != MetricType.GAUGE:
             return metric
-        copy = metric.copy()
-        copy.value = [0.0] * len(copy.value)
-        return copy
+        zeroed = metric.copy()
+        zeroed.value = [0.0] * len(zeroed.value)
+        return zeroed
 
     def _aggregate_labels_by_sum(self, metric_list: list[Metric]) -> dict[str, float]:
         """Aggregate all labels by sum."""
@@ -534,23 +574,42 @@ class MetricsCollector(ThreadSafeSingleton):
             value=list(aggregate.values()),
         )
 
-    def _add_coordinator_metrics(self, aggregate: list[Metric], available_instances: dict[int, Instance]) -> None:
-        available_role_counts = Counter(instance.role for instance in available_instances.values())
-        available_p = available_role_counts.get(PDRole.ROLE_P, 0)
-        available_d = available_role_counts.get(PDRole.ROLE_D, 0)
+    def _append_coordinator_metrics(
+        self,
+        aggregate: list[Metric],
+        collects: dict[int, dict[str, Any]],
+    ) -> None:
+        role_counts = Counter(ins_data.get("role", "") for ins_data in collects.values())
+        available_p = role_counts.get(PDRole.ROLE_P, 0)
+        available_d = role_counts.get(PDRole.ROLE_D, 0)
+        with self._config_lock:
+            p_num = self._deploy_config.p_instances_num
+            d_num = self._deploy_config.d_instances_num
 
-        p_num = self._deploy_config.p_instances_num
-        d_num = self._deploy_config.d_instances_num
-        unavailable_p = p_num - available_p
-        unavailable_d = d_num - available_d
+        def _new(name: str, num: int) -> Metric:
+            return Metric(
+                name=name,
+                help="Number of instances",
+                type=MetricType.GAUGE,
+                label=[name],
+                value=[num],
+            )
 
-        def _new_worker_count_metric(name: str, num: int) -> Metric:
-            return Metric(name=name, help="Number of instances", type=MetricType.GAUGE, label=[name], value=[num])
+        aggregate.append(_new("motor_active_prefill_workers", available_p))
+        aggregate.append(_new("motor_active_decode_workers", available_d))
+        aggregate.append(_new("motor_inactive_prefill_workers", p_num - available_p))
+        aggregate.append(_new("motor_inactive_decode_workers", d_num - available_d))
 
-        aggregate.append(_new_worker_count_metric("motor_active_prefill_workers", available_p))
-        aggregate.append(_new_worker_count_metric("motor_active_decode_workers", available_d))
-        aggregate.append(_new_worker_count_metric("motor_inactive_prefill_workers", unavailable_p))
-        aggregate.append(_new_worker_count_metric("motor_inactive_decode_workers", unavailable_d))
+    def _generate_full_metrics(
+        self,
+        collects: dict[int, dict[str, Any]],
+    ) -> str:
+        instance_metrics = self._aggregate_collects_by_instance(collects)
+        if not instance_metrics:
+            return ""
+        aggregate = self._aggregate_metrics(list(instance_metrics.values()))
+        self._append_coordinator_metrics(aggregate, collects)
+        return self._format_prometheus(aggregate)
 
     def _format_prometheus(self, aggregate: list[Metric]) -> str:
         lines = []
@@ -559,7 +618,7 @@ class MetricsCollector(ThreadSafeSingleton):
             lines.append("# TYPE {} {}".format(item.name, item.type))
             for i, label in enumerate(item.label):
                 v = item.value[i]
-                if v != v:  # NaN
+                if math.isnan(v):
                     vs = "Nan"
                 elif v == float("inf"):
                     vs = "+Inf"
@@ -570,10 +629,87 @@ class MetricsCollector(ThreadSafeSingleton):
                 lines.append("{} {}".format(label, vs))
         return "\n".join(lines)
 
-    def _collect_instance_metrics(self, collects: dict[int, dict[str, list[Metric]]]) -> dict[int, list[Metric]]:
-        """Instance metrics serialize."""
-        instance_metrics = {}
-        for ins_id in collects.keys():
-            instance_metrics[ins_id] = self._instance_metrics_cached[ins_id][self.METRICS_KEY]
+    @staticmethod
+    def _prepend_dim_labels(
+        label_str: str,
+        dim_labels: str,
+    ) -> str:
+        if "{" not in label_str:
+            return f"{label_str}{{{dim_labels}}}"
+        name_part, rest = label_str.split("{", 1)
+        if rest == "}":
+            return f"{name_part}{{{dim_labels}}}"
+        return f"{name_part}{{{dim_labels},{rest}"
 
-        return instance_metrics
+    @staticmethod
+    def _metric_value_str(value: float) -> str:
+        if math.isnan(value):
+            return "Nan"
+        if value == float("inf"):
+            return "+Inf"
+        if value == float("-inf"):
+            return "-Inf"
+        return str(value)
+
+    @staticmethod
+    def _emit_metric_groups(name_to_meta: dict[str, dict[str, Any]]) -> str:
+        out_lines: list[str] = []
+        for name in sorted(name_to_meta.keys()):
+            meta = name_to_meta[name]
+            out_lines.append(f"# HELP {name} {meta['help']}")
+            out_lines.append(f"# TYPE {name} {meta['type']}")
+            meta["lines"].sort(key=lambda kv: (kv[0], kv[1]))
+            out_lines.extend(line for _, line in meta["lines"])
+        return "\n".join(out_lines)
+
+    def _generate_dp_metrics(self, collects: dict[int, dict[str, Any]]) -> str:
+        name_to_meta: dict[str, dict[str, Any]] = {}
+        for instance_id, ins_collect in collects.items():
+            if not isinstance(ins_collect, dict) or "endpoints" not in ins_collect:
+                continue
+            role = ins_collect.get("role", "")
+            for ep_id, pod_info in ins_collect["endpoints"].items():
+                if self.METRICS_KEY not in pod_info:
+                    continue
+                pod_ip = pod_info.get("pod_ip", "")
+                dim_labels = f'dp_rank="{ep_id}",role="{role}",instance_id="{instance_id}",pod_ip="{pod_ip}"'
+                for metric in pod_info[self.METRICS_KEY]:
+                    meta = name_to_meta.setdefault(
+                        metric.name,
+                        {"help": metric.help, "type": metric.type, "lines": []},
+                    )
+                    for i, label_str in enumerate(metric.label):
+                        new_label = self._prepend_dim_labels(label_str, dim_labels)
+                        meta["lines"].append(
+                            ((instance_id, ep_id), f"{new_label} {self._metric_value_str(metric.value[i])}")
+                        )
+        return self._emit_metric_groups(name_to_meta)
+
+    def _generate_node_metrics(self, collects: dict[int, dict[str, Any]]) -> str:
+        key_to_lists: dict[tuple[str, str], list[list[Metric]]] = {}
+        for ins_collect in collects.values():
+            if not isinstance(ins_collect, dict) or "endpoints" not in ins_collect:
+                continue
+            role = ins_collect.get("role", "")
+            for pod_info in ins_collect["endpoints"].values():
+                if self.METRICS_KEY not in pod_info:
+                    continue
+                pod_ip = pod_info.get("pod_ip", "")
+                if not pod_ip:
+                    continue
+                key_to_lists.setdefault((pod_ip, role), []).append(pod_info[self.METRICS_KEY])
+        pod_aggregates = {
+            key: self._aggregate_metrics(metrics_lists) for key, metrics_lists in key_to_lists.items() if metrics_lists
+        }
+        name_to_meta: dict[str, dict[str, Any]] = {}
+        for (pod_ip, role), aggregate in pod_aggregates.items():
+            dim_labels = f'pod_ip="{pod_ip}",role="{role}"'
+            for metric in aggregate:
+                meta = name_to_meta.setdefault(
+                    metric.name,
+                    {"help": metric.help, "type": metric.type, "lines": []},
+                )
+                for i, label_str in enumerate(metric.label):
+                    new_label = self._prepend_dim_labels(label_str, dim_labels)
+                    meta["lines"].append(((pod_ip, role), f"{new_label} {self._metric_value_str(metric.value[i])}"))
+        return self._emit_metric_groups(name_to_meta)

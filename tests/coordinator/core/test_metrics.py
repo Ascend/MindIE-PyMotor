@@ -10,6 +10,8 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
+# pylint: disable=too-many-lines  # 测试用例集中于单文件，拆分需新建文件
+
 import asyncio
 import os
 import threading
@@ -27,26 +29,32 @@ from motor.config.coordinator import CoordinatorConfig
 from motor.common.utils.singleton import ThreadSafeSingleton
 
 
+def _stop_singleton_instance(instance):
+    """Call stop() on a singleton instance, awaiting the coroutine if needed."""
+    if not hasattr(instance, "stop"):
+        return
+    stop_result = instance.stop()
+    # If stop() returns a coroutine, run it to avoid "never awaited" warning
+    if asyncio.iscoroutine(stop_result):
+        try:
+            asyncio.run(stop_result)
+        except RuntimeError:
+            pass  # e.g. cannot call run() from running loop; skip
+
+
 def _cleanup_singletons():
     """Clean up singleton instances to ensure test isolation"""
     singletons_to_cleanup = [MetricsCollector]
 
     for singleton_cls in singletons_to_cleanup:
-        if singleton_cls in ThreadSafeSingleton._instances:
-            instance = ThreadSafeSingleton._instances[singleton_cls]
-            try:
-                if hasattr(instance, "stop"):
-                    stop_result = instance.stop()
-                    # If stop() returns a coroutine, run it to avoid "never awaited" warning
-                    if asyncio.iscoroutine(stop_result):
-                        try:
-                            asyncio.run(stop_result)
-                        except RuntimeError:
-                            pass  # e.g. cannot call run() from running loop; skip
-                pass
-            except Exception:
-                pass  # Ignore errors during cleanup
-            del ThreadSafeSingleton._instances[singleton_cls]
+        if singleton_cls not in ThreadSafeSingleton._instances:
+            continue
+        instance = ThreadSafeSingleton._instances[singleton_cls]
+        try:
+            _stop_singleton_instance(instance)
+        except Exception:
+            pass  # Ignore errors during cleanup
+        del ThreadSafeSingleton._instances[singleton_cls]
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +72,6 @@ def mock_metrics_collector():
     collector._inactive_instance_metrics_aggregate = []
     collector._instance_metrics_cached = {}
     collector._last_metrics = None
-    collector._last_instance_metrics = None
     collector._lock = MagicMock()
     collector._stop_event = MagicMock()
     return collector
@@ -80,6 +87,8 @@ class MockResponse:
 
 
 class TestMetrics:
+    # pytest 使用 setup_method 而非 __init__ 初始化用例属性
+    # pylint: disable=attribute-defined-outside-init
     def setup_method(self):
         # Create config for testing
         self.config = CoordinatorConfig()
@@ -123,7 +132,7 @@ class TestMetrics:
         script_path = os.path.abspath(__file__)
         script_dir = os.path.dirname(script_path)
         data_path = os.path.join(script_dir, "metrics_example.txt")
-        with open(data_path, "r") as f:
+        with open(data_path, "r", encoding="utf-8") as f:
             return f.read().strip()
 
     def clean_instances(self):
@@ -140,7 +149,6 @@ class TestMetrics:
         collector._inactive_instance_metrics_aggregate = []
         collector._instance_metrics_cached = {}
         collector._last_metrics = None
-        collector._last_instance_metrics = None
         collector._reuse_time = 0.001  # Very short interval for testing
         collector._lock = threading.Lock()
         collector._stop_event = threading.Event()
@@ -411,7 +419,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         # check function: empty collects
         collects = {}
         metric_collector._aggregate_metrics_by_instance(collects)
-        assert collects == {}
+        assert not collects
         assert len(metric_collector._instance_metrics_cached) == 0
 
         # check function: cache is empty
@@ -665,7 +673,7 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         # check function: empty collects
         collects = {}
         metric_collector._aggregate_metrics_by_instance(collects)
-        assert collects == {}
+        assert not collects
         assert len(metric_collector._instance_metrics_cached) == 0
 
         # check function: cache is empty
@@ -761,7 +769,7 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         for port in [8004, 8005]:
             assert requests.get(f"http://localhost:{port}/metrics").status_code == 404
 
-    def test_prometheus_metrics_handler(self, mock_metrics_collector):
+    def test_prometheus_metrics_handler(self, mock_metrics_collector):  # pylint: disable=redefined-outer-name
         mock_metrics_collector._last_metrics = None
         mock_metrics_collector.get_metrics.return_value = ""
 
@@ -769,7 +777,6 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         assert result == ""
 
         mock_metrics_collector._last_metrics = "# HELP test metric\ntest_metric 1.0\n"
-        mock_metrics_collector._last_instance_metrics = {0: []}
         mock_metrics_collector.get_metrics.return_value = "# HELP test metric\ntest_metric 1.0\n"
 
         result = mock_metrics_collector.get_metrics(metrics_type="full")
@@ -781,9 +788,8 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             return MockResponse(self.metrics_template, 200)
         return MockResponse(None, 404)
 
-    def test_prometheus_metrics_handler_abnormal(self, mock_metrics_collector):
+    def test_prometheus_metrics_handler_abnormal(self, mock_metrics_collector):  # pylint: disable=redefined-outer-name
         mock_metrics_collector._last_metrics = ""
-        mock_metrics_collector._last_instance_metrics = {}
         mock_metrics_collector.get_metrics.return_value = ""
 
         result = mock_metrics_collector.get_metrics(metrics_type="full")
@@ -852,7 +858,7 @@ def test_inject_role_label_to_single_metric():
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_format_instance_metrics_basic():
+def test_generate_instance_metrics_basic():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
@@ -864,10 +870,9 @@ def test_format_instance_metrics_basic():
     metric.label = ['vllm:num_requests_running{model="qwen"}']
     metric.value = [5.0]
 
-    collector._last_instance_metrics = {0: [metric]}
-    collector._last_instance_roles = {0: "prefill"}
+    collects = {0: {"role": "prefill", "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}}}
 
-    result = collector._format_instance_metrics()
+    result = collector._generate_instance_metrics(collects)
 
     assert "instance_id" in result
     assert "prefill" in result
@@ -876,21 +881,18 @@ def test_format_instance_metrics_basic():
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_format_instance_metrics_empty():
+def test_generate_instance_metrics_empty():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
 
-    collector._last_instance_metrics = {}
-    collector._last_instance_roles = {}
-
-    result = collector._format_instance_metrics()
+    result = collector._generate_instance_metrics({})
     assert result == ""
     _cleanup_singletons()
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_format_instance_metrics_unknown_role():
+def test_generate_instance_metrics_unknown_role():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
@@ -902,10 +904,9 @@ def test_format_instance_metrics_unknown_role():
     metric.label = ['vllm:num_requests_running{model="qwen"}']
     metric.value = [1.0]
 
-    collector._last_instance_metrics = {99: [metric]}
-    collector._last_instance_roles = {}
+    collects = {99: {"endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}}}
 
-    result = collector._format_instance_metrics()
+    result = collector._generate_instance_metrics(collects)
 
     assert 'role="unknown"' in result
     assert 'instance_id="99"' in result
@@ -918,7 +919,7 @@ def test_format_instance_metrics_unknown_role():
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_build_role_metrics_prefill_and_decode():
+def test_generate_role_metrics_prefill_and_decode():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
@@ -937,10 +938,12 @@ def test_build_role_metrics_prefill_and_decode():
     metric_b.label = ['vllm:num_requests_running{model="qwen"}']
     metric_b.value = [3.0]
 
-    collector._last_instance_metrics = {0: [metric_a], 1: [metric_b]}
-    collector._last_instance_roles = {0: "prefill", 1: "decode"}
+    collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric_a], "pod_ip": "10.0.0.1"}}},
+        1: {"role": "decode", "endpoints": {0: {"metrics": [metric_b], "pod_ip": "10.0.0.2"}}},
+    }
 
-    result = collector._build_role_metrics()
+    result = collector._generate_role_metrics(collects)
 
     assert "prefill" in result
     assert "decode" in result
@@ -950,7 +953,7 @@ def test_build_role_metrics_prefill_and_decode():
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_build_role_metrics_single_role():
+def test_generate_role_metrics_single_role():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
@@ -962,10 +965,9 @@ def test_build_role_metrics_single_role():
     metric.label = ['vllm:num_requests_running{model="qwen"}']
     metric.value = [2.0]
 
-    collector._last_instance_metrics = {0: [metric]}
-    collector._last_instance_roles = {0: "prefill"}
+    collects = {0: {"role": "prefill", "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}}}
 
-    result = collector._build_role_metrics()
+    result = collector._generate_role_metrics(collects)
 
     assert "prefill" in result
     assert "decode" not in result
@@ -973,16 +975,13 @@ def test_build_role_metrics_single_role():
 
 
 @patch("threading.Thread.start", MagicMock())
-def test_build_role_metrics_empty():
+def test_generate_role_metrics_empty():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
 
-    collector._last_instance_metrics = {}
-    collector._last_instance_roles = {}
-
-    result = collector._build_role_metrics()
-    assert result == {}
+    result = collector._generate_role_metrics({})
+    assert not result
     _cleanup_singletons()
 
 
@@ -996,7 +995,18 @@ def test_get_metrics_full():
     _cleanup_singletons()
     config = CoordinatorConfig()
     collector = MetricsCollector(config)
-    collector._last_metrics = "# HELP test metric\ntest_metric 1.0"
+
+    metric = Metric()
+    metric.name = "test_metric"
+    metric.help = "test metric"
+    metric.type = MetricType.GAUGE
+    metric.label = ["test_metric"]
+    metric.value = [1.0]
+
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}},
+    }
+    collector._collects_version = 1
 
     result = collector.get_metrics(metrics_type="full")
     assert "test_metric" in result
@@ -1016,8 +1026,10 @@ def test_get_metrics_instance():
     metric.label = ['vllm:num_requests_running{model="qwen"}']
     metric.value = [5.0]
 
-    collector._last_instance_metrics = {0: [metric]}
-    collector._last_instance_roles = {0: "prefill"}
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}},
+    }
+    collector._collects_version = 1
 
     result = collector.get_metrics(metrics_type="instance")
     assert isinstance(result, str)
@@ -1038,8 +1050,10 @@ def test_get_metrics_role_all():
     metric.label = ['vllm:num_requests_running{model="qwen"}']
     metric.value = [5.0]
 
-    collector._last_instance_metrics = {0: [metric]}
-    collector._last_instance_roles = {0: "prefill"}
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}}},
+    }
+    collector._collects_version = 1
 
     result = collector.get_metrics(metrics_type="role")
     assert isinstance(result, str)
@@ -1067,11 +1081,241 @@ def test_get_metrics_role_filtered():
     metric_b.label = ['vllm:num_requests_running{model="qwen"}']
     metric_b.value = [3.0]
 
-    collector._last_instance_metrics = {0: [metric_a], 1: [metric_b]}
-    collector._last_instance_roles = {0: "prefill", 1: "decode"}
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric_a], "pod_ip": "10.0.0.1"}}},
+        1: {"role": "decode", "endpoints": {0: {"metrics": [metric_b], "pod_ip": "10.0.0.2"}}},
+    }
+    collector._collects_version = 1
 
     result = collector.get_metrics(metrics_type="role", role="prefill")
     assert isinstance(result, str)
     assert "prefill" in result
     assert "decode" not in result
+    _cleanup_singletons()
+
+
+# ---------------------------------------------------------------------------
+# Tests for new multilevel metrics functions
+# ---------------------------------------------------------------------------
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_prepend_dim_labels_no_braces():
+    assert (
+        MetricsCollector._prepend_dim_labels("process_start_time", 'dp_rank="0"') == 'process_start_time{dp_rank="0"}'
+    )
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_prepend_dim_labels_empty_braces():
+    assert MetricsCollector._prepend_dim_labels("foo{}", 'dp_rank="0"') == 'foo{dp_rank="0"}'
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_prepend_dim_labels_existing_labels():
+    assert MetricsCollector._prepend_dim_labels('vllm:x{model="q"}', 'dp_rank="0"') == 'vllm:x{dp_rank="0",model="q"}'
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_metric_value_str_normal():
+    assert MetricsCollector._metric_value_str(3.14) == "3.14"
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_metric_value_str_nan():
+    assert MetricsCollector._metric_value_str(float("nan")) == "Nan"
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_metric_value_str_inf():
+    assert MetricsCollector._metric_value_str(float("inf")) == "+Inf"
+    assert MetricsCollector._metric_value_str(float("-inf")) == "-Inf"
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_emit_metric_groups():
+    name_to_meta = {
+        "metric_b": {"help": "help_b", "type": "gauge", "lines": [(("k",), "metric_b{x=\"1\"} 2.0")]},
+        "metric_a": {"help": "help_a", "type": "counter", "lines": [(("k",), "metric_a{x=\"1\"} 1.0")]},
+    }
+    result = MetricsCollector._emit_metric_groups(name_to_meta)
+    lines = result.split("\n")
+    assert lines[0] == "# HELP metric_a help_a"
+    assert lines[1] == "# TYPE metric_a counter"
+    assert lines[3] == "# HELP metric_b help_b"
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_generate_dp_metrics():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collects = {
+        2: {
+            "role": "prefill",
+            "endpoints": {
+                0: {"metrics": [metric], "pod_ip": "192.168.1.1"},
+                1: {"metrics": [metric], "pod_ip": "192.168.1.1"},
+            },
+        },
+    }
+
+    result = collector._generate_dp_metrics(collects)
+    assert 'dp_rank="0"' in result
+    assert 'dp_rank="1"' in result
+    assert 'role="prefill"' in result
+    assert 'instance_id="2"' in result
+    assert 'pod_ip="192.168.1.1"' in result
+    assert "# HELP vllm:num_requests_running" in result
+    assert "# TYPE vllm:num_requests_running" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_generate_dp_metrics_empty():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    result = collector._generate_dp_metrics({})
+    assert result == ""
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_generate_node_metrics():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric_a = Metric()
+    metric_a.name = "vllm:num_requests_running"
+    metric_a.help = "Number of requests running."
+    metric_a.type = MetricType.GAUGE
+    metric_a.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_a.value = [5.0]
+
+    metric_b = Metric()
+    metric_b.name = "vllm:num_requests_running"
+    metric_b.help = "Number of requests running."
+    metric_b.type = MetricType.GAUGE
+    metric_b.label = ['vllm:num_requests_running{model="qwen"}']
+    metric_b.value = [3.0]
+
+    collects = {
+        0: {
+            "role": "prefill",
+            "endpoints": {
+                0: {"metrics": [metric_a], "pod_ip": "10.0.0.1"},
+                1: {"metrics": [metric_b], "pod_ip": "10.0.0.1"},
+            },
+        },
+    }
+
+    result = collector._generate_node_metrics(collects)
+    assert 'pod_ip="10.0.0.1"' in result
+    assert 'role="prefill"' in result
+    assert "# HELP vllm:num_requests_running" in result
+    assert "8.0" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_dp():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collector._last_collects = {
+        2: {
+            "role": "prefill",
+            "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    collector._collects_version = 1
+
+    result = collector.get_metrics(metrics_type="dp")
+    assert 'dp_rank="0"' in result
+    assert 'role="prefill"' in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_node():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric = Metric()
+    metric.name = "vllm:num_requests_running"
+    metric.help = "Number of requests running."
+    metric.type = MetricType.GAUGE
+    metric.label = ['vllm:num_requests_running{model="qwen"}']
+    metric.value = [5.0]
+
+    collector._last_collects = {
+        2: {
+            "role": "prefill",
+            "endpoints": {0: {"metrics": [metric], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    collector._collects_version = 1
+
+    result = collector.get_metrics(metrics_type="node")
+    assert 'pod_ip="10.0.0.1"' in result
+    assert 'role="prefill"' in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_get_metrics_cache_invalidation():
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    metric_v1 = Metric()
+    metric_v1.name = "test_metric"
+    metric_v1.help = "test"
+    metric_v1.type = MetricType.GAUGE
+    metric_v1.label = ["test_metric"]
+    metric_v1.value = [1.0]
+
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric_v1], "pod_ip": "10.0.0.1"}}},
+    }
+    collector._collects_version = 1
+
+    result_v1 = collector.get_metrics(metrics_type="full")
+    assert "1.0" in result_v1
+
+    metric_v2 = Metric()
+    metric_v2.name = "test_metric"
+    metric_v2.help = "test"
+    metric_v2.type = MetricType.GAUGE
+    metric_v2.label = ["test_metric"]
+    metric_v2.value = [99.0]
+
+    collector._last_collects = {
+        0: {"role": "prefill", "endpoints": {0: {"metrics": [metric_v2], "pod_ip": "10.0.0.1"}}},
+    }
+    collector._collects_version = 2
+
+    result_v2 = collector.get_metrics(metrics_type="full")
+    assert "99.0" in result_v2
+    assert result_v1 != result_v2
     _cleanup_singletons()
