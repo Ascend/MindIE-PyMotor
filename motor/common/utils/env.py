@@ -43,6 +43,20 @@ class Env:
         return os.getenv("COORDINATOR_SERVICE", "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local")
 
     @property
+    def coordinator_infer_service(self):
+        return os.getenv(
+            "COORDINATOR_INFER_SERVICE",
+            os.getenv("COORDINATOR_SERVICE", "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local"),
+        )
+
+    @property
+    def coordinator_obs_service(self):
+        return os.getenv(
+            "COORDINATOR_OBS_SERVICE",
+            os.getenv("COORDINATOR_SERVICE", "mindie-motor-coordinator-service.mindie-motor.svc.cluster.local"),
+        )
+
+    @property
     def controller_service(self):
         return os.getenv("CONTROLLER_SERVICE", "mindie-motor-controller-service.mindie-motor.svc.cluster.local")
 

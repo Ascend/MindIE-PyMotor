@@ -16,6 +16,8 @@ from lib.utils import logger, safe_exec_cmd, load_yaml
 
 g_controller_service = "mindie-motor-controller-service"
 g_coordinator_service = "mindie-motor-coordinator-mgmt"
+g_coordinator_infer_service = "mindie-motor-coordinator-infer"
+g_coordinator_obs_service = "mindie-motor-coordinator-obs"
 g_kv_pool_service = "kvp-master"
 g_kv_conductor_service = "kv-conductor"
 g_kv_pool_enabled = False
@@ -41,6 +43,16 @@ def set_controller_service(service_name):
 def set_coordinator_service(service_name):
     global g_coordinator_service
     g_coordinator_service = service_name
+
+
+def set_coordinator_infer_service(service_name):
+    global g_coordinator_infer_service
+    g_coordinator_infer_service = service_name
+
+
+def set_coordinator_obs_service(service_name):
+    global g_coordinator_obs_service
+    g_coordinator_obs_service = service_name
 
 
 def set_kv_pool_service(service_name):
@@ -106,25 +118,24 @@ def get_deploy_mode_from_config(deploy_config):
     return mode
 
 
-def _pick_mgmt_service(docs: list[dict]):
-    """Pick the management Service (port 1026) from a list of YAML docs.
+def _pick_coordinator_services(docs: list[dict]):
+    """Return a dict mapping port->Service for all coordinator Services.
 
-    When the coordinator template defines multiple Services (infer, mgmt, obs),
-    the first Service in document order may not be the management one.
-    Select by port (1026) so the COORDINATOR_SERVICE FQDN resolves to the
-    correct ClusterIP that serves /readiness and /instances/refresh.
-    Falls back to the first Service if none exposes port 1026.
+    The coordinator template defines three separate Services:
+      - mindie-motor-coordinator-infer (NodePort, port 1025)
+      - mindie-motor-coordinator-mgmt  (ClusterIP, port 1026)
+      - mindie-motor-coordinator-obs   (NodePort, port 1027)
+    Each is identified by its port for robust matching.
     """
+    result = {}
     for doc in docs:
         if doc.get(C.KIND) == C.SERVICE:
             for port_entry in doc.get("spec", {}).get("ports", []):
-                if port_entry.get("port") == 1026 or port_entry.get("targetPort") == 1026:
-                    return doc
-    # Fallback: first Service (backward-compatible with single-service templates)
-    for doc in docs:
-        if doc.get(C.KIND) == C.SERVICE:
-            return doc
-    return None
+                port = port_entry.get("port")
+                if port in (1025, 1026, 1027):
+                    result[port] = doc
+                    break
+    return result
 
 
 def init_service_domain_name(paths, deploy_config):
@@ -140,7 +151,7 @@ def init_service_domain_name(paths, deploy_config):
             controller_service_data = doc
             break
 
-    coordinator_service_data = _pick_mgmt_service(coordinator_data)
+    coord_services = _pick_coordinator_services(coordinator_data)
 
     kv_pull_service_data = None
     for doc in kv_pool_data:
@@ -162,8 +173,18 @@ def init_service_domain_name(paths, deploy_config):
 
     controller_name = controller_service_data[C.METADATA][C.NAME]
     set_controller_service(f"{controller_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
-    coordinator_name = coordinator_service_data[C.METADATA][C.NAME]
-    set_coordinator_service(f"{coordinator_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
+
+    ns = deploy_config[C.CONFIG_JOB_ID]
+    infer_svc = coord_services.get(1025)
+    mgmt_svc = coord_services.get(1026)
+    obs_svc = coord_services.get(1027)
+    if infer_svc:
+        set_coordinator_infer_service(f"{infer_svc[C.METADATA][C.NAME]}.{ns}.svc.cluster.local")
+    if mgmt_svc:
+        set_coordinator_service(f"{mgmt_svc[C.METADATA][C.NAME]}.{ns}.svc.cluster.local")
+    if obs_svc:
+        set_coordinator_obs_service(f"{obs_svc[C.METADATA][C.NAME]}.{ns}.svc.cluster.local")
+
     kv_pool_name = kv_pull_service_data[C.METADATA][C.NAME]
     set_kv_pool_service(f"{kv_pool_name}.{deploy_config[C.CONFIG_JOB_ID]}.svc.cluster.local")
     kv_conductor_name = kv_conductor_service_data[C.METADATA][C.NAME]

@@ -15,9 +15,9 @@ from lib.utils import (
 )
 from lib.generator import k8s_utils
 from lib.generator.k8s_utils import (
-    set_controller_service, set_coordinator_service, set_kv_pool_service,
-    set_kv_conductor_service, set_rbac_namespace,
-    extract_rbac_resources, apply_sp_block_annotation
+    set_controller_service, set_coordinator_service, set_coordinator_infer_service,
+    set_coordinator_obs_service, set_kv_pool_service, set_kv_conductor_service,
+    set_rbac_namespace, extract_rbac_resources, apply_sp_block_annotation
 )
 from lib.generator.engine import (
     build_engine_env_items, set_container_npu, apply_node_selector_by_hardware, set_weight_mount,
@@ -257,7 +257,7 @@ def generate_yaml_infer_service_set(input_yaml, output_file, user_config):
 
 def init_infer_service_domain_name(infer_service_template_yaml, deploy_config):
     """
-    Set g_controller_service and g_coordinator_service for CRD InferServiceSet mode.
+    Set g_controller_service and g_coordinator_*_service for CRD InferServiceSet mode.
     CRD creates services with naming: {service_name}-{infer_service_set_name}-0-{role_name}
     """
     all_docs = load_yaml(infer_service_template_yaml, False)
@@ -267,37 +267,47 @@ def init_infer_service_domain_name(infer_service_template_yaml, deploy_config):
     infer_name = infer_doc.get(C.METADATA, {}).get(C.NAME, "mindie-server")
     namespace = deploy_config[C.CONFIG_JOB_ID]
 
+    def _build_fqdn(service, role_name_val):
+        service_name = service.get(C.NAME, "")
+        full_service_name = f"{service_name}-{infer_name}-0-{role_name_val}"
+        return f"{full_service_name}.{namespace}.svc.cluster.local"
+
     def get_service_fqdn_for_role(role_name):
+        """Return the first service's FQDN for non-coordinator roles."""
         role = get_infer_role(infer_doc, role_name)
         if not role:
             return None
         services = role.get(C.SERVICES, [])
         if not services:
             return None
-        # Pick the management service (port 1026) so the FQDN resolves to the
-        # correct ClusterIP for /readiness and /instances/refresh, even when
-        # infer or obs Services appear first in the role's services list.
-        service = None
+        service = services[0]
+        role_name_val = role.get(C.NAME, role_name)
+        return _build_fqdn(service, role_name_val)
+
+    def get_coordinator_fqdns():
+        """Return a dict of port->FQDN for the coordinator role's three services."""
+        role = get_infer_role(infer_doc, C.COORDINATOR)
+        if not role:
+            return {}
+        services = role.get(C.SERVICES, [])
+        role_name_val = role.get(C.NAME, C.COORDINATOR)
+        result = {}
         for svc in services:
             for port_entry in svc.get("spec", {}).get("ports", []):
-                if port_entry.get("port") == 1026 or port_entry.get("targetPort") == 1026:
-                    service = svc
+                port = port_entry.get("port")
+                if port in (1025, 1026, 1027):
+                    result[port] = _build_fqdn(svc, role_name_val)
                     break
-            if service is not None:
-                break
-        if service is None:
-            service = services[0]
-        service_name = service.get(C.NAME, "")
-        role_name_val = role.get(C.NAME, role_name)
-        full_service_name = f"{service_name}-{infer_name}-0-{role_name_val}"
-        return f"{full_service_name}.{namespace}.svc.cluster.local"
+        return result
 
     controller_service = get_service_fqdn_for_role(C.CONTROLLER)
-    coordinator_service = get_service_fqdn_for_role(C.COORDINATOR)
-    if not controller_service or not coordinator_service:
+    coord_fqdns = get_coordinator_fqdns()
+    if not controller_service or not coord_fqdns:
         raise ValueError("Controller or coordinator role not found in infer_service_template.yaml")
     set_controller_service(controller_service)
-    set_coordinator_service(coordinator_service)
+    set_coordinator_service(coord_fqdns.get(1026, ""))
+    set_coordinator_infer_service(coord_fqdns.get(1025, ""))
+    set_coordinator_obs_service(coord_fqdns.get(1027, ""))
 
     kv_pool_service = get_service_fqdn_for_role(C.ROLE_KV_POOL)
     if kv_pool_service:

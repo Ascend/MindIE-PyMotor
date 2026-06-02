@@ -100,5 +100,5 @@ class CoordinatorApiClient:
     def _generate_obs_client_args(cls) -> dict[str, str]:
         tls_config = cls.controller_config.mgmt_tls_config
         api_config = cls.coordinator_config.api_config
-        address = f"{api_config.coordinator_api_dns}:{api_config.coordinator_obs_port}"
+        address = f"{api_config.coordinator_api_obs_dns}:{api_config.coordinator_obs_port}"
         return {"address": f"{address}", "tls_config": tls_config}

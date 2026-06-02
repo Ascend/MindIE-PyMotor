@@ -244,6 +244,10 @@ class ApiConfig:
     # coordinator API configuration
     coordinator_api_host: str = field(default_factory=lambda: Env.pod_ip or '127.0.0.1')
     coordinator_api_dns: str = field(default_factory=lambda: Env.coordinator_service or '127.0.0.1')
+    coordinator_api_infer_dns: str = field(default_factory=lambda:
+        Env.coordinator_infer_service or Env.coordinator_service or '127.0.0.1')
+    coordinator_api_obs_dns: str = field(default_factory=lambda:
+        Env.coordinator_obs_service or Env.coordinator_service or '127.0.0.1')
     coordinator_api_infer_port: int = 1025
     coordinator_api_mgmt_port: int = 1026
     coordinator_obs_port: int = 1027

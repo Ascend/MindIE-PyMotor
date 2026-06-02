@@ -35,7 +35,9 @@ def build_engine_env_items(role, deploy_config, job_name, include_kv_pool=False)
         {C.NAME: C.ENV_ROLE, C.VALUE: role},
         {C.NAME: C.ENV_JOB_NAME, C.VALUE: job_name},
         {C.NAME: C.ENV_CONTROLLER_SERVICE, C.VALUE: k8s_utils.g_controller_service},
-        {C.NAME: C.ENV_COORDINATOR_SERVICE, C.VALUE: k8s_utils.g_coordinator_service}
+        {C.NAME: C.ENV_COORDINATOR_SERVICE, C.VALUE: k8s_utils.g_coordinator_service},
+        {C.NAME: C.ENV_COORDINATOR_INFER_SERVICE, C.VALUE: k8s_utils.g_coordinator_infer_service},
+        {C.NAME: C.ENV_COORDINATOR_OBS_SERVICE, C.VALUE: k8s_utils.g_coordinator_obs_service}
     ]
     if include_kv_pool and k8s_utils.g_kv_pool_enabled:
         env_items.append({C.NAME: C.ENV_KVP_MASTER_SERVICE, C.VALUE: k8s_utils.g_kv_pool_service})
