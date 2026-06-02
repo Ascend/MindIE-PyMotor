@@ -97,10 +97,11 @@ def test_model_config_from_dict():
 
 
 def test_engine_config_from_dict():
-    """Test EngineConfig.from_dict"""
+    """Test EngineConfig.from_dict normalizes hyphen keys to underscores."""
     data = {"max_model_len": 2048, "enforce-eager": True}
     config = EngineConfig.from_dict(data)
-    assert config.configs == data
+    assert config.configs == {"max_model_len": 2048, "enforce_eager": True}
+    assert config.get("enforce_eager") is True
 
 
 def test_engine_config_get():

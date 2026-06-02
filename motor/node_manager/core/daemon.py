@@ -83,6 +83,7 @@ class Daemon(ThreadSafeSingleton):
         endpoints_info: list[Endpoint],
         instance_id: int,
         master_dp_ip: str,
+        d2d_peer_ips: list[str] | None = None,
         node_rank: int = 0,
     ):
         """
@@ -112,21 +113,33 @@ class Daemon(ThreadSafeSingleton):
 
                 cmd = [
                     "engine_server",
-                    "--dp-rank", str(endpoint.id),
-                    "--instance-id", str(instance_id),
-                    "--role", self._to_engine_role(pd_role_info),
-                    "--host", str(endpoint.ip),
-                    "--port", str(int(endpoint.business_port)),
-                    "--mgmt-port", str(int(endpoint.mgmt_port)),
-                    "--master-dp-ip", master_dp_ip,
-                    "--node-rank", str(node_rank),
-                    "--config-path", str(Env.user_config_path)
+                    "--dp-rank",
+                    str(endpoint.id),
+                    "--instance-id",
+                    str(instance_id),
+                    "--role",
+                    self._to_engine_role(pd_role_info),
+                    "--host",
+                    str(endpoint.ip),
+                    "--port",
+                    str(int(endpoint.business_port)),
+                    "--mgmt-port",
+                    str(int(endpoint.mgmt_port)),
+                    "--master-dp-ip",
+                    master_dp_ip,
+                    "--node-rank",
+                    str(node_rank),
+                    "--config-path",
+                    str(Env.user_config_path),
                 ]
                 if self.single_container_flag:
                     cmd.extend(["--kv-port", str(self.kv_port)])
                     cmd.extend(["--dp-rpc-port", str(self.dp_rpc_port)])
                     if self.lookup_rpc_port is not None:
                         cmd.extend(["--lookup-rpc-port", str(self.lookup_rpc_port)])
+                if d2d_peer_ips is not None:
+                    cmd.extend(["--d2d-peer-ips", ",".join(d2d_peer_ips)])
+                    logger.info("D2D peer IPs: %s", d2d_peer_ips)
                 logger.info(" ".join(cmd))
                 process = subprocess.Popen(cmd, shell=False, env=env)
                 if process.poll() is not None:
@@ -158,13 +171,10 @@ class Daemon(ThreadSafeSingleton):
             Comma-separated device IDs string, e.g., "0,1,2,3"
         """
         local_world_size = self.parallel_config.local_world_size
-        start_device_id = (index * local_world_size % device_size)
+        start_device_id = index * local_world_size % device_size
         end_device_id = start_device_id + local_world_size
         if end_device_id > device_size:
-            device_ids = (
-                list(range(start_device_id, device_size))
-                + list(range(0, end_device_id - device_size))
-            )
+            device_ids = list(range(start_device_id, device_size)) + list(range(0, end_device_id - device_size))
         else:
             device_ids = list(range(start_device_id, end_device_id))
         if self.single_container_flag:

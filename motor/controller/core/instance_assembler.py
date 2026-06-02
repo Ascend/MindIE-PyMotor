@@ -13,11 +13,23 @@ from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
-from motor.common.resources import RegisterMsg, StartCmdMsg, ReregisterMsg, Instance, Endpoint, DeviceInfo, Ranktable
+from motor.common.resources import (
+    InsStatus,
+    RegisterMsg,
+    StartCmdMsg,
+    ReregisterMsg,
+    Instance,
+    Endpoint,
+    DeviceInfo,
+    Ranktable,
+    PDRole,
+)
 from motor.common.etcd.etcd_client import EtcdClient
 from motor.common.etcd.persistent_state import PersistentState
 from motor.common.utils.singleton import ThreadSafeSingleton
+from motor.common.utils.env import Env
 from motor.config.controller import ControllerConfig
+from motor.config.resolver import BaseConfigResolver
 from motor.controller.api_client.node_manager_api_client import NodeManagerApiClient
 from motor.controller.core import InstanceManager
 from motor.common.logger import get_logger
@@ -76,6 +88,9 @@ class InstanceAssembler(ThreadSafeSingleton):
         self.config_lock = threading.RLock()
 
         # Extract required config fields
+        self._user_config_path = config.config_path or Env.user_config_path
+        self._d2d_enabled_cache: dict[PDRole, bool] = {}
+
         with self.config_lock:
             self.etcd_config = config.etcd_config
             self.etcd_tls_config = config.etcd_tls_config
@@ -149,6 +164,8 @@ class InstanceAssembler(ThreadSafeSingleton):
     def update_config(self, config: ControllerConfig) -> None:
         """Update configuration for the instance assembler"""
         with self.config_lock:
+            self._user_config_path = config.config_path or Env.user_config_path
+            self._d2d_enabled_cache.clear()
             # Update config fields
             self.etcd_config = config.etcd_config
             self.etcd_tls_config = config.etcd_tls_config
@@ -543,9 +560,21 @@ class InstanceAssembler(ThreadSafeSingleton):
             logger.error("Failed to find master DP address for instance %s", metadata.instance.job_name)
             return False
 
+        d2d_peer_ips = (
+            self._collect_d2d_peer_ips(metadata) if self._is_d2d_enabled_for_role(metadata.instance.role) else None
+        )
+        if not d2d_peer_ips:
+            d2d_peer_ips = None
+        if d2d_peer_ips:
+            logger.info(
+                "Collected %d D2D peer IPs for instance %s: %s",
+                len(d2d_peer_ips),
+                metadata.instance.job_name,
+                d2d_peer_ips,
+            )
+
         # node_rank within PCP group = registration_index % nnodes.
         # Re-registration not handled here — _start_commmand_sender skips re-registered instances.
-        node_managers = metadata.instance.get_node_managers()
         nnodes = metadata.nnodes
         for rank, node_mgr in enumerate(node_managers):
             endpoints = metadata.instance.get_endpoints(node_mgr.pod_ip)
@@ -559,11 +588,87 @@ class InstanceAssembler(ThreadSafeSingleton):
                 endpoints=[endpoint for endpoint in endpoints.values()],
                 master_dp_ip=master_dp_ip,
                 ranktable=metadata.ranktable,
+                d2d_peer_ips=d2d_peer_ips,
                 node_rank=rank % nnodes if nnodes > 1 else rank,
             )
 
             is_succeed = NodeManagerApiClient.send_start_command(node_mgr, start_cmd_msg) and is_succeed
         return is_succeed
+
+    _D2D_SOURCE_SENTINEL = "auto"
+
+    _ROLE_TO_SECTION_KEY = {
+        PDRole.ROLE_E: "motor_engine_encode_config",
+        PDRole.ROLE_P: "motor_engine_prefill_config",
+        PDRole.ROLE_D: "motor_engine_decode_config",
+        PDRole.ROLE_U: "motor_engine_union_config",
+    }
+
+    def _is_d2d_enabled_for_role(self, role: PDRole) -> bool:
+        """Check if D2D is enabled by reading engine_config via resolver.
+
+        Result is cached per role since the engine config does not change
+        across individual _send_start_command calls.
+        """
+        if role in self._d2d_enabled_cache:
+            cached = self._d2d_enabled_cache[role]
+            logger.info("D2D for role %s: using cached value %s", role, cached)
+            return cached
+        config_path = self._user_config_path
+        if not config_path:
+            logger.warning("D2D check skipped for role %s: no user_config_path", role)
+            enabled = False
+        else:
+            section_key = self._ROLE_TO_SECTION_KEY.get(role, "motor_engine_union_config")
+            logger.info("Checking D2D for role=%s section=%s config=%s", role, section_key, config_path)
+            try:
+                resolver = BaseConfigResolver.load_section(config_path, section_key)
+                d2d = resolver.get_d2d_config()
+                if d2d is None:
+                    logger.info("D2D not enabled for role %s: model_loader_extra_config not found or invalid", role)
+                    enabled = False
+                elif d2d.get("source") != self._D2D_SOURCE_SENTINEL:
+                    logger.info(
+                        "D2D not enabled for role %s: source=%s (expected '%s')",
+                        role,
+                        d2d.get("source"),
+                        self._D2D_SOURCE_SENTINEL,
+                    )
+                    enabled = False
+                elif d2d.get("listen_port") is None:
+                    logger.warning(
+                        "D2D SOURCE is 'auto' but LISTEN_PORT is not configured, D2D disabled for role %s", role
+                    )
+                    enabled = False
+                else:
+                    logger.info("D2D enabled for role %s: listen_port=%s", role, d2d.get("listen_port"))
+                    enabled = True
+            except Exception as e:
+                logger.warning("Failed to check D2D status for role %s: %s", role, e)
+                enabled = False
+        self._d2d_enabled_cache[role] = enabled
+        return enabled
+
+    def _collect_d2d_peer_ips(self, metadata: AssembleInstanceMetadata) -> list[str]:
+        """Collect IPs of peer instances with the same role for D2D weight transfer.
+
+        Queries ACTIVE instances from InstanceManager only. A peer must be inference-ready
+        (ElasticServer serving weights) before it is used as a D2D source.
+        Self is excluded by job_name.
+
+        Operational note: scale followers after seed instances reach ACTIVE, otherwise
+        no peer IPs are collected and the new instance enters seed mode.
+        """
+        peer_ips = []
+        role = metadata.instance.role
+        own_job_name = metadata.instance.job_name
+
+        for inst in InstanceManager().get_instances({InsStatus.ACTIVE}):
+            if inst.role == role and inst.job_name != own_job_name:
+                for ep in inst.get_all_endpoints():
+                    peer_ips.append(ep.ip)
+
+        return list(set(peer_ips))
 
     def _instances_assembler_loop(self) -> None:
         # Check all instances in assembling, if one instance is ready,

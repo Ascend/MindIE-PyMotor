@@ -17,7 +17,7 @@ from typing import Any
 
 from motor.common.logger import get_logger
 from motor.config.config_utils import _update_engine_server_tls_config
-from motor.config.resolver import BaseConfigResolver, ConfigResolver
+from motor.config.resolver import ConfigResolver, normalize_keys
 from motor.config.tls_config import TLSConfig
 from motor.engine_server.constants import constants
 from motor.engine_server.utils.ip import ip_valid_check, port_valid_check
@@ -40,6 +40,7 @@ DECODE_PARALLEL_CONFIG_KEY = "decode_parallel_config"
 @dataclass
 class ParallelConfig:
     """Configuration for parallel processing (both prefill and decode)"""
+
     dp_size: int = field(default=1)
     tp_size: int = field(default=1)
     pp_size: int = field(default=1)
@@ -64,6 +65,7 @@ class ParallelConfig:
 @dataclass
 class ModelConfig:
     """Configuration for the model itself"""
+
     model_name: str
     model_path: str
     npu_mem_utils: float
@@ -79,19 +81,20 @@ class ModelConfig:
             npu_mem_utils=data["npu_mem_utils"],
             encode_parallel_config=ParallelConfig.from_dict(data.get(ENCODE_PARALLEL_CONFIG_KEY, {})),
             prefill_parallel_config=ParallelConfig.from_dict(data[PREFILL_PARALLEL_CONFIG_KEY]),
-            decode_parallel_config=ParallelConfig.from_dict(data[DECODE_PARALLEL_CONFIG_KEY])
+            decode_parallel_config=ParallelConfig.from_dict(data[DECODE_PARALLEL_CONFIG_KEY]),
         )
 
 
 @dataclass
 class EngineConfig:
     """Configuration for the engine with dynamic key-value pairs"""
+
     configs: dict[str, Any]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EngineConfig":
         """Parse EngineConfig from a dictionary (stores dynamic key-value pairs directly)"""
-        return cls(configs=data)
+        return cls(configs=normalize_keys(data))
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.configs.get(key, default)
@@ -103,6 +106,7 @@ class EngineConfig:
 @dataclass
 class HealthCheckConfig:
     """Configuration for health check"""
+
     health_collector_timeout: int = 2
     npu_usage_threshold: int = 3
     enable_virtual_inference: bool = False
@@ -116,6 +120,7 @@ class HealthCheckConfig:
 @dataclass
 class DeployConfig:
     """Root configuration class representing the entire JSON structure"""
+
     engine_type: str
     model_config: ModelConfig
     engine_config: EngineConfig
@@ -135,10 +140,10 @@ class DeployConfig:
             raw_data = json.load(f)
         data = raw_data
         if isinstance(raw_data, dict) and (
-                MOTOR_ENGINE_ENCODE_CONFIG_KEY in raw_data
-                or MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
-                or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
-                or MOTOR_ENGINE_UNION_CONFIG_KEY in raw_data
+            MOTOR_ENGINE_ENCODE_CONFIG_KEY in raw_data
+            or MOTOR_ENGINE_PREFILL_CONFIG_KEY in raw_data
+            or MOTOR_ENGINE_DECODE_CONFIG_KEY in raw_data
+            or MOTOR_ENGINE_UNION_CONFIG_KEY in raw_data
         ):
             key_map = {
                 "encode": MOTOR_ENGINE_ENCODE_CONFIG_KEY,
@@ -170,13 +175,19 @@ class DeployConfig:
 
                 # encode section is optional — only for EPD architecture
                 encode_section = raw_data.get(MOTOR_ENGINE_ENCODE_CONFIG_KEY)
-                encode_resolver = ConfigResolver(encode_section) if (isinstance(encode_section, dict) and encode_section.get("engine_type")) else None
+                encode_resolver = (
+                    ConfigResolver(encode_section)
+                    if (isinstance(encode_section, dict) and encode_section.get("engine_type"))
+                    else None
+                )
 
             model_config = ModelConfig(
                 model_name=resolver.get_model_name(""),
                 model_path=resolver.get_model_path(""),
                 npu_mem_utils=resolver.get_npu_mem_utils(0.9),
-                encode_parallel_config=ParallelConfig(**encode_resolver.get_parallel_config()) if encode_resolver else ParallelConfig(),
+                encode_parallel_config=ParallelConfig(**encode_resolver.get_parallel_config())
+                if encode_resolver
+                else ParallelConfig(),
                 prefill_parallel_config=ParallelConfig(**prefill_resolver.get_parallel_config()),
                 decode_parallel_config=ParallelConfig(**decode_resolver.get_parallel_config()),
             )
@@ -192,7 +203,7 @@ class DeployConfig:
             engine_config=EngineConfig.from_dict(data.get("engine_config", {})),
             mgmt_tls_config=TLSConfig.from_dict(mgmt_tls_config) if mgmt_tls_config else None,
             infer_tls_config=TLSConfig.from_dict(infer_tls_config) if infer_tls_config else None,
-            health_check_config=HealthCheckConfig.from_dict(data.get("health_check_config", {}))
+            health_check_config=HealthCheckConfig.from_dict(data.get("health_check_config", {})),
         )
 
     def get_parallel_config(self, role: str = "union") -> ParallelConfig:
@@ -229,35 +240,30 @@ class EndpointConfig:
     dp_rank: int = 0
     node_rank: int = 0
     config_path: str | None = None
+    d2d_peer_ips: str | None = None
     deploy_config: DeployConfig = None
 
     @classmethod
     def parse_cli_args(cls) -> argparse.Namespace:
         parser = argparse.ArgumentParser(description="EngineServer - Universal Inference Engine Service")
-        parser.add_argument("--host",
-                            help="EngineServer endpoint host")
-        parser.add_argument("--role",
-                            help="PD separate role, prefill/decode/union")
-        parser.add_argument("--kv-port", type=int,
-                            help="kv port")
-        parser.add_argument("--lookup-rpc-port", type=int,
-                            help="lookup rpc port")
-        parser.add_argument("--master-dp-ip", type=str,
-                            help="Master DP ip for distributed setup")
-        parser.add_argument("--dp-rpc-port", type=int,
-                            help="dp rpc port")
-        parser.add_argument("--port", type=int,
-                            help="EngineServer business interface port")
-        parser.add_argument("--mgmt-port", type=int, dest="mgmt_port",
-                            help="EngineServer management interface port")
-        parser.add_argument("--instance-id", type=int, default=0,
-                            help="Engine instance id")
-        parser.add_argument("--dp-rank", type=int, default=0,
-                            help="DP parallel rank")
-        parser.add_argument("--node-rank", type=int, default=0,
-                            help="PCP node rank (assigned by Motor Controller)")
-        parser.add_argument("--config-path",
-                            help="Path to engine-specific configuration file (JSON format)")
+        parser.add_argument("--host", help="EngineServer endpoint host")
+        parser.add_argument("--role", help="PD separate role, prefill/decode/union")
+        parser.add_argument("--kv-port", type=int, help="kv port")
+        parser.add_argument("--lookup-rpc-port", type=int, help="lookup rpc port")
+        parser.add_argument("--master-dp-ip", type=str, help="Master DP ip for distributed setup")
+        parser.add_argument("--dp-rpc-port", type=int, help="dp rpc port")
+        parser.add_argument("--port", type=int, help="EngineServer business interface port")
+        parser.add_argument("--mgmt-port", type=int, dest="mgmt_port", help="EngineServer management interface port")
+        parser.add_argument("--instance-id", type=int, default=0, help="Engine instance id")
+        parser.add_argument("--dp-rank", type=int, default=0, help="DP parallel rank")
+        parser.add_argument("--node-rank", type=int, default=0, help="PCP node rank (assigned by Motor Controller)")
+        parser.add_argument("--config-path", help="Path to engine-specific configuration file (JSON format)")
+        parser.add_argument(
+            "--d2d-peer-ips",
+            type=str,
+            default=None,
+            help="Comma-separated IPs of peer instances for D2D weight transfer",
+        )
         return parser.parse_args()
 
     @classmethod
@@ -275,6 +281,7 @@ class EndpointConfig:
             instance_id=cli_args.instance_id,
             config_path=cli_args.config_path,
             dp_rank=cli_args.dp_rank,
+            d2d_peer_ips=cli_args.d2d_peer_ips,
             node_rank=cli_args.node_rank,
         )
         endpoint_config.validate()
@@ -293,8 +300,7 @@ class EndpointConfig:
             raise ValueError(f"{self.dp_rank} is not supported.")
         if not os.path.exists(self.config_path):
             raise ValueError(f"config file {self.config_path} does not exist")
-        if not FileValidator(self.config_path) \
-                .check_not_soft_link().check_file_size().check().is_valid():
+        if not FileValidator(self.config_path).check_not_soft_link().check_file_size().check().is_valid():
             raise ValueError(f"{self.config_path} is not a valid file path.")
 
     def load_deploy_config(self):
@@ -307,7 +313,8 @@ class EndpointConfig:
                     connectors[0][constants.KV_PORT] = str(self.kv_port)
                 if self.lookup_rpc_port is not None:
                     connectors[1][constants.KV_CONNECTOR_EXTRA_CONFIG][constants.LOOKUP_RPC_PORT] = str(
-                        self.lookup_rpc_port)
+                        self.lookup_rpc_port
+                    )
             else:
                 if self.kv_port is not None:
                     kv_config[constants.KV_PORT] = str(self.kv_port)
@@ -340,7 +347,8 @@ class EndpointConfig:
         replay_endpoint_info = replay_endpoint.split(split_str)
         if replay_endpoint_info.__len__() != 2:
             return
-        kv_events_config["replay_endpoint"] = replay_endpoint_info[0] + split_str + str(int(replay_endpoint_info[1]) +
-                                                                                        self.dp_rank)
+        kv_events_config["replay_endpoint"] = (
+            replay_endpoint_info[0] + split_str + str(int(replay_endpoint_info[1]) + self.dp_rank)
+        )
 
         self.deploy_config.engine_config.set("kv-events-config", kv_events_config)

@@ -78,6 +78,7 @@ async def start_instance(request: Request):
                 start_msg.endpoints,
                 start_msg.instance_id,
                 start_msg.master_dp_ip,
+                engine_manager.d2d_peer_ips,
                 start_msg.node_rank,
             )
         except Exception as pull_err:

@@ -39,16 +39,13 @@ class EngineManager(ThreadSafeSingleton):
         self.ranktable: Ranktable = None
         self.instance_ranktable: Ranktable = None
         self.instance_id: int = 0
+        self.d2d_peer_ips: list[str] | None = None
         self.node_rank: int = 0
         self.is_working = False
 
         self._fault_reporter = FaultReporter(config)
 
-        self._register_thread = threading.Thread(
-            target=self._register,
-            daemon=True,
-            name="engine_register"
-        )
+        self._register_thread = threading.Thread(target=self._register, daemon=True, name="engine_register")
         self._register_thread.start()
 
         self._initialized = True
@@ -93,6 +90,7 @@ class EngineManager(ThreadSafeSingleton):
         logger.info("start_cmd is %s", start_cmd)
         self.instance_id = start_cmd.instance_id
         self.endpoints = start_cmd.endpoints
+        self.d2d_peer_ips = start_cmd.d2d_peer_ips
         self.node_rank = start_cmd.node_rank
 
         self._write_ranktable_to_file(start_cmd.ranktable)

@@ -312,6 +312,20 @@ class InstanceManager(ThreadSafeSingleton):
                     initial_instances.append(ReadOnlyInstance(instance))
         return initial_instances
 
+    def get_instances(self, statuses: set[InsStatus] | None = None) -> list[ReadOnlyInstance]:
+        """Return instances matching any of the given statuses.
+
+        If statuses is None, returns all non-DELETED instances.
+        """
+        if statuses is None:
+            statuses = {InsStatus.INITIAL, InsStatus.ACTIVE, InsStatus.INACTIVE}
+        result = []
+        with self.ins_lock:
+            for instance in self.instances.values():
+                if instance.status in statuses:
+                    result.append(ReadOnlyInstance(instance))
+        return result
+
     def get_inactive_instances(self) -> list[ReadOnlyInstance]:
         inactive_instances = []
         with self.ins_lock:
@@ -480,8 +494,10 @@ class InstanceManager(ThreadSafeSingleton):
                 logger.info(
                     "Instance %s (id:%d) is stale — newer instance %s (id:%d) already exists, "
                     "removing from forced separation without recovery",
-                    instance.job_name, instance.id,
-                    newer_instance.job_name, newer_instance.id,
+                    instance.job_name,
+                    instance.id,
+                    newer_instance.job_name,
+                    newer_instance.id,
                 )
                 with self.ins_lock:
                     self.forced_separated_instances.discard(instance.id)

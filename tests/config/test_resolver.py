@@ -9,7 +9,8 @@
 # See the Mulan PSL v2 for more details.
 
 """End-to-end tests for ConfigResolver: CP config parsing, hyphen/underscore
-compatibility, and engine-specific defaults."""
+compatibility, and engine-specific defaults.
+"""
 
 import pytest
 
@@ -77,14 +78,20 @@ def test_vllm_cp_hyphen():
     assert pc["pcp_size"] == 4
 
 
-def test_vllm_cp_prefers_first_variant():
-    """When both underscore and hyphen are present, the first variant wins."""
-    resolver = ConfigResolver(_vllm_section({
-        "prefill_context_parallel_size": 2,
-        "prefill-context-parallel-size": 4,
-    }))
+def test_vllm_cp_both_forms_are_equivalent():
+    """When both underscore and hyphen forms exist, they normalize to the same key.
+    The last value wins (dict insertion order).
+    """
+    resolver = ConfigResolver(
+        _vllm_section(
+            {
+                "prefill_context_parallel_size": 2,
+                "prefill-context-parallel-size": 4,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
-    assert pc["pcp_size"] == 2  # underscore is first in the tuple
+    assert pc["pcp_size"] == 4  # normalized, last value wins
 
 
 # ------------------------------------------------------------------
@@ -94,37 +101,53 @@ def test_vllm_cp_prefers_first_variant():
 
 
 def test_sglang_cp_hyphen():
-    resolver = ConfigResolver(_sglang_section({
-        "context-parallel-size": 2,
-        "enable-prefill-context-parallel": True,
-    }))
+    resolver = ConfigResolver(
+        _sglang_section(
+            {
+                "context-parallel-size": 2,
+                "enable-prefill-context-parallel": True,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc["pcp_size"] == 2
 
 
 def test_sglang_cp_underscore():
-    resolver = ConfigResolver(_sglang_section({
-        "context_parallel_size": 2,
-        "enable_prefill_context_parallel": True,
-    }))
+    resolver = ConfigResolver(
+        _sglang_section(
+            {
+                "context_parallel_size": 2,
+                "enable_prefill_context_parallel": True,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc["pcp_size"] == 2
 
 
 def test_sglang_cp_not_enabled_without_flag():
     """pcp_size is NOT set when enable-prefill-context-parallel is absent."""
-    resolver = ConfigResolver(_sglang_section({
-        "context-parallel-size": 2,
-    }))
+    resolver = ConfigResolver(
+        _sglang_section(
+            {
+                "context-parallel-size": 2,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc.get("pcp_size", 1) == 1  # default, key not present in dict
 
 
 def test_sglang_cp_not_enabled_when_flag_false():
-    resolver = ConfigResolver(_sglang_section({
-        "context-parallel-size": 2,
-        "enable-prefill-context-parallel": False,
-    }))
+    resolver = ConfigResolver(
+        _sglang_section(
+            {
+                "context-parallel-size": 2,
+                "enable-prefill-context-parallel": False,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc.get("pcp_size", 1) == 1
 
@@ -136,32 +159,44 @@ def test_sglang_cp_not_enabled_when_flag_false():
 
 def test_local_world_size_includes_pcp():
     """local_world_size = pcp * tp * pp"""
-    resolver = ConfigResolver(_vllm_section({
-        "prefill_context_parallel_size": 2,
-        "tensor_parallel_size": 2,
-        "pipeline_parallel_size": 2,
-    }))
+    resolver = ConfigResolver(
+        _vllm_section(
+            {
+                "prefill_context_parallel_size": 2,
+                "tensor_parallel_size": 2,
+                "pipeline_parallel_size": 2,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc["local_world_size"] == 8  # 2 * 2 * 2
 
 
 def test_local_world_size_pcp_defaults_to_1():
-    resolver = ConfigResolver(_vllm_section({
-        "tensor_parallel_size": 2,
-        "pipeline_parallel_size": 3,
-    }))
+    resolver = ConfigResolver(
+        _vllm_section(
+            {
+                "tensor_parallel_size": 2,
+                "pipeline_parallel_size": 3,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc["local_world_size"] == 6  # 1 * 2 * 3
 
 
 def test_world_size_includes_pcp():
     """world_size = dp * pcp * tp * pp"""
-    resolver = ConfigResolver(_vllm_section({
-        "data_parallel_size": 2,
-        "prefill_context_parallel_size": 2,
-        "tensor_parallel_size": 2,
-        "pipeline_parallel_size": 2,
-    }))
+    resolver = ConfigResolver(
+        _vllm_section(
+            {
+                "data_parallel_size": 2,
+                "prefill_context_parallel_size": 2,
+                "tensor_parallel_size": 2,
+                "pipeline_parallel_size": 2,
+            }
+        )
+    )
     pc = resolver.get_parallel_config()
     assert pc["world_size"] == 16  # 2 * 2 * 2 * 2
 
@@ -171,20 +206,23 @@ def test_world_size_includes_pcp():
 # ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key,expected", [
-    ({"data_parallel_size": 3}, ("dp_size", 3)),
-    ({"data-parallel-size": 3}, ("dp_size", 3)),
-    ({"tensor_parallel_size": 4}, ("tp_size", 4)),
-    ({"tensor-parallel-size": 4}, ("tp_size", 4)),
-    ({"pipeline_parallel_size": 2}, ("pp_size", 2)),
-    ({"pipeline-parallel-size": 2}, ("pp_size", 2)),
-    ({"data_parallel_rpc_port": 9100}, ("dp_rpc_port", 9100)),
-    ({"data-parallel-rpc-port": 9100}, ("dp_rpc_port", 9100)),
-    ({"enable_expert_parallel": True}, ("enable_ep", True)),
-    ({"enable-expert-parallel": True}, ("enable_ep", True)),
-    ({"cp_kv_cache_interleave_size": 4}, ("cp_kv_cache_interleave_size", 4)),
-    ({"cp-kv-cache-interleave-size": 4}, ("cp_kv_cache_interleave_size", 4)),
-])
+@pytest.mark.parametrize(
+    "key,expected",
+    [
+        ({"data_parallel_size": 3}, ("dp_size", 3)),
+        ({"data-parallel-size": 3}, ("dp_size", 3)),
+        ({"tensor_parallel_size": 4}, ("tp_size", 4)),
+        ({"tensor-parallel-size": 4}, ("tp_size", 4)),
+        ({"pipeline_parallel_size": 2}, ("pp_size", 2)),
+        ({"pipeline-parallel-size": 2}, ("pp_size", 2)),
+        ({"data_parallel_rpc_port": 9100}, ("dp_rpc_port", 9100)),
+        ({"data-parallel-rpc-port": 9100}, ("dp_rpc_port", 9100)),
+        ({"enable_expert_parallel": True}, ("enable_ep", True)),
+        ({"enable-expert-parallel": True}, ("enable_ep", True)),
+        ({"cp_kv_cache_interleave_size": 4}, ("cp_kv_cache_interleave_size", 4)),
+        ({"cp-kv-cache-interleave-size": 4}, ("cp_kv_cache_interleave_size", 4)),
+    ],
+)
 def test_vllm_parallel_key_variants(key, expected):
     resolver = ConfigResolver(_vllm_section(key))
     pc = resolver.get_parallel_config()
@@ -196,14 +234,17 @@ def test_vllm_parallel_key_variants(key, expected):
 # ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key,expected", [
-    ({"dp-size": 3}, ("dp_size", 3)),
-    ({"dp_size": 3}, ("dp_size", 3)),
-    ({"tp-size": 4}, ("tp_size", 4)),
-    ({"tp_size": 4}, ("tp_size", 4)),
-    ({"pp-size": 2}, ("pp_size", 2)),
-    ({"pp_size": 2}, ("pp_size", 2)),
-])
+@pytest.mark.parametrize(
+    "key,expected",
+    [
+        ({"dp-size": 3}, ("dp_size", 3)),
+        ({"dp_size": 3}, ("dp_size", 3)),
+        ({"tp-size": 4}, ("tp_size", 4)),
+        ({"tp_size": 4}, ("tp_size", 4)),
+        ({"pp-size": 2}, ("pp_size", 2)),
+        ({"pp_size": 2}, ("pp_size", 2)),
+    ],
+)
 def test_sglang_parallel_key_variants(key, expected):
     resolver = ConfigResolver(_sglang_section(key))
     pc = resolver.get_parallel_config()

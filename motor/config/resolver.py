@@ -15,6 +15,15 @@ from motor.common.logger import get_logger
 logger = get_logger(__name__)
 
 
+def normalize_keys(obj: Any) -> Any:
+    """Recursively convert ``-`` to ``_`` in all dict keys."""
+    if isinstance(obj, dict):
+        return {k.replace("-", "_"): normalize_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize_keys(item) for item in obj]
+    return obj
+
+
 class BaseConfigResolver:
     """Base resolver — not instantiated directly. Use the ConfigResolver() factory.
 
@@ -28,8 +37,10 @@ class BaseConfigResolver:
     _warned_conflict_keys: set[str] = set()
 
     def __init__(self, engine_section: dict[str, Any]):
-        self._model_cfg: dict[str, Any] = engine_section.get("model_config") or {}
-        self._engine_cfg: dict[str, Any] = engine_section.get("engine_config") or {}
+        raw_model = engine_section.get("model_config") or {}
+        raw_engine = engine_section.get("engine_config") or {}
+        self._model_cfg: dict[str, Any] = normalize_keys(raw_model)
+        self._engine_cfg: dict[str, Any] = normalize_keys(raw_engine)
 
     # ------------------------------------------------------------------
     # Public API
@@ -40,7 +51,10 @@ class BaseConfigResolver:
             if key not in BaseConfigResolver._warned_conflict_keys:
                 logger.warning(
                     "Config conflict for '%s': engine_config=%s, %s=%s. Using engine_config.",
-                    key, engine_val, model_source, model_val,
+                    key,
+                    engine_val,
+                    model_source,
+                    model_val,
                 )
                 BaseConfigResolver._warned_conflict_keys.add(key)
 
@@ -159,10 +173,29 @@ class BaseConfigResolver:
         """Raw engine_config dict."""
         return self._engine_cfg
 
+    def get_d2d_config(self) -> dict | None:
+        """Return D2D config {source, listen_port} or None if not configured."""
+        return None
+
+    @staticmethod
+    def load_section(config_path: str, section_key: str) -> "BaseConfigResolver":
+        """Load a resolver from a config file and extract the engine section.
+
+        Reads *config_path*, picks *section_key* from the top-level JSON dict,
+        and returns a ConfigResolver for that engine section.
+        """
+        import json as _json
+
+        with open(config_path, 'r') as f:
+            raw = _json.load(f)
+        section = raw.get(section_key, {})
+        return ConfigResolver(section)
+
 
 # ------------------------------------------------------------------
 # Engine-specific adapters
 # ------------------------------------------------------------------
+
 
 class VLLMConfigResolver(BaseConfigResolver):
     """Adapter: maps internal keys to vLLM-native engine_config keys."""
@@ -182,6 +215,39 @@ class VLLMConfigResolver(BaseConfigResolver):
         "enable_ep": ("enable_expert_parallel", "enable-expert-parallel"),
         "cp_kv_cache_interleave_size": ("cp_kv_cache_interleave_size", "cp-kv-cache-interleave-size"),
     }
+
+    def get_d2d_config(self) -> dict | None:
+        """Read D2D config from model_loader_extra_config.
+
+        Returns {source, listen_port} or None.
+        source may be "auto" (controller fills real IPs) or a static peer list.
+        """
+        import json as _json
+
+        ml_extra = self._engine_cfg.get("model_loader_extra_config")
+        if ml_extra is None:
+            logger.info("get_d2d_config: model_loader_extra_config not found in engine_config")
+            return None
+        if isinstance(ml_extra, str):
+            try:
+                ml_extra = _json.loads(ml_extra)
+            except _json.JSONDecodeError:
+                logger.warning("get_d2d_config: model_loader_extra_config is invalid JSON: %s", ml_extra)
+                return None
+        if not isinstance(ml_extra, dict):
+            logger.warning("get_d2d_config: model_loader_extra_config is not a dict: %s", type(ml_extra))
+            return None
+
+        source = ml_extra.get("source") or ml_extra.get("SOURCE")
+        if not source:
+            logger.info(
+                "get_d2d_config: source key not found or empty in model_loader_extra_config, keys=%s",
+                list(ml_extra.keys()),
+            )
+            return None
+        listen_port = ml_extra.get("listen_port") or ml_extra.get("LISTEN_PORT")
+        logger.info("get_d2d_config: resolved source=%s listen_port=%s", source, listen_port)
+        return {"source": source, "listen_port": listen_port}
 
 
 class SGLangConfigResolver(BaseConfigResolver):
@@ -206,9 +272,7 @@ class SGLangConfigResolver(BaseConfigResolver):
         result = super()._resolve_engine_parallel_keys()
 
         cp_size = self._get_engine_key("context-parallel-size", "context_parallel_size")
-        cp_enabled = self._get_engine_key(
-            "enable-prefill-context-parallel", "enable_prefill_context_parallel"
-        ) or False
+        cp_enabled = self._get_engine_key("enable-prefill-context-parallel", "enable_prefill_context_parallel") or False
         if cp_size and cp_enabled:
             result["pcp_size"] = cp_size
 
@@ -218,6 +282,7 @@ class SGLangConfigResolver(BaseConfigResolver):
 # ------------------------------------------------------------------
 # Factory
 # ------------------------------------------------------------------
+
 
 def ConfigResolver(
     engine_section: dict[str, Any],

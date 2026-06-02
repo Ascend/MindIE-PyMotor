@@ -12,7 +12,7 @@ import hashlib
 import pytest
 from unittest.mock import MagicMock, patch
 
-from motor.common.resources import Instance, ParallelConfig, Endpoint
+from motor.common.resources import Instance, InsStatus, ParallelConfig, Endpoint, ReadOnlyInstance
 from motor.common.resources.http_msg_spec import RegisterMsg, ReregisterMsg, Ranktable, ServerInfo, DeviceInfo
 from motor.controller.core.instance_assembler import (
     InstanceAssembler,
@@ -1766,6 +1766,236 @@ def test_assemble_instance_multi_endpoint_disabled_not_enough_nodes(instance_ass
         assert metadata.register_status != RegisterStatus.ASSEMBLED
 
 
+# ===== D2D Weight Transfer Tests =====
+
+
+def _make_mock_readonly_instance(job_name: str, role: str, ips: list[str]):
+    """Create a ReadOnlyInstance wrapping a real Instance (required by upstream merge)."""
+    inst = Instance(
+        job_name=job_name,
+        model_name="test",
+        id=abs(hash(job_name)) % 1_000_000,
+        role=role,
+        parallel_config=ParallelConfig(),
+    )
+    for idx, ip in enumerate(ips):
+        inst.add_endpoints(
+            f"pod-{job_name}-{idx}",
+            {0: Endpoint(id=0, ip=ip, business_port="8000", mgmt_port="9000")},
+        )
+    return ReadOnlyInstance(inst)
+
+
+def test_collect_d2d_peer_ips_queries_active_only(instance_assembler, test_config):
+    """_collect_d2d_peer_ips only queries ACTIVE instances from InstanceManager."""
+    instance = Instance(
+        job_name="current_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[]) as mock_get:
+        instance_assembler._collect_d2d_peer_ips(metadata)
+        mock_get.assert_called_once_with({InsStatus.ACTIVE})
+
+
+def test_collect_d2d_peer_ips_active_same_role(instance_assembler, test_config):
+    """_collect_d2d_peer_ips collects IPs from same-role ACTIVE peer instances."""
+    instance = Instance(
+        job_name="current_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_peer = _make_mock_readonly_instance("peer_job", test_config['role'], ["10.0.0.1", "10.0.0.2"])
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[mock_peer]):
+        result = instance_assembler._collect_d2d_peer_ips(metadata)
+        assert set(result) == {"10.0.0.1", "10.0.0.2"}
+
+
+def test_collect_d2d_peer_ips_excludes_own_job_name(instance_assembler, test_config):
+    """_collect_d2d_peer_ips excludes instances with the same job_name (self)."""
+    instance = Instance(
+        job_name="my_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_self = _make_mock_readonly_instance("my_job", test_config['role'], ["10.0.0.1"])
+    mock_peer = _make_mock_readonly_instance("other_job", test_config['role'], ["10.0.0.2"])
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[mock_self, mock_peer]):
+        result = instance_assembler._collect_d2d_peer_ips(metadata)
+        assert result == ["10.0.0.2"]
+
+
+def test_collect_d2d_peer_ips_excludes_different_role(instance_assembler, test_config):
+    """_collect_d2d_peer_ips excludes instances with a different role."""
+    instance = Instance(
+        job_name="current_job",
+        model_name="test",
+        id=99,
+        role="prefill",
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_same = _make_mock_readonly_instance("peer_prefill", "prefill", ["10.0.0.1"])
+    mock_diff = _make_mock_readonly_instance("peer_decode", "decode", ["10.0.0.2"])
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[mock_same, mock_diff]):
+        result = instance_assembler._collect_d2d_peer_ips(metadata)
+        assert result == ["10.0.0.1"]
+
+
+def test_collect_d2d_peer_ips_deduplicates(instance_assembler, test_config):
+    """_collect_d2d_peer_ips deduplicates IPs across multiple instances."""
+    instance = Instance(
+        job_name="current_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_peer1 = _make_mock_readonly_instance("peer1", test_config['role'], ["10.0.0.1", "10.0.0.2"])
+    mock_peer2 = _make_mock_readonly_instance("peer2", test_config['role'], ["10.0.0.2", "10.0.0.3"])
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[mock_peer1, mock_peer2]):
+        result = instance_assembler._collect_d2d_peer_ips(metadata)
+        assert set(result) == {"10.0.0.1", "10.0.0.2", "10.0.0.3"}
+
+
+def test_collect_d2d_peer_ips_no_peers(instance_assembler, test_config):
+    """_collect_d2d_peer_ips returns empty list when no peer instances exist."""
+    instance = Instance(
+        job_name="current_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    with patch.object(InstanceManager(), 'get_instances', return_value=[]):
+        result = instance_assembler._collect_d2d_peer_ips(metadata)
+        assert result == []
+
+
+def test_send_start_command_with_d2d_enabled(instance_assembler, test_config):
+    """_send_start_command includes d2d_peer_ips when D2D is enabled (SOURCE: auto)."""
+    instance = Instance(
+        job_name="d2d_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    instance.add_node_mgr("127.0.0.1", "8088")
+    instance.add_node_mgr("127.0.0.2", "8088")
+    reg_msg = create_register_msg("d2d_job", "127.0.0.1", test_config)
+    pod_endpoints = instance_assembler._build_single_endpoint(reg_msg, 0)
+    instance.add_endpoints("127.0.0.1", pod_endpoints)
+    reg_msg2 = create_register_msg("d2d_job", "127.0.0.2", test_config)
+    pod_endpoints2 = instance_assembler._build_single_endpoint(reg_msg2, 1)
+    instance.add_endpoints("127.0.0.2", pod_endpoints2)
+
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_peer = _make_mock_readonly_instance("peer_job", test_config['role'], ["10.0.0.1", "10.0.0.2"])
+
+    with (
+        patch.object(instance_assembler, '_is_d2d_enabled_for_role', return_value=True),
+        patch.object(InstanceManager(), 'get_instances', return_value=[mock_peer]),
+        patch(
+            'motor.controller.api_client.node_manager_api_client.NodeManagerApiClient.send_start_command'
+        ) as mock_send,
+    ):
+        mock_send.return_value = True
+
+        result = instance_assembler._send_start_command(metadata)
+
+        assert result is True
+        called_msg = mock_send.call_args[0][1]
+        assert called_msg.d2d_peer_ips is not None
+        assert set(called_msg.d2d_peer_ips) == {"10.0.0.1", "10.0.0.2"}
+
+
+def test_send_start_command_with_d2d_disabled(instance_assembler, test_config):
+    """_send_start_command does not populate d2d_peer_ips when D2D is disabled."""
+    instance = Instance(
+        job_name="d2d_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    instance.add_node_mgr("127.0.0.1", "8088")
+    reg_msg = create_register_msg("d2d_job", "127.0.0.1", test_config)
+    pod_endpoints = instance_assembler._build_single_endpoint(reg_msg, 0)
+    instance.add_endpoints("127.0.0.1", pod_endpoints)
+
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    mock_peer = _make_mock_readonly_instance("peer_job", test_config['role'], ["10.0.0.1"])
+
+    with (
+        patch.object(instance_assembler, '_is_d2d_enabled_for_role', return_value=False),
+        patch.object(InstanceManager(), 'get_instances', return_value=[mock_peer]),
+        patch(
+            'motor.controller.api_client.node_manager_api_client.NodeManagerApiClient.send_start_command'
+        ) as mock_send,
+    ):
+        mock_send.return_value = True
+
+        instance_assembler._send_start_command(metadata)
+
+        called_msg = mock_send.call_args[0][1]
+        assert called_msg.d2d_peer_ips is None
+
+
+def test_send_start_command_with_d2d_enabled_no_peers(instance_assembler, test_config):
+    """_send_start_command converts empty peer list to None when D2D is enabled but no peers found."""
+    instance = Instance(
+        job_name="d2d_job",
+        model_name="test",
+        id=99,
+        role=test_config['role'],
+        parallel_config=test_config['parallel_config'],
+    )
+    instance.add_node_mgr("127.0.0.1", "8088")
+    reg_msg = create_register_msg("d2d_job", "127.0.0.1", test_config)
+    pod_endpoints = instance_assembler._build_single_endpoint(reg_msg, 0)
+    instance.add_endpoints("127.0.0.1", pod_endpoints)
+
+    metadata = AssembleInstanceMetadata(instance=instance)
+
+    with (
+        patch.object(instance_assembler, '_is_d2d_enabled_for_role', return_value=True),
+        patch.object(InstanceManager(), 'get_instances', return_value=[]),
+        patch(
+            'motor.controller.api_client.node_manager_api_client.NodeManagerApiClient.send_start_command'
+        ) as mock_send,
+    ):
+        mock_send.return_value = True
+
+        instance_assembler._send_start_command(metadata)
+
+        called_msg = mock_send.call_args[0][1]
+        assert called_msg.d2d_peer_ips is None
+
+
 # ===== Cross-Node PCP Tests =====
 
 
@@ -1898,9 +2128,7 @@ def test_cross_node_pcp_with_dp_waits_for_all_groups(instance_assembler):
 
     # Add the 8th node
     instance.add_node_mgr("10.0.0.8", "8080", device_num=16)
-    instance.add_endpoints(
-        "10.0.0.8", {0: Endpoint(id=7, ip="10.0.0.8", business_port="8000", mgmt_port="9000")}
-    )
+    instance.add_endpoints("10.0.0.8", {0: Endpoint(id=7, ip="10.0.0.8", business_port="8000", mgmt_port="9000")})
 
     with patch.object(instance_assembler, "_filter_abnormal_endpoints"):
         instance_assembler._assemble_instance(metadata)

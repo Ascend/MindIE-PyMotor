@@ -412,6 +412,62 @@ class TestEngineManager:
         # Should have slept once between attempts
         assert mock_sleep.call_count == 1
 
+
+# ===== D2D Weight Transfer Tests =====
+
+
+class TestD2DWeightTransfer:
+    """Tests for D2D weight transfer peer IP handling in EngineManager."""
+
+    def test_d2d_peer_ips_initialized_none(self, engine_manager):
+        """d2d_peer_ips is initialized as None in __init__."""
+        assert engine_manager.d2d_peer_ips is None
+
+    def test_parse_start_cmd_with_d2d_peer_ips(self, engine_manager, sample_start_cmd_msg):
+        """parse_start_cmd extracts d2d_peer_ips from StartCmdMsg."""
+        engine_manager._config.basic_config.job_name = "test_job"
+        engine_manager._config.endpoint_config.endpoint_num = 2
+        engine_manager._config.api_config.pod_ip = "192.168.1.100"
+
+        sample_start_cmd_msg.d2d_peer_ips = ["10.0.0.1", "10.0.0.2"]
+
+        result = engine_manager.parse_start_cmd(sample_start_cmd_msg)
+
+        assert result is True
+        assert engine_manager.d2d_peer_ips == ["10.0.0.1", "10.0.0.2"]
+
+    def test_parse_start_cmd_with_empty_d2d_peer_ips(self, engine_manager, sample_start_cmd_msg):
+        """parse_start_cmd handles empty d2d_peer_ips list."""
+        engine_manager._config.basic_config.job_name = "test_job"
+        engine_manager._config.endpoint_config.endpoint_num = 2
+        engine_manager._config.api_config.pod_ip = "192.168.1.100"
+
+        sample_start_cmd_msg.d2d_peer_ips = []
+
+        result = engine_manager.parse_start_cmd(sample_start_cmd_msg)
+
+        assert result is True
+        assert engine_manager.d2d_peer_ips == []
+
+    def test_parse_start_cmd_with_default_d2d_peer_ips(self, engine_manager, sample_endpoints):
+        """parse_start_cmd handles StartCmdMsg with default (None) d2d_peer_ips."""
+        engine_manager._config.basic_config.job_name = "test_job"
+        engine_manager._config.endpoint_config.endpoint_num = 2
+        engine_manager._config.api_config.pod_ip = "192.168.1.100"
+
+        msg = StartCmdMsg(
+            job_name="test_job",
+            role="both",
+            instance_id=1,
+            endpoints=sample_endpoints,
+            master_dp_ip="192.168.1.100",
+        )
+
+        result = engine_manager.parse_start_cmd(msg)
+
+        assert result is True
+        assert engine_manager.d2d_peer_ips is None
+
     # ---- FaultReporter delegation tests ----
 
     def test_start_delegates_to_fault_reporter(self, engine_manager):
@@ -429,4 +485,3 @@ class TestEngineManager:
         new_config = NodeManagerConfig()
         engine_manager.update_config(new_config)
         engine_manager._fault_reporter.update_config.assert_called_once_with(new_config, engine_manager.endpoints)
-

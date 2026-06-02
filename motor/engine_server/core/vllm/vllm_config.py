@@ -61,6 +61,7 @@ class VLLMConfig(IConfig):
     data_parallel_address: str | None = None
     data_parallel_rpc_port: int | None = None
     kv_transfer_config: str | None = None
+    _d2d_source: list | None = None
     mapping: dict[str, str] | None = field(default_factory=_get_default_mapping)
     endpoint_config: EndpointConfig | None = None
 
@@ -68,10 +69,10 @@ class VLLMConfig(IConfig):
         role = self.endpoint_config.role
         if self.endpoint_config.deploy_config.get_parallel_config(role).dp_size > 1:
             self.data_parallel_address = self.endpoint_config.master_dp_ip
-            self.data_parallel_rpc_port = self.endpoint_config.deploy_config. \
-                get_parallel_config(role).dp_rpc_port
+            self.data_parallel_rpc_port = self.endpoint_config.deploy_config.get_parallel_config(role).dp_rpc_port
         if role == constants.PREFILL_ROLE or role == constants.DECODE_ROLE:
             self._process_kv_transfer_config()
+        self._process_d2d_config()
 
     def validate(self):
         if self.args is not None:
@@ -90,7 +91,6 @@ class VLLMConfig(IConfig):
         parser = FlexibleArgumentParser(description="vLLM parser")
         parser = make_arg_parser(parser)
         self.args = parser.parse_args()
-
 
     def get_args(self) -> argparse.Namespace:
         return self.args
@@ -166,13 +166,46 @@ class VLLMConfig(IConfig):
             kv_config[constants.KV_ROLE] = constants.KV_CONSUMER
 
         if kv_config[constants.KV_CONNECTOR] == constants.MOON_CAKE_STORE_V1:
-            kv_config[constants.KV_CONNECTOR_EXTRA_CONFIG][constants.MOON_CAKE_RPC_PORT] \
-                = str(self.endpoint_config.instance_id)
+            kv_config[constants.KV_CONNECTOR_EXTRA_CONFIG][constants.MOON_CAKE_RPC_PORT] = str(
+                self.endpoint_config.instance_id
+            )
         elif kv_config[constants.KV_CONNECTOR] == constants.ASCEND_STORE_CONNECTOR:
             kv_config[constants.KV_CONNECTOR_EXTRA_CONFIG][constants.LOOKUP_RPC_PORT] = str(
-                self.endpoint_config.instance_id)
+                self.endpoint_config.instance_id
+            )
         else:
             raise ValueError(f"{constants.KV_CONNECTOR} is not supported")
+
+    def _process_d2d_config(self):
+        d2d_peer_ips = self.endpoint_config.d2d_peer_ips
+        if d2d_peer_ips is None:
+            return
+
+        engine_cfg = self.endpoint_config.deploy_config.engine_config
+        ml_extra = engine_cfg.configs.get("model_loader_extra_config")
+        if not isinstance(ml_extra, dict):
+            return
+        source = ml_extra.get("source") or ml_extra.get("SOURCE")
+        if source != "auto":
+            return
+        listen_port = ml_extra.get("listen_port") if "listen_port" in ml_extra else ml_extra.get("LISTEN_PORT")
+        if listen_port is None:
+            return
+
+        peer_ips = [ip.strip() for ip in d2d_peer_ips.split(",") if ip.strip()]
+        if not peer_ips:
+            logger.warning("D2D peer IPs is empty, entering seed mode (load from disk, serve peers)")
+            return
+        role = self.endpoint_config.role
+        parallel_config = self.endpoint_config.deploy_config.get_parallel_config(role)
+        local_world_size = parallel_config.local_world_size
+        dp_rank = self.endpoint_config.dp_rank
+        offset = dp_rank * local_world_size
+        self._d2d_source = [
+            {"device_id": offset + rank, "sources": [f"{ip}:{int(listen_port) + offset + rank}" for ip in peer_ips]}
+            for rank in range(local_world_size)
+        ]
+        logger.info("D2D peer SOURCE: %s", self._d2d_source)
 
     def _flatten_config(self) -> dict[str, Any]:
         """
@@ -220,8 +253,11 @@ class VLLMConfig(IConfig):
             engine_master_port = deploy_config.engine_config.get("master-port", None)
         logger.info(
             "Cross-node PCP detection: nnodes=%s (type=%s), master_port=%s, node_rank=%d, master_dp_ip=%s",
-            engine_nnodes, type(engine_nnodes).__name__, engine_master_port,
-            self.endpoint_config.node_rank, self.endpoint_config.master_dp_ip,
+            engine_nnodes,
+            type(engine_nnodes).__name__,
+            engine_master_port,
+            self.endpoint_config.node_rank,
+            self.endpoint_config.master_dp_ip,
         )
         try:
             engine_nnodes_int = int(engine_nnodes)
@@ -239,11 +275,40 @@ class VLLMConfig(IConfig):
         else:
             logger.info(
                 "Cross-node PCP NOT active: nnodes_int=%d, master_port=%s",
-                engine_nnodes_int, engine_master_port,
+                engine_nnodes_int,
+                engine_master_port,
             )
 
         if self.kv_transfer_config is not None:
             flattened["kv_transfer_config"] = self.kv_transfer_config
+        ml_extra = deploy_config.engine_config.configs.get("model_loader_extra_config")
+        _KEY_MAP = {
+            "source": "SOURCE",
+            "listen_port": "LISTEN_PORT",
+            "model": "MODEL",
+            "int8_cache": "INT8_CACHE",
+            "int8_cache_name": "INT8_CACHE_NAME",
+            "output_prefix": "OUTPUT_PREFIX",
+        }
+
+        d2d_configured = (
+            isinstance(ml_extra, dict)
+            and (ml_extra.get("source") or ml_extra.get("SOURCE")) == "auto"
+            and (ml_extra.get("listen_port") if "listen_port" in ml_extra else ml_extra.get("LISTEN_PORT")) is not None
+        )
+
+        if d2d_configured:
+            ml_extra = {_KEY_MAP.get(k, k): v for k, v in ml_extra.items()}
+            if self._d2d_source is not None:
+                ml_extra["SOURCE"] = self._d2d_source
+            else:
+                ml_extra.pop("SOURCE", None)
+            ml_extra.setdefault("MODEL", deploy_config.model_config.model_name)
+            flattened["model_loader_extra_config"] = json.dumps(ml_extra)
+            flattened["load_format"] = "netloader"
+        elif isinstance(ml_extra, dict):
+            ml_extra = {_KEY_MAP.get(k, k): v for k, v in ml_extra.items()}
+            flattened["model_loader_extra_config"] = json.dumps(ml_extra)
 
         return flattened
 
