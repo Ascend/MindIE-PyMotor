@@ -73,7 +73,7 @@ setup_tls_certificates() {
         echo "Please copy openssl_gen_cert.sh to the specified path or set GEN_CERT_SCRIPT environment variable"
         return 1
     fi
-    
+
     if [ ! -f "$CA_PATH/ca.pem" ] || [ ! -f "$CA_PATH/ca.key.pem" ]; then
         echo "Error: CA certificate not found at $CA_PATH"
         echo "Please generate CA certificate first:"
@@ -81,7 +81,7 @@ setup_tls_certificates() {
         echo "Or set CA_PATH environment variable to the correct CA certificate path"
         return 1
     fi
-    
+
     echo "TLS is enabled, generating certificates..."
     echo "CA_PATH: $CA_PATH"
     echo "BASE_CERT_PATH: $BASE_CERT_PATH"
@@ -186,18 +186,6 @@ set_cann_env() {
     export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/driver/lib64/common"
     source "$CANN_INSTALL_PATH/ascend-toolkit/set_env.sh"
     source "$CANN_INSTALL_PATH/nnal/atb/set_env.sh"
-}
-
-gen_ranktable_config() {
-    if [ -f "$CONFIGMAP_PATH/hccl_tools.py" ]; then
-        echo "Using hccl_tools.py to generate ranktable.json..."
-        export HCCL_PATH="$CONFIG_PATH/hccl.json"
-        export PATH="/usr/local/Ascend/driver/tools:$PATH"
-        PYTHONUNBUFFERED=1 python3 "$CONFIGMAP_PATH/hccl_tools.py" --hccl_path "$HCCL_PATH"
-        export RANKTABLE_PATH="$CONFIG_PATH/ranktable.json"
-    else
-        echo "hccl_tools.py does not exist, skip ranktable generation"
-    fi
 }
 
 gen_kv_pool_config() {

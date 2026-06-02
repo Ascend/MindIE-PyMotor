@@ -21,7 +21,6 @@ from motor.common.resources import (
     Instance,
     Endpoint,
     DeviceInfo,
-    Ranktable,
     PDRole,
 )
 from motor.common.etcd.etcd_client import EtcdClient
@@ -53,9 +52,6 @@ class AssembleInstanceMetadata(BaseModel):
     start_command_send_times: int = Field(default=0, description="Number of times start command was sent")
     register_timestamp: float = Field(default=0.0, description="Registration timestamp")
     is_reregister: bool = Field(default=False, description="Whether this is a re-registration")
-    ranktable: Ranktable | None = Field(
-        default=None, description="Instance level ranktable, only use in A2, A3. A5 will be None"
-    )
     nnodes: int = Field(default=1, description="Expected PCP cross-node count")
 
     # Non-serializable field (excluded from serialization)
@@ -390,7 +386,7 @@ class InstanceAssembler(ThreadSafeSingleton):
             return RegisterStatus.ASSEMBLED
 
         # Then check if instance is still being assembled locally
-        if job_name in self.instances.keys():
+        if job_name in self.instances:
             return RegisterStatus.ASSEMBLING
 
         # Instance not found anywhere
@@ -403,14 +399,6 @@ class InstanceAssembler(ThreadSafeSingleton):
             pod_endpoints = self._build_multi_endpoints(msg, id_offset)
         else:
             pod_endpoints = self._build_single_endpoint(msg, id_offset)
-
-        if msg.ranktable is not None:
-            if metadata.ranktable is None:
-                metadata.ranktable = msg.ranktable
-            else:
-                for server_info in msg.ranktable.server_list:
-                    metadata.ranktable.server_list.append(server_info)
-                metadata.ranktable.server_count = str(len(metadata.ranktable.server_list))
 
         return pod_endpoints
 
@@ -477,9 +465,6 @@ class InstanceAssembler(ThreadSafeSingleton):
     def _build_device_infos(
         self, msg: RegisterMsg, start_idx: int, devices_per_endpoint: int, id_offset: int
     ) -> list[DeviceInfo]:
-        if isinstance(msg.ranktable, Ranktable):
-            return msg.ranktable.server_list[0].device
-
         device_infos = []
         for j in range(devices_per_endpoint):
             device_idx = start_idx + j
@@ -585,9 +570,8 @@ class InstanceAssembler(ThreadSafeSingleton):
                 job_name=metadata.instance.job_name,
                 role=metadata.instance.role,
                 instance_id=metadata.instance.id,
-                endpoints=[endpoint for endpoint in endpoints.values()],
+                endpoints=list(endpoints.values()),
                 master_dp_ip=master_dp_ip,
-                ranktable=metadata.ranktable,
                 d2d_peer_ips=d2d_peer_ips,
                 node_rank=rank % nnodes if nnodes > 1 else rank,
             )

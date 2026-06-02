@@ -13,7 +13,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from motor.common.resources import Instance, InsStatus, ParallelConfig, Endpoint, ReadOnlyInstance
-from motor.common.resources.http_msg_spec import RegisterMsg, ReregisterMsg, Ranktable, ServerInfo, DeviceInfo
+from motor.common.resources.http_msg_spec import RegisterMsg, ReregisterMsg
 from motor.controller.core.instance_assembler import (
     InstanceAssembler,
     AssembleInstanceMetadata,
@@ -23,39 +23,6 @@ from motor.common.etcd.persistent_state import PersistentState
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.controller.core import InstanceManager
 from motor.config.controller import ControllerConfig
-
-
-def build_pod_ranktable(
-    pod_ip: str,
-    pod_device_num: int,
-    rank_offset: int = 0,
-    is_supperpod: bool = True,
-) -> Ranktable:
-    """
-    Build pod level ranktable, it only have on server, so server_list size is 1.
-    This function is mainly for test case to build ranktable.
-    """
-    ranktable = Ranktable(
-        version="1.2",
-        status="completed",
-        server_count="1",
-        server_list=[
-            ServerInfo(
-                server_id=pod_ip,
-                container_ip=pod_ip,
-                device=[
-                    DeviceInfo(
-                        device_ip=pod_ip,
-                        device_id=str(i),
-                        rank_id=str(rank_offset + i),
-                        super_device_id="0" if is_supperpod else None,
-                    )
-                    for i in range(pod_device_num)
-                ],
-            )
-        ],
-    )
-    return ranktable
 
 
 @pytest.fixture
@@ -122,6 +89,7 @@ def instance_assembler(mock_config):
 
         with patch('motor.controller.core.instance_assembler.EtcdClient') as mock_etcd_class:
             mock_etcd = MagicMock()
+            mock_etcd.persist_data.return_value = True
             mock_etcd_class.return_value = mock_etcd
 
             assembler = InstanceAssembler(mock_config)
@@ -172,13 +140,7 @@ def register_instance_with_pods(assembler: InstanceAssembler, job_name: str, con
     pod_ips = [f"127.0.0.{i + 1}" for i in range(pod_count)]
 
     for i, pod_ip in enumerate(pod_ips):
-        rank_offset = i * 2 * config['tp']
-        msg = create_register_msg(
-            job_name,
-            pod_ip,
-            config,
-            ranktable=build_pod_ranktable(pod_ip=pod_ip, pod_device_num=2 * config['tp'], rank_offset=rank_offset),
-        )
+        msg = create_register_msg(job_name, pod_ip, config)
         result = assembler.register(msg)
         assert result == 0
 
@@ -204,8 +166,8 @@ def create_assembled_instance(assembler: InstanceAssembler, job_name: str, confi
 
 def test_initialization(mock_config):
     """Test InstanceAssembler initialization"""
-    with patch('threading.Thread') as mock_thread_class:
-        with patch('motor.controller.core.instance_assembler.EtcdClient') as mock_etcd_class:
+    with patch('threading.Thread'):
+        with patch('motor.controller.core.instance_assembler.EtcdClient'):
             assembler = InstanceAssembler(mock_config)
 
             assert assembler.etcd_config is mock_config.etcd_config
@@ -270,14 +232,7 @@ def test_register_existing_instance(instance_assembler, test_config):
     assert len(instance_assembler.instances) == 1
 
     # Second registration to same instance
-    msg2 = create_register_msg(
-        job_name,
-        test_config['pod_ip2'],
-        test_config,
-        ranktable=build_pod_ranktable(
-            pod_ip=test_config['pod_ip2'], pod_device_num=2 * test_config['tp'], rank_offset=2 * test_config['tp']
-        ),
-    )
+    msg2 = create_register_msg(job_name, test_config['pod_ip2'], test_config)
     result2 = instance_assembler.register(msg2)
     assert result2 == 0
 
@@ -359,14 +314,7 @@ def test_reregister_already_assembled_instance(instance_assembler, test_config):
     assert result == 0
 
     # Register second pod to complete assembly
-    reg_msg2 = create_register_msg(
-        job_name,
-        test_config['pod_ip2'],
-        test_config,
-        ranktable=build_pod_ranktable(
-            pod_ip=test_config['pod_ip2'], pod_device_num=2 * test_config['tp'], rank_offset=2 * test_config['tp']
-        ),
-    )
+    reg_msg2 = create_register_msg(job_name, test_config['pod_ip2'], test_config)
     endpoints2 = instance_assembler._build_multi_endpoints(reg_msg2, 2)
     msg2 = create_reregister_msg(
         job_name, test_config['pod_ip2'], instance_id=0, config=test_config, endpoints=endpoints2
@@ -453,14 +401,7 @@ def test_assembly_complete_instance_reregistration(instance_assembler, test_conf
 
     # Build endpoints for reregistration (multi-endpoint mode: 2 pods × 2 endpoints = 4 endpoints)
     reg_msg1 = create_register_msg(job_name, test_config['pod_ip1'], test_config)
-    reg_msg2 = create_register_msg(
-        job_name,
-        test_config['pod_ip2'],
-        test_config,
-        ranktable=build_pod_ranktable(
-            pod_ip=test_config['pod_ip2'], pod_device_num=2 * test_config['tp'], rank_offset=2 * test_config['tp']
-        ),
-    )
+    reg_msg2 = create_register_msg(job_name, test_config['pod_ip2'], test_config)
 
     endpoints1 = instance_assembler._build_multi_endpoints(reg_msg1, 0)
     endpoints2 = instance_assembler._build_multi_endpoints(reg_msg2, 2)
@@ -597,7 +538,7 @@ def test_start_command_sender_success(instance_assembler, test_config):
     job_name = "test_sender_success"
 
     # Create assembled instance
-    metadata = create_assembled_instance(instance_assembler, job_name, test_config)
+    create_assembled_instance(instance_assembler, job_name, test_config)
 
     # Mock successful send
     def stop_sleep(*args, **kwargs):
@@ -625,7 +566,7 @@ def test_start_command_sender_retry(instance_assembler, test_config):
     job_name = "test_sender_retry"
 
     # Create assembled instance
-    metadata = create_assembled_instance(instance_assembler, job_name, test_config)
+    create_assembled_instance(instance_assembler, job_name, test_config)
 
     # Mock failed send
     def stop_sleep(*args, **kwargs):
@@ -657,7 +598,7 @@ def test_start_command_sender_max_retries(instance_assembler, test_config):
     instance_assembler.send_cmd_retry_times = 2
 
     # Create assembled instance
-    metadata = create_assembled_instance(instance_assembler, job_name, test_config)
+    create_assembled_instance(instance_assembler, job_name, test_config)
 
     # Mock failed sends
     def stop_sleep(*args, **kwargs):
@@ -720,6 +661,7 @@ def test_persist_data_enabled(instance_assembler, test_config):
     instance_assembler.etcd_client.persist_data.reset_mock()
 
     result = instance_assembler.persist_data()
+    assert result is True
 
     # Verify persist was called on etcd_client
     instance_assembler.etcd_client.persist_data.assert_called_once()
@@ -835,7 +777,7 @@ def test_restore_data_invalid_checksum(instance_assembler):
     with patch.object(instance_assembler.etcd_client, 'restore_data', return_value=mock_persistent_states):
         result = instance_assembler.restore_data()
 
-        assert result == False  # Should fail because checksum validation fails
+        assert not result  # Should fail because checksum validation fails
         assert instance_assembler.ins_id_cnt == 1  # Should not restore invalid data
 
 
@@ -882,7 +824,7 @@ def test_restore_data_reconstruction_exception(instance_assembler):
         with patch.object(instance_assembler.etcd_client, 'restore_data', return_value=mock_persistent_states):
             result = instance_assembler.restore_data()
 
-            assert result == True  # Should succeed but skip problematic instance
+            assert result  # Should succeed but skip problematic instance
             assert len(instance_assembler.instances) == 0  # Should not restore invalid instance
 
 
@@ -934,7 +876,7 @@ def test_persistent_state_is_valid_method():
 
     # Create invalid state with wrong checksum
     invalid_state = PersistentState(data={"test": "data"}, version=1, timestamp=time.time(), checksum="wrong_checksum")
-    assert invalid_state.is_valid() == False
+    assert not invalid_state.is_valid()
 
 
 def test_restore_data_with_type_conversion():
@@ -988,7 +930,7 @@ def test_restore_data_with_type_conversion():
         assert metadata.instance.id == 208  # string "208" converted to int 208
         assert metadata.register_status == RegisterStatus.ASSEMBLED  # string "ASSEMBLED" converted to enum
         assert metadata.start_command_send_times == 0  # string "0" converted to int 0
-        assert metadata.is_reregister == False  # string "False" converted to bool False
+        assert not metadata.is_reregister  # string "False" converted to bool False
 
 
 def test_restore_data_with_invalid_enum_value():
@@ -1215,7 +1157,7 @@ def test_persist_and_restore_data_success(instance_assembler, test_config):
 def test_persist_data_with_checksum_validation(instance_assembler, test_config):
     """Test that persisted data includes correct checksums"""
     # Create test instance
-    metadata = create_assembled_instance(instance_assembler, "test_checksum", test_config)
+    create_assembled_instance(instance_assembler, "test_checksum", test_config)
 
     # Enable persistence
     instance_assembler.etcd_config.enable_etcd_persistence = True
@@ -1575,7 +1517,7 @@ def test_is_endpoints_enough_multi_endpoint_disabled():
         enable_multi_endpoints=False,
     )
     instance1.add_node_mgr("127.0.0.1", "8080", device_num=8)  # 1 node with 8 devices
-    assert instance1.is_endpoints_enough() == False  # Need 2 nodes (16/8=2)
+    assert not instance1.is_endpoints_enough()  # Need 2 nodes (16/8=2)
 
     # Test case 2: Enough node managers
     instance2 = Instance(
@@ -1588,7 +1530,7 @@ def test_is_endpoints_enough_multi_endpoint_disabled():
     )
     instance2.add_node_mgr("127.0.0.1", "8080", device_num=8)
     instance2.add_node_mgr("127.0.0.2", "8081", device_num=8)  # 2 nodes with 8 devices each
-    assert instance2.is_endpoints_enough() == True  # Have 2 nodes (16/8=2)
+    assert instance2.is_endpoints_enough()  # Have 2 nodes (16/8=2)
 
     # Test case 3: World size not divisible by device_num (should use ceiling)
     instance3 = Instance(
@@ -1602,7 +1544,7 @@ def test_is_endpoints_enough_multi_endpoint_disabled():
     instance3.add_node_mgr("127.0.0.1", "8080", device_num=8)
     instance3.add_node_mgr("127.0.0.2", "8081", device_num=8)
     instance3.add_node_mgr("127.0.0.3", "8082", device_num=8)  # 3 nodes with 8 devices each
-    assert instance3.is_endpoints_enough() == True  # Need 3 nodes (ceil(20/8)=3)
+    assert instance3.is_endpoints_enough()  # Need 3 nodes (ceil(20/8)=3)
 
     # Test case 4: Multi-endpoint enabled (should check dp_size)
     instance4 = Instance(
@@ -1619,7 +1561,7 @@ def test_is_endpoints_enough_multi_endpoint_disabled():
         1: Endpoint(id=1, ip="127.0.0.1", business_port="8001", mgmt_port="9001"),
     }
     instance4.add_endpoints("127.0.0.1", endpoints)
-    assert instance4.is_endpoints_enough() == False  # Need 4 endpoints
+    assert not instance4.is_endpoints_enough()  # Need 4 endpoints
 
     # Add more endpoints to reach dp_size
     endpoints2 = {
@@ -1627,7 +1569,7 @@ def test_is_endpoints_enough_multi_endpoint_disabled():
         3: Endpoint(id=3, ip="127.0.0.2", business_port="8003", mgmt_port="9003"),
     }
     instance4.add_endpoints("127.0.0.2", endpoints2)
-    assert instance4.is_endpoints_enough() == True  # Have 4 endpoints
+    assert instance4.is_endpoints_enough()  # Have 4 endpoints
 
 
 def test_get_all_endpoints_multi_endpoint_disabled():
@@ -1667,7 +1609,7 @@ def test_get_all_endpoints_multi_endpoint_disabled():
     instance2.add_endpoints("127.0.0.1", endpoints)
     all_eps2 = instance2.get_all_endpoints()
     assert len(all_eps2) == 3  # All 3 endpoints
-    assert set([ep.id for ep in all_eps2]) == {0, 1, 2}
+    assert {ep.id for ep in all_eps2} == {0, 1, 2}
 
     # Test case 3: Multiple pods with multi-endpoint disabled
     instance3 = Instance(

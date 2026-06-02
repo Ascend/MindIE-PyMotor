@@ -8,15 +8,13 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 
-import json
 import os
 import signal
 import threading
 import time
 
 from motor.common.resources.endpoint import Endpoint
-from motor.common.resources.http_msg_spec import Ranktable, RegisterMsg, StartCmdMsg, ReregisterMsg
-from motor.common.utils.env import Env
+from motor.common.resources.http_msg_spec import RegisterMsg, StartCmdMsg, ReregisterMsg
 from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.node_manager import NodeManagerConfig
@@ -36,8 +34,6 @@ class EngineManager(ThreadSafeSingleton):
             config = NodeManagerConfig.from_json()
         self._config = config
         self.config_lock = threading.RLock()
-        self.ranktable: Ranktable = None
-        self.instance_ranktable: Ranktable = None
         self.instance_id: int = 0
         self.d2d_peer_ips: list[str] | None = None
         self.node_rank: int = 0
@@ -92,8 +88,6 @@ class EngineManager(ThreadSafeSingleton):
         self.endpoints = start_cmd.endpoints
         self.d2d_peer_ips = start_cmd.d2d_peer_ips
         self.node_rank = start_cmd.node_rank
-
-        self._write_ranktable_to_file(start_cmd.ranktable)
         return True
 
     def stop(self) -> None:
@@ -103,31 +97,6 @@ class EngineManager(ThreadSafeSingleton):
                 self._register_thread.join(timeout=2.0)
         except Exception as e:
             logger.error("Failed to stop engine manager: %s", e)
-
-    def _write_ranktable_to_file(self, ins_ranktable: Ranktable | None):
-        """Write the instance's ranktable to a local JSON file."""
-        if ins_ranktable is None:
-            logger.info("Ranktable is None, skip writing to file")
-            return
-
-        output_path = Env.ranktable_path
-        if output_path is None:
-            logger.warning("RANKTABLE_PATH env is not set, skip writing ranktable to file")
-            return
-
-        try:
-            # If ranktable is Ranktable type, use model_dump; otherwise, use as list[DeviceInfo]
-            if isinstance(ins_ranktable, Ranktable):
-                rk_dump = ins_ranktable.model_dump(exclude_none=True)
-            else:
-                rk_dump = ins_ranktable
-
-            with open(output_path, "w") as f:
-                json.dump(rk_dump, f, ensure_ascii=False, indent=2)
-
-            logger.info("Ranktable written to %s", output_path)
-        except Exception as e:
-            logger.error("Failed to write ranktable to file: %s", e)
 
     def _check_cmd_para(self, start_cmd: StartCmdMsg) -> bool:
         # Read config values under lock protection
@@ -192,34 +161,9 @@ class EngineManager(ThreadSafeSingleton):
             return False
         return True
 
-    def _get_ranktable(self) -> Ranktable | None:
-        """Get ranktable from HCCL file"""
-        try:
-            with open(Env.hccl_path, "r") as f:
-                data = json.load(f)
-            if self._config.single_container_config.single_container_flag:
-                device_offset = self._config.single_container_config.device_offset
-                device_num = self._config.single_container_config.device_num
-                server_list_key = "server_list"
-                device_key = "device"
-                if (
-                    server_list_key in data
-                    and len(data[server_list_key]) > 0
-                    and device_key in data[server_list_key][0]
-                ):
-                    data[server_list_key][0][device_key] = data[server_list_key][0][device_key][
-                        device_offset : device_offset + device_num
-                    ]
-            return Ranktable(**data)
-        except Exception as e:
-            logger.error("Failed to load ranktable from %s: %s", Env.hccl_path, e)
-            return None
-
     def _gen_register_msg(self) -> RegisterMsg | None:
         if not self._check_config_paras():
             return None
-
-        self.ranktable = self._get_ranktable()
 
         # Read config values under lock protection
         with self.config_lock:
@@ -246,7 +190,6 @@ class EngineManager(ThreadSafeSingleton):
             parallel_config=parallel_config,
             enable_multi_endpoints=enable_multi_endpoints,
             device_num=device_num,
-            ranktable=self.ranktable,
             nnodes=nnodes,
         )
         return register_msg
