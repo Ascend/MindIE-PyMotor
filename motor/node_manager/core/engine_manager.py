@@ -39,6 +39,7 @@ class EngineManager(ThreadSafeSingleton):
         self.ranktable: Ranktable = None
         self.instance_ranktable: Ranktable = None
         self.instance_id: int = 0
+        self.node_rank: int = 0
         self.is_working = False
 
         self._fault_reporter = FaultReporter(config)
@@ -92,6 +93,7 @@ class EngineManager(ThreadSafeSingleton):
         logger.info("start_cmd is %s", start_cmd)
         self.instance_id = start_cmd.instance_id
         self.endpoints = start_cmd.endpoints
+        self.node_rank = start_cmd.node_rank
 
         self._write_ranktable_to_file(start_cmd.ranktable)
         return True
@@ -233,6 +235,7 @@ class EngineManager(ThreadSafeSingleton):
             parallel_config = self._config.basic_config.parallel_config
             enable_multi_endpoints = self._config.basic_config.enable_multi_endpoints
             device_num = self._config.basic_config.device_num
+            nnodes = self._config.basic_config.nnodes
 
         register_msg = RegisterMsg(
             job_name=job_name,
@@ -246,6 +249,7 @@ class EngineManager(ThreadSafeSingleton):
             enable_multi_endpoints=enable_multi_endpoints,
             device_num=device_num,
             ranktable=self.ranktable,
+            nnodes=nnodes,
         )
         return register_msg
 
@@ -270,6 +274,7 @@ class EngineManager(ThreadSafeSingleton):
             parallel_config = self._config.basic_config.parallel_config
             enable_multi_endpoints = self._config.basic_config.enable_multi_endpoints
             device_num = self._config.basic_config.device_num
+            nnodes = self._config.basic_config.nnodes
 
         reregister_msg = ReregisterMsg(
             job_name=job_name,
@@ -282,5 +287,7 @@ class EngineManager(ThreadSafeSingleton):
             device_num=device_num,
             instance_id=self.instance_id,
             endpoints=self.endpoints,
+            nnodes=nnodes,
+            node_rank=self.node_rank,
         )
         return reregister_msg

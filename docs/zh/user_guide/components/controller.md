@@ -40,7 +40,7 @@ Controller 进程入口为 `motor/controller/main.py`。启动时加载 `Control
 | 方法 | 路径 | 处理逻辑要点 |
 |------|------|----------------|
 | `POST` | `/controller/heartbeat` | 解析 `HeartbeatMsg`，`InstanceManager().handle_heartbeat` |
-| `POST` | `/controller/register` | 解析 `RegisterMsg`，`InstanceAssembler().register` |
+| `POST` | `/controller/register` | 解析 `RegisterMsg`（含 `nnodes` 字段，用于跨节点 PCP 场景），`InstanceAssembler().register` |
 | `POST` | `/controller/reregister` | 解析 `ReregisterMsg`，`InstanceAssembler().reregister` |
 | `POST` | `/controller/terminate_instance` | 解析 `TerminateInstanceMsg`，向各 Node Manager 下发 stop 等 |
 | `GET` | `/startup`、`/readiness`、`/liveness` | 探针类接口（实现见同文件内对应 handler） |
@@ -67,6 +67,16 @@ python -m motor.controller.main --config /path/to/controller_config.json
 ```
 
 非交互环境下主循环可能阻塞在 `select`/`wait`；退出可通过 SIGINT/SIGTERM（`signal_handler`）或交互输入 `stop`。
+
+### RegisterMsg 字段
+
+`POST /controller/register` 请求体（`RegisterMsg`）新增字段：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `nnodes` | int | 1 | 跨节点 PCP 期望节点数，来自 `engine_config` 中的 `nnodes` 配置。**仅在 `nnodes > 1` 时启用跨节点 PCP 组装逻辑，此时就绪条件从 `total_endpoints == dp_size` 切换为 `node_managers_count >= nnodes`**。 |
+
+`nnodes=1` 时行为与既有逻辑完全一致（向后兼容）。
 
 ## 报错与日志
 

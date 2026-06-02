@@ -227,6 +227,7 @@ class EndpointConfig:
     mgmt_port: int = 9001
     instance_id: int = 0
     dp_rank: int = 0
+    node_rank: int = 0
     config_path: str | None = None
     deploy_config: DeployConfig = None
 
@@ -253,6 +254,8 @@ class EndpointConfig:
                             help="Engine instance id")
         parser.add_argument("--dp-rank", type=int, default=0,
                             help="DP parallel rank")
+        parser.add_argument("--node-rank", type=int, default=0,
+                            help="PCP node rank (assigned by Motor Controller)")
         parser.add_argument("--config-path",
                             help="Path to engine-specific configuration file (JSON format)")
         return parser.parse_args()
@@ -272,6 +275,7 @@ class EndpointConfig:
             instance_id=cli_args.instance_id,
             config_path=cli_args.config_path,
             dp_rank=cli_args.dp_rank,
+            node_rank=cli_args.node_rank,
         )
         endpoint_config.validate()
         endpoint_config.load_deploy_config()

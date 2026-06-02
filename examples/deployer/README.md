@@ -109,3 +109,21 @@ examples/infer_engines/
 👉 **[examples/infer_engines 目录](../infer_engines)**
 
 该目录下提供多种场景的参考配置与脚本，便于按实际模型进行部署与调优。
+
+## Motor 自动管理的 vLLM 原生参数
+
+以下 vLLM 原生 CLI 参数由 PyMotor 在注册、组装、拉起过程中自动推导和注入，**无需在 `engine_config` 中手动指定**：
+
+| 参数 | 自动管理方式 |
+|------|-------------|
+| `data-parallel-address` | Controller 根据组装结果确定 master DP 节点 IP，通过 `StartCmdMsg.master_dp_ip` → `--master-dp-ip` 传入 EngineServer |
+| `data-parallel-rank` | 由 Endpoint ID 决定，NodeManager Daemon 以 `--dp-rank` 传入 EngineServer |
+| `node-rank` | Controller 按 NodeManager 注册先后顺序分配（先注册 = 主节点 rank 0），通过 `StartCmdMsg.node_rank` → `--node-rank` 传入 EngineServer |
+| `master-addr` | EngineServer 在检测到跨节点 PCP 模式（`nnodes > 1` 且 `master-port` 存在）时，自动将 `master-dp-ip` 作为 `--master-addr` 注入 vLLM |
+| `headless` | EngineServer 在跨节点 PCP 模式下，对 `node-rank != 0` 的从节点自动追加 `--headless` |
+
+> **注意**：跨节点 PCP 场景下，用户仅需在 `engine_config` 中配置 `nnodes` 和 `master-port`，其余参数由 Motor 自动处理。
+
+CLI 参数与 `engine_config` 键名的完整映射关系详见：
+
+👉 **[CLI 参数与 engine_config 映射指南](https://gitcode.com/Ascend/MindIE-PyMotor/blob/master/docs/zh/user_guide/cli_to_engine_config_guide.md)**

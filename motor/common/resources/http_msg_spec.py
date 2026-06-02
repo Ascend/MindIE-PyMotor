@@ -50,6 +50,7 @@ class RegisterMsg(BaseModel):
     enable_multi_endpoints: bool = Field(default=True, description="Whether to enable multi-endpoints mode")
     device_num: int = Field(..., description="Number of visible devices in the container")
     ranktable: Ranktable | None = Field(default=None, description="Ranktable managed by this nm")
+    nnodes: int = Field(default=1, description="PCP cross-node count, from engine_config")
 
 
 class StartCmdMsg(BaseModel):
@@ -64,6 +65,7 @@ class StartCmdMsg(BaseModel):
     endpoints: list[Endpoint] = Field(..., description="endpoints that managed by nm")
     master_dp_ip: str = Field(..., description="Master data parallel node IP address")
     ranktable: Ranktable | None = Field(default=None, description="Ranktable of the instance")
+    node_rank: int = Field(default=0, description="Node rank assigned by Controller (registration order)")
 
 
 class ReregisterMsg(BaseModel):
@@ -82,6 +84,8 @@ class ReregisterMsg(BaseModel):
     enable_multi_endpoints: bool = Field(default=True, description="Whether to enable multi-endpoints mode")
     device_num: int = Field(default=0, description="Number of visible devices in the container")
     endpoints: list[Endpoint] = Field(..., description="endpoints that managed by nm")
+    nnodes: int = Field(default=1, description="PCP cross-node count, from engine_config")
+    node_rank: int = Field(default=0, description="PCP node rank assigned by Controller")
 
 
 class HeartbeatMsg(BaseModel):

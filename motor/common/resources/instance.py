@@ -87,7 +87,7 @@ class ParallelConfig(BaseModel):
         pp_size: int = None,
         world_size: int = None,
         local_world_size: int = None,
-        **kwargs
+        **kwargs,
     ) -> None:
         dp_val = dp_size if dp_size is not None else 1
         pcp_val = pcp_size if pcp_size is not None else 1
@@ -119,7 +119,14 @@ class ParallelConfig(BaseModel):
         logger.debug(
             "ParallelConfig initialized with dp:%d, pcp:%d, tp:%d, ep:%d, pp:%d, "
             "world_size:%d, local_world_size:%d, enable_ep:%s",
-            dp_val, pcp_val, tp_val, ep_val, pp_val, world_size_val, local_world_size_val, enable_ep
+            dp_val,
+            pcp_val,
+            tp_val,
+            ep_val,
+            pp_val,
+            world_size_val,
+            local_world_size_val,
+            enable_ep,
         )
 
 
@@ -127,6 +134,7 @@ class Instance(BaseModel):
     """
     instance is a group of endpoints, it can be prefill or decode
     """
+
     job_name: str = Field(..., description="Instance job name")
     model_name: str = Field(..., description="Instance model name")
     id: int = Field(..., description="Instance ID")
@@ -134,12 +142,13 @@ class Instance(BaseModel):
     status: InsStatus = Field(default=InsStatus.INITIAL, description="Instance status")
     parallel_config: ParallelConfig | None = Field(None, description="Parallel configuration")
     enable_multi_endpoints: bool = Field(default=True, description="Whether to enable multi-endpoints mode")
-    node_managers: list[NodeManagerInfo] = Field(default_factory=list,
-                                             description="List of node manager info")
-    endpoints: dict[str, dict[int, Endpoint]] = Field(default_factory=dict,
-                                                      description="Mapping of endpoints by pod IP")
-    gathered_workload: Workload = Field(default_factory=Workload,
-                                        description="Gathered workload of all endpoints in the instance")
+    node_managers: list[NodeManagerInfo] = Field(default_factory=list, description="List of node manager info")
+    endpoints: dict[str, dict[int, Endpoint]] = Field(
+        default_factory=dict, description="Mapping of endpoints by pod IP"
+    )
+    gathered_workload: Workload = Field(
+        default_factory=Workload, description="Gathered workload of all endpoints in the instance"
+    )
 
     def __init__(self, **data) -> None:
         super().__init__(**data)
@@ -202,8 +211,13 @@ class Instance(BaseModel):
 
         expected_count = self._get_expected_endpoint_count()
         total_endpoints = current_endpoint_num + actual_added_num
-        logger.info("Add endpoints for pod_ip:%s, added endpoints number is %d, total endpoint number is %d/%d",
-                    pod_ip, actual_added_num, total_endpoints, expected_count)
+        logger.info(
+            "Add endpoints for pod_ip:%s, added endpoints number is %d, total endpoint number is %d/%d",
+            pod_ip,
+            actual_added_num,
+            total_endpoints,
+            expected_count,
+        )
 
     def del_endpoints(self, pod_ip: str):
         current_endpoint_num = self.get_endpoints_num()
@@ -219,13 +233,18 @@ class Instance(BaseModel):
 
         expected_count = self._get_expected_endpoint_count()
         remaining_endpoints = current_endpoint_num - del_endpoint_num
-        logger.info("Del endpoints for pod_ip:%s, deleted endpoints number is %d, total endpoint number is %d/%d",
-                    pod_ip, del_endpoint_num, remaining_endpoints, expected_count)
+        logger.info(
+            "Del endpoints for pod_ip:%s, deleted endpoints number is %d, total endpoint number is %d/%d",
+            pod_ip,
+            del_endpoint_num,
+            remaining_endpoints,
+            expected_count,
+        )
 
     def is_endpoints_enough(self) -> bool:
-        """ Return True if the instance has enough endpoints or node managers.
+        """Return True if the instance has enough endpoints or node managers.
         When enable_multi_endpoints is True:
-            Check if the number of endpoints equals dp_size.
+            Check if the number of non-headless endpoints equals dp_size.
         When enable_multi_endpoints is False:
             Check if the number of node managers equals expected node count.
             Expected node count = world_size / device_num_per_node
@@ -240,13 +259,12 @@ class Instance(BaseModel):
             if self.enable_multi_endpoints:
                 if self.endpoints is None:
                     return False
-                
+
                 dp_size = self.parallel_config.dp_size
                 total_endpoints = self.get_endpoints_num()
                 logger.debug("total endpoint size: %d dp size: %d", total_endpoints, dp_size)
                 if total_endpoints == dp_size:
-                    logger.info("Instance %d has enough endpoints now, endpoint number is %d",
-                                self.id, total_endpoints)
+                    logger.info("Instance %d has enough endpoints now, endpoint number is %d", self.id, total_endpoints)
                     return True
                 return False
             else:
@@ -255,11 +273,18 @@ class Instance(BaseModel):
                     return False
 
                 actual_node_count = len(self.node_managers)
-                logger.debug("world_size: %d, expected_node_count: %d, actual_node_count: %d",
-                             self.parallel_config.world_size, expected_node_count, actual_node_count)
+                logger.debug(
+                    "world_size: %d, expected_node_count: %d, actual_node_count: %d",
+                    self.parallel_config.world_size,
+                    expected_node_count,
+                    actual_node_count,
+                )
                 if actual_node_count == expected_node_count:
-                    logger.info("Instance %d has enough node managers now, node manager number is %d",
-                                self.id, actual_node_count)
+                    logger.info(
+                        "Instance %d has enough node managers now, node manager number is %d",
+                        self.id,
+                        actual_node_count,
+                    )
                     return True
                 return False
 
@@ -287,11 +312,12 @@ class Instance(BaseModel):
                     event = ServerExceptionEvent(
                         endpoint_ip=endpoint_ip,
                         endpoint_ids=endpoint_ids,
-                        reason_id=ServerExceptionReason.HEARTBEAT_TIMEOUT
+                        reason_id=ServerExceptionReason.HEARTBEAT_TIMEOUT,
                     )
                     Observability().add_alarm(event)
-                logger.warning("Instance %s(id:%d)'s endpoints %s have heartbeat timeout",
-                               self.job_name, self.id, dead_endpoints)
+                logger.warning(
+                    "Instance %s(id:%d)'s endpoints %s have heartbeat timeout", self.job_name, self.id, dead_endpoints
+                )
                 return False
             return True
 
@@ -320,11 +346,12 @@ class Instance(BaseModel):
                     event = ServerExceptionEvent(
                         endpoint_ip=endpoint_ip,
                         endpoint_ids=endpoint_ids,
-                        reason_id=ServerExceptionReason.ENDPOINT_ABNORMAL
+                        reason_id=ServerExceptionReason.ENDPOINT_ABNORMAL,
                     )
                     Observability().add_alarm(event)
-                logger.warning("Instance %s(id:%d)'s endpoints %s have ABNORMAL status",
-                               self.job_name, self.id, abnormal_endpoints)
+                logger.warning(
+                    "Instance %s(id:%d)'s endpoints %s have ABNORMAL status", self.job_name, self.id, abnormal_endpoints
+                )
                 return True
             return False
 
@@ -336,9 +363,11 @@ class Instance(BaseModel):
         with self._lock:
             if ip in self.endpoints:
                 if len(self.endpoints[ip]) != len(status):
-                    logger.error(f"Heartbeat status size {len(status)} is not equal to "
-                                 f"endpoints size {len(self.endpoints[ip])} for pod_ip {ip} "
-                                 f"in instance {self.job_name}")
+                    logger.error(
+                        f"Heartbeat status size {len(status)} is not equal to "
+                        f"endpoints size {len(self.endpoints[ip])} for pod_ip {ip} "
+                        f"in instance {self.job_name}"
+                    )
                     return False
                 for endpoint in self.endpoints[ip].values():
                     endpoint.hb_timestamp = timestamp
@@ -356,40 +385,43 @@ class Instance(BaseModel):
             return 0
 
     def get_endpoints(self, ip: str) -> MappingProxyType[int, Endpoint]:
-        """ Get endpoints by pod(server) ip """
+        """Get endpoints by pod(server) ip"""
         with self._lock:
             return MappingProxyType(self.endpoints.get(ip, {}))
+
+    def invalidate_endpoints_cache(self) -> None:
+        """Invalidate the cached endpoints tuple (e.g. after headless flag changes)."""
+        with self._lock:
+            self._endpoints_version += 1
 
     def get_all_endpoints(self) -> tuple[Endpoint, ...]:
         """Return a tuple of all endpoints, with versioned caching.
 
         When enable_multi_endpoints is True:
-            Return all endpoints.
+            Return all endpoints (excluding headless).
         When enable_multi_endpoints is False:
-            Return only endpoints with id=0 (one endpoint per pod).
+            Return only endpoints with id=0 (one endpoint per pod, excluding headless).
 
-        Cache is invalidated only when the endpoints structure changes (add/del),
-        not when endpoint content (workload, status) changes. O(1) on cache hit,
-        O(n) tuple build on cache miss.
+        Cache is invalidated when endpoints structure changes (add/del) or when
+        invalidate_endpoints_cache() is called (e.g. headless flag change).
         """
         with self._lock:
             # O(1) version check
-            if (
-                self._cached_endpoints_tuple is not None
-                and self._cached_endpoints_version == self._endpoints_version
-            ):
+            if self._cached_endpoints_tuple is not None and self._cached_endpoints_version == self._endpoints_version:
                 return self._cached_endpoints_tuple
 
             # Rebuild tuple only when version changed
             eps = []
             for pod_endpoints in self.endpoints.values():
                 for endpoint in pod_endpoints.values():
+                    if endpoint.headless:
+                        continue
                     if self.enable_multi_endpoints:
                         eps.append(endpoint)
                     else:
                         if endpoint.id == 0:
                             eps.append(endpoint)
-            
+
             self._cached_endpoints_tuple = tuple(eps)
             self._cached_endpoints_version = self._endpoints_version
             return self._cached_endpoints_tuple
@@ -408,7 +440,7 @@ class Instance(BaseModel):
         logger.info(f"Instance {self.job_name}(id:{self.id}) status updated to {status}")
 
     def _get_expected_endpoint_count(self) -> int:
-        """ Get expected endpoint count based on enable_multi_endpoints flag.
+        """Get expected endpoint count based on enable_multi_endpoints flag.
         When enable_multi_endpoints is True:
             Return dp_size (expected endpoint count).
         When enable_multi_endpoints is False:
@@ -417,7 +449,7 @@ class Instance(BaseModel):
         if self.parallel_config is None:
             logger.warning("parallel_config is None")
             return 0
-        
+
         if self.enable_multi_endpoints:
             return self.parallel_config.dp_size
         else:
@@ -447,8 +479,12 @@ class ReadOnlyInstance:
         """Delegate attribute access to the wrapped instance for read-only properties."""
         # Block modification methods
         modification_methods = {
-            'add_node_mgr', 'del_node_mgr', 'add_endpoints', 'del_endpoints',
-            'update_heartbeat', 'update_instance_status'
+            'add_node_mgr',
+            'del_node_mgr',
+            'add_endpoints',
+            'del_endpoints',
+            'update_heartbeat',
+            'update_instance_status',
         }
 
         if name in modification_methods:
@@ -470,7 +506,7 @@ class ReadOnlyInstance:
             job_name=self._instance.job_name,
             model_name=self._instance.model_name,
             id=self._instance.id,
-            role=self._instance.role
+            role=self._instance.role,
         )
         # Copy status and other attributes
         copied_instance.status = self._instance.status
@@ -508,7 +544,7 @@ class ReadOnlyInstance:
             job_name=self._instance.job_name,
             model_name=self._instance.model_name,
             id=self._instance.id,
-            role=self._instance.role
+            role=self._instance.role,
         )
         # Copy status and other attributes
         copied_instance.status = self._instance.status

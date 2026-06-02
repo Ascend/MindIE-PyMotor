@@ -26,23 +26,19 @@ from motor.common.resources.instance import ParallelConfig, PDRole
 @pytest.fixture
 def config_data():
     return {
-        "api_config": {
-            "controller_api_dns": "localhost",
-            "controller_api_port": 8080,
-            "node_manager_port": 8080
-        },
+        "api_config": {"controller_api_dns": "localhost", "controller_api_port": 8080, "node_manager_port": 8080},
         "basic_config": {
             "parallel_config": {"tp_size": 2, "pp_size": 1, "dp_size": 2},
             "role": "both",
-            "model_name": "vllm"
+            "model_name": "vllm",
         },
         "logging_config": {
             "log_level": "DEBUG",
             "log_max_line_length": 4096,
             "host_log_dir": "/tmp/",
             "log_format": "%(levelname)s [%(filename)s:%(lineno)d] %(message)s",
-            "log_date_format": "%Y-%m-%d %H:%M:%S"
-        }
+            "log_date_format": "%Y-%m-%d %H:%M:%S",
+        },
     }
 
 
@@ -51,6 +47,7 @@ def create_config_mock(config_dataa):
         if "user_config.json" in file_path:
             return mock_open(read_data=json.dumps(config_data)).return_value
         return mock_open().return_value
+
     return mock_side_effect
 
 
@@ -72,7 +69,7 @@ def create_config_object():
             setattr(config, field_name, None)
     return config
 
-    
+
 @patch.dict('os.environ', {'ROLE': 'both'})
 @patch('motor.config.node_manager.safe_open')
 def test_init_success(mock_safe_open, config_data):
@@ -101,12 +98,26 @@ def test_init_success(mock_safe_open, config_data):
     assert config.logging_config.host_log_dir == "/tmp/"
     assert config.logging_config.log_format == "%(levelname)s [%(filename)s:%(lineno)d] %(message)s"
     assert config.logging_config.log_date_format == "%Y-%m-%d %H:%M:%S"
-    
 
-@pytest.mark.parametrize("invalid_config,expected_error,role_env", [
-    ({"role": "both"}, "Missing required config field", "both"),
-    ({"parallel_config": {"tp_size": 1, "pp_size": 1}, "role": "invalid", "controller_api_dns": "localhost", "controller_api_port": 8080, "node_manager_port": 8080, "model_name": "vllm"}, "Invalid role value", "invalid"),
-])
+
+@pytest.mark.parametrize(
+    "invalid_config,expected_error,role_env",
+    [
+        ({"role": "both"}, "Missing required config field", "both"),
+        (
+            {
+                "parallel_config": {"tp_size": 1, "pp_size": 1},
+                "role": "invalid",
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+            },
+            "Invalid role value",
+            "invalid",
+        ),
+    ],
+)
 @patch.dict('os.environ')
 def test_config_validation_errors(invalid_config, expected_error, role_env):
     os.environ['ROLE'] = role_env
@@ -114,12 +125,14 @@ def test_config_validation_errors(invalid_config, expected_error, role_env):
     config = create_config_object()
 
     if "parallel_config" not in invalid_config:
-        invalid_config.update({
-            "controller_api_dns": "localhost",
-            "controller_api_port": 8080,
-            "node_manager_port": 8080,
-            "model_name": "vllm"
-        })
+        invalid_config.update(
+            {
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+            }
+        )
 
     try:
         NodeManagerConfig._update_from_config_data(config, invalid_config)
@@ -137,7 +150,7 @@ def test_logging_config_defaults(config_data):
         "controller_api_dns": "localhost",
         "controller_api_port": 8080,
         "node_manager_port": 8080,
-        "model_name": "vllm"
+        "model_name": "vllm",
     }
 
     config = create_config_object()
@@ -149,26 +162,64 @@ def test_logging_config_defaults(config_data):
     assert config.logging_config.host_log_dir is not None
     # Default format aligned with vLLM field order; engine_server uses single module bucket
     assert config.logging_config.log_format == (
-        '(%(processName)s pid=%(process)d) %(levelname)s %(asctime)s '
-        '[%(name)s][%(fileinfo)s:%(lineno)d] %(message)s'
+        '(%(processName)s pid=%(process)d) %(levelname)s %(asctime)s [%(name)s][%(fileinfo)s:%(lineno)d] %(message)s'
     )
     assert config.logging_config.log_date_format == '%m-%d %H:%M:%S'
 
 
-@pytest.mark.parametrize("invalid_config,expected_error", [
-    ({"parallel_config": {"tp_size": 2, "pp_size": 1}, "role": "both", "controller_api_dns": "localhost",
-      "controller_api_port": 8080, "node_manager_port": 8080, "model_name": "vllm",
-      "logging_config": {"log_level": "INVALID_LEVEL"}}, "log_level must be one of"),
-    ({"parallel_config": {"tp_size": 2, "pp_size": 1}, "role": "both", "controller_api_dns": "localhost",
-      "controller_api_port": 8080, "node_manager_port": 8080, "model_name": "vllm",
-      "logging_config": {"log_level": "INVALID"}}, "log_level must be one of"),
-    ({"parallel_config": {"tp_size": 2, "pp_size": 1}, "role": "both", "controller_api_dns": "localhost",
-      "controller_api_port": 8080, "node_manager_port": 8080, "model_name": "vllm",
-      "logging_config": {"log_file": "/nonexistent/path"}}, "log_file must be a string or null"),
-    ({"parallel_config": {"tp_size": 2, "pp_size": 1}, "role": "both", "controller_api_dns": "localhost",
-      "controller_api_port": 8080, "node_manager_port": 8080, "model_name": "vllm",
-      "logging_config": {"log_format": ""}}, "log_format must be a string"),
-])
+@pytest.mark.parametrize(
+    "invalid_config,expected_error",
+    [
+        (
+            {
+                "parallel_config": {"tp_size": 2, "pp_size": 1},
+                "role": "both",
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+                "logging_config": {"log_level": "INVALID_LEVEL"},
+            },
+            "log_level must be one of",
+        ),
+        (
+            {
+                "parallel_config": {"tp_size": 2, "pp_size": 1},
+                "role": "both",
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+                "logging_config": {"log_level": "INVALID"},
+            },
+            "log_level must be one of",
+        ),
+        (
+            {
+                "parallel_config": {"tp_size": 2, "pp_size": 1},
+                "role": "both",
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+                "logging_config": {"log_file": "/nonexistent/path"},
+            },
+            "log_file must be a string or null",
+        ),
+        (
+            {
+                "parallel_config": {"tp_size": 2, "pp_size": 1},
+                "role": "both",
+                "controller_api_dns": "localhost",
+                "controller_api_port": 8080,
+                "node_manager_port": 8080,
+                "model_name": "vllm",
+                "logging_config": {"log_format": ""},
+            },
+            "log_format must be a string",
+        ),
+    ],
+)
 @patch.dict('os.environ', {'ROLE': 'both'})
 def test_logging_config_validation_errors(invalid_config, expected_error):
     """Test logging configuration validation errors"""
@@ -180,7 +231,7 @@ def test_logging_config_validation_errors(invalid_config, expected_error):
     except ValueError:
         pass
 
-    
+
 @patch.dict('os.environ', {'ROLE': 'both'})
 def test_generate_endpoint_ports(config_data):
     config_data_with_dp = config_data.copy()
@@ -188,10 +239,10 @@ def test_generate_endpoint_ports(config_data):
 
     config = create_config_object()
     NodeManagerConfig._update_from_config_data(config, config_data_with_dp)
-    
+
     # Set device_num for testing (simulating visible devices)
     config.basic_config.device_num = 8  # 8 devices for testing
-    
+
     NodeManagerConfig._generate_endpoint_ports(config)
 
     assert config.endpoint_config.endpoint_num == 2
@@ -199,7 +250,8 @@ def test_generate_endpoint_ports(config_data):
     assert len(config.endpoint_config.service_ports) == 2
     assert config.endpoint_config.mgmt_ports == ["10001", "10003"]
     assert config.endpoint_config.service_ports == ["10000", "10002"]
-    
+
+
 @patch.dict('os.environ', {'ROLE': 'both', 'USER_CONFIG_PATH': 'tests/jsons/user_config.json'.replace('\\', '/')})
 @patch('motor.config.node_manager.safe_open')
 def test_non_singleton_behavior(mock_safe_open, config_data):
@@ -213,7 +265,7 @@ def test_non_singleton_behavior(mock_safe_open, config_data):
     assert config1 is not config2
     # But they should have the same configuration values
     assert config1.basic_config.role == config2.basic_config.role
-    
+
 
 @patch.dict('os.environ', {'ROLE': 'both', 'USER_CONFIG_PATH': 'tests/jsons/user_config.json'.replace('\\', '/')})
 @patch('motor.config.node_manager.safe_open')
@@ -242,16 +294,19 @@ def test_reload_success(mock_safe_open, config_data):
     mock_safe_open.side_effect = reload_mock_side_effect
 
     # Mock os.path.exists and os.path.getmtime for our test paths
-    with patch('os.path.exists', return_value=True), \
-         patch('os.path.getmtime', return_value=1234567890.0), \
-         patch('pathlib.Path.exists', return_value=True), \
-         patch('pathlib.Path.stat') as mock_path_stat:
+    with (
+        patch('os.path.exists', return_value=True),
+        patch('os.path.getmtime', return_value=1234567890.0),
+        patch('pathlib.Path.exists', return_value=True),
+        patch('pathlib.Path.stat') as mock_path_stat,
+    ):
         mock_path_stat.return_value = MagicMock(st_mtime=1234567890.0)
         result = config.reload()
 
     assert result is True
     assert config.basic_config.model_name == "modified_model"
     assert config.api_config.node_manager_port == 9090
+
 
 @patch.dict('os.environ', {'ROLE': 'both', 'USER_CONFIG_PATH': '/tmp/test_node_manager_config.json'})
 @patch('motor.config.node_manager.safe_open')
@@ -304,15 +359,18 @@ def test_validate_config_success():
     config.validate_config()
 
 
-@pytest.mark.parametrize("param,value,expected_error", [
-    ("node_manager_port", 0, "node_manager_port must be in range 1-65535"),
-    ("node_manager_port", 65536, "node_manager_port must be in range 1-65535"),
-    ("base_port", -1, "base_port must be in range 0-65535"),
-    ("endpoint_num", -1, "endpoint_num cannot be negative"),
-    ("heartbeat_interval_seconds", 0, "heartbeat_interval_seconds must be greater than 0"),
-    ("log_level", "INVALID", "log_level must be one of"),
-    ("log_max_line_length", 0, "log_max_line_length must be greater than 0"),
-])
+@pytest.mark.parametrize(
+    "param,value,expected_error",
+    [
+        ("node_manager_port", 0, "node_manager_port must be in range 1-65535"),
+        ("node_manager_port", 65536, "node_manager_port must be in range 1-65535"),
+        ("base_port", -1, "base_port must be in range 0-65535"),
+        ("endpoint_num", -1, "endpoint_num cannot be negative"),
+        ("heartbeat_interval_seconds", 0, "heartbeat_interval_seconds must be greater than 0"),
+        ("log_level", "INVALID", "log_level must be one of"),
+        ("log_max_line_length", 0, "log_max_line_length must be greater than 0"),
+    ],
+)
 def test_validate_config_errors(param, value, expected_error):
     """Test configuration validation errors"""
     config = create_config_object()
@@ -394,27 +452,22 @@ def test_get_config_summary():
 def test_from_json_success():
     """Test loading configuration from JSON data"""
     test_config = {
-        "api_config": {
-            "node_manager_port": 8080
-        },
+        "api_config": {"node_manager_port": 8080},
         "basic_config": {
             "parallel_config": {"tp_size": 1, "pp_size": 1},
             "role": "both",
             "model_name": "test_model",
-            "heartbeat_interval_seconds": 2
+            "heartbeat_interval_seconds": 2,
         },
-        "logging_config": {
-            "log_level": "DEBUG",
-            "log_max_line_length": 4096
-        }
+        "logging_config": {"log_level": "DEBUG", "log_max_line_length": 4096},
     }
 
     config = create_config_object()
     NodeManagerConfig._update_from_config_data(config, test_config)
-    
+
     # Set device_num for testing (simulating visible devices)
     config.basic_config.device_num = 8  # 8 devices for testing
-    
+
     NodeManagerConfig._generate_endpoint_ports(config)
 
     assert config.api_config.node_manager_port == 8080
@@ -426,7 +479,9 @@ def test_from_json_success():
 @patch.dict('os.environ', {'ROLE': 'prefill'})
 def test_generate_endpoint_ports_with_cp_prefill():
     config = create_config_object()
-    config.basic_config.parallel_config = ParallelConfig(dp_size=4, tp_size=2, pp_size=1, pcp_size=2, local_world_size=4, world_size=16)
+    config.basic_config.parallel_config = ParallelConfig(
+        dp_size=4, tp_size=2, pp_size=1, pcp_size=2, local_world_size=4, world_size=16
+    )
     config.basic_config.role = PDRole.ROLE_P
     config.basic_config.enable_multi_endpoints = True
     config.basic_config.device_num = 8
@@ -479,3 +534,115 @@ def test_from_json_loads_union_config_for_hybrid():
     assert config.basic_config.parallel_config.pp_size == 1
     assert config.basic_config.device_num == 4
     assert config.endpoint_config.endpoint_num == 2
+
+
+# ===== Cross-Node PCP Tests =====
+
+
+@patch.dict("os.environ", {"ROLE": "prefill"})
+def test_cross_node_pcp_adjusts_local_world_size():
+    """When nnodes > 1 and pcp_size > 1, local_world_size is adjusted for per-node PCP."""
+    user_config = {
+        "motor_deploy_config": {
+            "hardware_type": "800I-A3",
+            "p_instances_num": 1,
+            "single_p_instance_pod_num": 2,
+            "p_pod_npu_num": 16,
+        },
+        "motor_engine_prefill_config": {
+            "engine_type": "vllm",
+            "enable_multi_endpoints": True,
+            "engine_config": {
+                "model": "/mnt/weight/test",
+                "data_parallel_size": 1,
+                "tensor_parallel_size": 16,
+                "prefill_context_parallel_size": 2,
+                "nnodes": 2,
+                "master_port": 7001,
+            },
+        },
+        "motor_engine_decode_config": {
+            "engine_type": "vllm",
+            "engine_config": {"model": "/mnt/weight/test"},
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(user_config, f)
+        temp_path = f.name
+
+    try:
+        config = NodeManagerConfig.from_json(temp_path)
+    finally:
+        os.unlink(temp_path)
+
+    # PCP=2, TP=16, nnodes=2: per-node PCP=1, local_world_size=1*16*1=16
+    assert config.basic_config.parallel_config.pcp_size == 2  # global PCP unchanged
+    assert config.basic_config.parallel_config.tp_size == 16
+    assert config.basic_config.parallel_config.local_world_size == 16  # per-node adjusted
+    assert config.basic_config.parallel_config.world_size == 32  # global: 1*2*16*1
+    assert config.basic_config.nnodes == 2
+    assert config.basic_config.device_num == 16
+    # endpoint_num: min(dp=1, 16//16=1) = 1
+    assert config.endpoint_config.endpoint_num == 1
+
+
+@patch.dict("os.environ", {"ROLE": "prefill"})
+def test_cross_node_pcp_no_adjustment_when_nnodes_is_one():
+    """When nnodes=1, local_world_size is NOT adjusted (backward compatible)."""
+    user_config = {
+        "motor_deploy_config": {
+            "hardware_type": "800I-A3",
+            "p_instances_num": 1,
+            "single_p_instance_pod_num": 1,
+            "p_pod_npu_num": 8,
+        },
+        "motor_engine_prefill_config": {
+            "engine_type": "vllm",
+            "enable_multi_endpoints": True,
+            "engine_config": {
+                "model": "/mnt/weight/test",
+                "data_parallel_size": 1,
+                "tensor_parallel_size": 4,
+                "prefill_context_parallel_size": 2,
+            },
+        },
+        "motor_engine_decode_config": {
+            "engine_type": "vllm",
+            "engine_config": {"model": "/mnt/weight/test"},
+        },
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(user_config, f)
+        temp_path = f.name
+
+    try:
+        config = NodeManagerConfig.from_json(temp_path)
+    finally:
+        os.unlink(temp_path)
+
+    # nnodes defaults to 1, so no adjustment: local_world_size = 2*4*1 = 8
+    assert config.basic_config.nnodes == 1
+    assert config.basic_config.parallel_config.local_world_size == 8
+
+
+@patch.dict("os.environ", {"ROLE": "prefill"})
+def test_cross_node_pcp_generate_endpoint_ports():
+    """_generate_endpoint_ports works with adjusted local_world_size for cross-node PCP."""
+    config = create_config_object()
+    config.basic_config.parallel_config = ParallelConfig(
+        dp_size=1, tp_size=16, pp_size=1, pcp_size=2, local_world_size=16, world_size=32
+    )
+    config.basic_config.role = PDRole.ROLE_P
+    config.basic_config.enable_multi_endpoints = True
+    config.basic_config.device_num = 16
+    config.basic_config.nnodes = 2
+
+    NodeManagerConfig._generate_endpoint_ports(config)
+
+    # PCP=2, TP=16, nnodes=2: per-node PCP=1, local_world_size=16
+    # endpoint_num = min(dp=1, 16//16) = 1
+    assert config.endpoint_config.endpoint_num == 1
+    assert len(config.endpoint_config.service_ports) == 1
+    assert len(config.endpoint_config.mgmt_ports) == 1

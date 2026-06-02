@@ -86,6 +86,8 @@ class BasicConfig:
     parallel_config: ParallelConfig = field(default_factory=ParallelConfig)
     # Multi-endpoints configuration
     enable_multi_endpoints: bool = True
+    # Cross-node PCP configuration
+    nnodes: int = 1
 
 
 @dataclass
@@ -289,7 +291,7 @@ class NodeManagerConfig:
             engine_config_key = MOTOR_ENGINE_DECODE_CONFIG_KEY
         elif Env.role in ("union", "both"):
             engine_config_key = MOTOR_ENGINE_UNION_CONFIG_KEY
-        
+
         if not engine_config_key or engine_config_key not in user_cfg:
             return user_cfg
 
@@ -301,15 +303,39 @@ class NodeManagerConfig:
 
         if BASIC_CONFIG_KEY not in config_data:
             config_data[BASIC_CONFIG_KEY] = {}
-        
+
         resolver = ConfigResolver(engine_config)
         config_data[BASIC_CONFIG_KEY][MODEL_NAME_KEY] = resolver.get_model_name("")
         config_data[BASIC_CONFIG_KEY][HARDWARE_TYPE_KEY] = user_cfg["motor_deploy_config"][HARDWARE_TYPE_KEY]
 
+        # Read nnodes from engine_config for cross-node PCP support
+        engine_cfg = engine_config.get(ENGINE_CONFIG_KEY, {})
+        try:
+            config_data[BASIC_CONFIG_KEY]["nnodes"] = int(engine_cfg.get("nnodes", 1))
+        except (TypeError, ValueError):
+            config_data[BASIC_CONFIG_KEY]["nnodes"] = 1
+
         if Env.role in ("encode", "prefill", "decode", "union", "both"):
             config_data[BASIC_CONFIG_KEY]["parallel_config"] = resolver.get_parallel_config()
             config_data[BASIC_CONFIG_KEY][ENABLE_MULTI_ENDPOINTS_KEY] = resolver.get_enable_multi_endpoints()
-        
+
+        # Adjust local_world_size for cross-node PCP: each node contributes pcp/nnodes PCP ranks
+        nnodes = config_data[BASIC_CONFIG_KEY].get("nnodes", 1)
+        pc = config_data[BASIC_CONFIG_KEY].get("parallel_config", {})
+        pcp_size = pc.get("pcp_size", 1)
+        if isinstance(nnodes, int) and nnodes > 1 and pcp_size > 1 and pcp_size % nnodes == 0:
+            per_node_pcp = pcp_size // nnodes
+            per_node_tp = pc.get("tp_size", 1)
+            per_node_pp = pc.get("pp_size", 1)
+            pc["local_world_size"] = per_node_pcp * per_node_tp * per_node_pp
+            logger.info(
+                "Cross-node PCP detected (nnodes=%d, pcp=%d): per-node local_world_size adjusted from %d to %d",
+                nnodes,
+                pcp_size,
+                pcp_size * per_node_tp * per_node_pp,
+                pc["local_world_size"],
+            )
+
         _update_tls_config([MGMT_TLS_CONFIG], config_data, user_cfg)
 
         return config_data

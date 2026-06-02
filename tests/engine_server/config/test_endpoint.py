@@ -13,7 +13,6 @@
 import json
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -27,9 +26,8 @@ from motor.config.endpoint import (
     EndpointConfig,
     PREFILL_PARALLEL_CONFIG_KEY,
     DECODE_PARALLEL_CONFIG_KEY,
-    ENCODE_PARALLEL_CONFIG_KEY
+    ENCODE_PARALLEL_CONFIG_KEY,
 )
-from motor.config.tls_config import TLSConfig
 from motor.engine_server.constants import constants
 
 
@@ -50,8 +48,7 @@ def test_parallel_config_default_values():
 
 def test_parallel_config_with_resolver_values():
     """Test that world_size and local_world_size are accepted when provided"""
-    config = ParallelConfig(dp_size=2, tp_size=2, pp_size=1, pcp_size=1,
-                            world_size=4, local_world_size=2)
+    config = ParallelConfig(dp_size=2, tp_size=2, pp_size=1, pcp_size=1, world_size=4, local_world_size=2)
     assert config.world_size == 4
     assert config.local_world_size == 2
 
@@ -64,8 +61,7 @@ def test_parallel_config_world_size_explicit():
 
 def test_parallel_config_from_dict():
     """Test ParallelConfig.from_dict"""
-    data = {"dp_size": 4, "tp_size": 2, "pp_size": 1, "dp_rpc_port": 9001,
-            "world_size": 8, "local_world_size": 2}
+    data = {"dp_size": 4, "tp_size": 2, "pp_size": 1, "dp_rpc_port": 9001, "world_size": 8, "local_world_size": 2}
     config = ParallelConfig.from_dict(data)
     assert config.dp_size == 4
     assert config.tp_size == 2
@@ -73,9 +69,6 @@ def test_parallel_config_from_dict():
     assert config.dp_rpc_port == 9001
     assert config.world_size == 8
     assert config.local_world_size == 2
-
-
-
 
 
 # --- ModelConfig tests ---
@@ -98,6 +91,7 @@ def test_model_config_from_dict():
     assert config.prefill_parallel_config.dp_size == 2
     assert config.decode_parallel_config.dp_size == 4
     assert config.encode_parallel_config.dp_size == 2
+
 
 # --- EngineConfig tests ---
 
@@ -298,7 +292,7 @@ def encode_engine_config_file():
                 "parallel_config": {"dp_size": 2, "tp_size": 1},
             },
             "engine_config": {"max_model_len": 2048},
-        }
+        },
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(config, f)
@@ -402,6 +396,7 @@ def test_endpoint_config_default_values():
     assert config.mgmt_port == 9001
     assert config.instance_id == 0
     assert config.dp_rank == 0
+    assert config.node_rank == 0
     assert config.config_path is None
 
 
@@ -409,12 +404,18 @@ def test_endpoint_config_parse_cli_args():
     """Test EndpointConfig.parse_cli_args"""
     args = [
         "prog",
-        "--host", "192.168.1.1",
-        "--role", "prefill",
-        "--port", "8080",
-        "--mgmt-port", "9080",
-        "--config-path", "/path/to/config.json",
-        "--instance-id", "1",
+        "--host",
+        "192.168.1.1",
+        "--role",
+        "prefill",
+        "--port",
+        "8080",
+        "--mgmt-port",
+        "9080",
+        "--config-path",
+        "/path/to/config.json",
+        "--instance-id",
+        "1",
     ]
     with patch("sys.argv", args):
         parsed = EndpointConfig.parse_cli_args()
@@ -424,6 +425,48 @@ def test_endpoint_config_parse_cli_args():
     assert parsed.mgmt_port == 9080
     assert parsed.config_path == "/path/to/config.json"
     assert parsed.instance_id == 1
+
+
+def test_endpoint_config_parse_node_rank_cli_arg():
+    """Test EndpointConfig.parse_cli_args includes --node-rank"""
+    args = [
+        "prog",
+        "--host",
+        "192.168.1.1",
+        "--role",
+        "prefill",
+        "--port",
+        "8080",
+        "--mgmt-port",
+        "9080",
+        "--config-path",
+        "/path/to/config.json",
+        "--node-rank",
+        "2",
+    ]
+    with patch("sys.argv", args):
+        parsed = EndpointConfig.parse_cli_args()
+    assert parsed.node_rank == 2
+
+
+def test_endpoint_config_node_rank_default():
+    """Test EndpointConfig.node_rank defaults to 0 when not specified"""
+    args = [
+        "prog",
+        "--host",
+        "192.168.1.1",
+        "--role",
+        "prefill",
+        "--port",
+        "8080",
+        "--mgmt-port",
+        "9080",
+        "--config-path",
+        "/path/to/config.json",
+    ]
+    with patch("sys.argv", args):
+        parsed = EndpointConfig.parse_cli_args()
+    assert parsed.node_rank == 0
 
 
 def test_endpoint_config_validate_invalid_role():
@@ -661,7 +704,7 @@ def test_endpoint_config_load_deploy_config_updates_dp_rpc_port_encode():
                 "parallel_config": {"dp_size": 1, "dp_rpc_port": 9000},
             },
             "engine_config": {},
-        }
+        },
     }
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(encode_config, f)
@@ -695,12 +738,14 @@ def test_endpoint_config_update_engine_config():
         prefill_parallel_config=prefill,
         decode_parallel_config=decode,
     )
-    engine_config = EngineConfig(configs={
-        "kv-events-config": {
-            "endpoint": "127.0.0.1*:10000",
-            "replay_endpoint": "127.0.0.1*:10001",
+    engine_config = EngineConfig(
+        configs={
+            "kv-events-config": {
+                "endpoint": "127.0.0.1*:10000",
+                "replay_endpoint": "127.0.0.1*:10001",
+            }
         }
-    })
+    )
     deploy_config = DeployConfig(
         engine_type="vllm",
         model_config=model_config,
@@ -742,12 +787,14 @@ def test_endpoint_config_update_engine_config_no_kv_events():
 
 def test_endpoint_config_update_engine_config_invalid_endpoint_format():
     """Test update_engine_config skips when endpoint format is invalid (no *: separator)"""
-    engine_config = EngineConfig(configs={
-        "kv-events-config": {
-            "endpoint": "invalid-format",
-            "replay_endpoint": "127.0.0.1*:10001",
+    engine_config = EngineConfig(
+        configs={
+            "kv-events-config": {
+                "endpoint": "invalid-format",
+                "replay_endpoint": "127.0.0.1*:10001",
+            }
         }
-    })
+    )
     deploy_config = DeployConfig(
         engine_type="vllm",
         model_config=ModelConfig(

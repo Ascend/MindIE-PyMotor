@@ -211,6 +211,37 @@ class VLLMConfig(IConfig):
             flattened["data_parallel_address"] = self.data_parallel_address
             flattened["data_parallel_rpc_port"] = self.data_parallel_rpc_port
             flattened["data_parallel_rank"] = self.endpoint_config.dp_rank
+
+        # Cross-node PCP: detect nnodes > 1 and master_port (or master-port) in engine_config
+        engine_nnodes = deploy_config.engine_config.get("nnodes", 1)
+        # User may write "master_port" or "master-port" (vLLM native style) in engine_config
+        engine_master_port = deploy_config.engine_config.get("master_port", None)
+        if engine_master_port is None:
+            engine_master_port = deploy_config.engine_config.get("master-port", None)
+        logger.info(
+            "Cross-node PCP detection: nnodes=%s (type=%s), master_port=%s, node_rank=%d, master_dp_ip=%s",
+            engine_nnodes, type(engine_nnodes).__name__, engine_master_port,
+            self.endpoint_config.node_rank, self.endpoint_config.master_dp_ip,
+        )
+        try:
+            engine_nnodes_int = int(engine_nnodes)
+        except (TypeError, ValueError):
+            engine_nnodes_int = 1
+        if engine_nnodes_int > 1 and engine_master_port is not None:
+            node_rank = self.endpoint_config.node_rank
+            master_dp_ip = self.endpoint_config.master_dp_ip
+            logger.info("Cross-node PCP active: node_rank=%d, master_addr=%s", node_rank, master_dp_ip)
+            flattened.setdefault("node_rank", node_rank)
+            if master_dp_ip:
+                flattened.setdefault("master_addr", master_dp_ip)
+            if node_rank != 0:
+                flattened.setdefault("headless", True)
+        else:
+            logger.info(
+                "Cross-node PCP NOT active: nnodes_int=%d, master_port=%s",
+                engine_nnodes_int, engine_master_port,
+            )
+
         if self.kv_transfer_config is not None:
             flattened["kv_transfer_config"] = self.kv_transfer_config
 

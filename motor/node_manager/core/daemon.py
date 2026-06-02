@@ -82,7 +82,8 @@ class Daemon(ThreadSafeSingleton):
         pd_role_info: PDRole,
         endpoints_info: list[Endpoint],
         instance_id: int,
-        master_dp_ip: str
+        master_dp_ip: str,
+        node_rank: int = 0,
     ):
         """
         start engine processes based on the provided role and endpoint information.
@@ -94,6 +95,7 @@ class Daemon(ThreadSafeSingleton):
             --port engine service port
             --mgmt-port endpoint management port
             --master-dp-ip master data parallel node IP address
+            --node-rank node rank assigned by Controller (registration order)
             --config-path engine config file path
         """
         try:
@@ -117,6 +119,7 @@ class Daemon(ThreadSafeSingleton):
                     "--port", str(int(endpoint.business_port)),
                     "--mgmt-port", str(int(endpoint.mgmt_port)),
                     "--master-dp-ip", master_dp_ip,
+                    "--node-rank", str(node_rank),
                     "--config-path", str(Env.user_config_path)
                 ]
                 if self.single_container_flag:

@@ -78,6 +78,7 @@ async def start_instance(request: Request):
                 start_msg.endpoints,
                 start_msg.instance_id,
                 start_msg.master_dp_ip,
+                start_msg.node_rank,
             )
         except Exception as pull_err:
             logger.error("Failed to pull engine: %s", pull_err)
