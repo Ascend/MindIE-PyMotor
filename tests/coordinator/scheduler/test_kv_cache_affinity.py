@@ -46,7 +46,7 @@ class TestKvCacheAffinityPolicy(unittest.TestCase):
         
         mock_endpoint = Mock()
         mock_endpoint.id = "endpoint-1"
-        mock_instance.endpoints = {"group": {"endpoint-1": mock_endpoint}}
+        mock_instance.get_all_endpoints.return_value = tuple[Mock, ...]([mock_endpoint])
         
         mock_req_info = Mock()
         mock_req_info.req_data = {"messages": [{"role": "user", "content": "hello"}]}
@@ -85,7 +85,7 @@ class TestKvCacheAffinityPolicy(unittest.TestCase):
         
         mock_endpoint = Mock()
         mock_endpoint.id = "endpoint-2"
-        mock_instance.endpoints = {"group": {"endpoint-2": mock_endpoint}}
+        mock_instance.get_all_endpoints.return_value = tuple[Mock, ...]([mock_endpoint])
         
         mock_req_info = Mock()
         mock_req_info.req_data = {"prompt": "hello"}

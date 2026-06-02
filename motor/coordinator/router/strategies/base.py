@@ -137,11 +137,10 @@ class BaseRouter(ABC):
     @staticmethod
     def _select_endpoint_from_instance(instance: Instance) -> Endpoint | None:
         if instance and instance.endpoints:
-            for endpoints_dict in instance.endpoints.values():
-                for endpoint in endpoints_dict.values():
-                    status_val = endpoint.status.value if hasattr(endpoint.status, "value") else str(endpoint.status)
-                    if status_val == "normal":
-                        return endpoint
+            for endpoint in instance.get_all_endpoints():
+                status_val = endpoint.status.value if hasattr(endpoint.status, "value") else str(endpoint.status)
+                if status_val == "normal":
+                    return endpoint
         return None
 
     @staticmethod
@@ -161,9 +160,11 @@ class BaseRouter(ABC):
             p_req["kv_transfer_params"] = kv_transfer_params
         p_req[OpenAIField.STREAM] = False
         p_req[OpenAIField.MAX_TOKENS] = 1
+        if OpenAIField.MAX_COMPLETION_TOKENS in p_req:
+            p_req[OpenAIField.MAX_COMPLETION_TOKENS] = 1
         if set_min_tokens:
-            p_req["min_tokens"] = 1
-        p_req.pop("stream_options", None)
+            p_req[OpenAIField.MIN_TOKENS] = 1
+        p_req.pop(OpenAIField.STREAM_OPTIONS, None)
         return p_req
 
     @contextlib.contextmanager
@@ -514,11 +515,13 @@ class BaseRouter(ABC):
             req_data = self.req_info.req_data.copy()
             max_retry = self.config.exception_config.transport_retry_limit
             for attempt in range(max_retry):
-                req_data["stream"] = False
-                req_data["max_tokens"] = 1
-                req_data["min_tokens"] = 1
-                if "stream_options" in req_data:
-                    del req_data["stream_options"]
+                req_data[OpenAIField.STREAM] = False
+                req_data[OpenAIField.MAX_TOKENS] = 1
+                req_data[OpenAIField.MIN_TOKENS] = 1
+                if OpenAIField.MAX_COMPLETION_TOKENS in req_data:
+                    req_data[OpenAIField.MAX_COMPLETION_TOKENS] = 1
+                if OpenAIField.STREAM_OPTIONS in req_data:
+                    del req_data[OpenAIField.STREAM_OPTIONS]
 
                 try:
                     async with self._manage_resource_context(PDRole.ROLE_E, self.release_tokens) as resource, \

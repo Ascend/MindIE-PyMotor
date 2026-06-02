@@ -426,15 +426,14 @@ class MetricsCollector(ThreadSafeSingleton):
         """
         collect = {"endpoints": {}}
 
-        for ens_info in ins_info.endpoints.values():
-            for en_info in ens_info.values():
-                metrics_str = EngineServerApiClient.query_metrics(f"{en_info.ip}:{en_info.mgmt_port}")
-                if not metrics_str:
-                    return {}
-                collect["endpoints"][en_info.id] = {
-                    "metrics_str": metrics_str,
-                    "pod_ip": en_info.ip,
-                }
+        for en_info in ins_info.get_all_endpoints():
+            metrics_str = EngineServerApiClient.query_metrics(f"{en_info.ip}:{en_info.mgmt_port}")
+            if not metrics_str:
+                return {}
+            collect["endpoints"][en_info.id] = {
+                "metrics_str": metrics_str,
+                "pod_ip": en_info.ip,
+            }
 
         return collect
 

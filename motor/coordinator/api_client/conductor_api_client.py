@@ -39,9 +39,8 @@ class ConductorApiClient():
         for instance in instances:
             if instance.role != PDRole.ROLE_P:
                 continue
-            for endpoint in instance.endpoints.values():
-                for ep in endpoint.values():
-                    ConductorApiClient().register_post(instance, ep)
+            for ep in instance.get_all_endpoints():
+                ConductorApiClient().register_post(instance, ep)
 
     @staticmethod
     def unregister_kv_instance(
@@ -57,9 +56,8 @@ class ConductorApiClient():
         for instance in instances:
             if instance.role != PDRole.ROLE_P:
                 continue
-            for endpoint in instance.endpoints.values():
-                for ep in endpoint.values():
-                    ConductorApiClient().unregister_post(instance, ep)
+            for ep in instance.get_all_endpoints():
+                ConductorApiClient().unregister_post(instance, ep)
 
     @classmethod
     def register_post(

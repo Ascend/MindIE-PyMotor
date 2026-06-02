@@ -89,14 +89,13 @@ class KvCacheAffinityPolicy(BaseSchedulingPolicy):
             logger.warning(f"selected_data_dp is None")
             return None
 
-        for endpoint in selected_instance.endpoints.values():
-            for ep in endpoint.values():
-                kv_dp = selected_data_dp.get(f"{ep.id}", 0)
-                if kv_dp < max_kv_dp:
-                    continue
+        for ep in selected_instance.get_all_endpoints():
+            kv_dp = selected_data_dp.get(f"{ep.id}", 0)
+            if kv_dp < max_kv_dp:
+                continue
 
-                max_kv_dp = kv_dp
-                selected_endpoint = ep
+            max_kv_dp = kv_dp
+            selected_endpoint = ep
 
         if selected_endpoint is None:
             logger.warning(f"selected_endpoint is None")
