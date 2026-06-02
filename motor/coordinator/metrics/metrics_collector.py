@@ -13,8 +13,6 @@ import math
 import re
 import time
 import threading
-from dataclasses import dataclass, field
-from enum import Enum
 from collections import Counter
 from collections.abc import Callable
 from typing import Any
@@ -25,41 +23,16 @@ from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.coordinator import CoordinatorConfig
 from motor.coordinator.api_client.engine_server_api_client import EngineServerApiClient
+from motor.coordinator.metrics.metric_types import (
+    AggregationContext,
+    AggregationScope,
+    Metric,
+    MetricType,
+)
+from motor.coordinator.metrics.aggregation_engine import SemanticAggregationEngine
+from motor.coordinator.metrics.metric_registry import MetricRegistry
 
 logger = get_logger(__name__)
-
-
-class MetricType(Enum):
-    GAUGE = "gauge"
-    COUNTER = "counter"
-    HISTOGRAM = "histogram"
-    SUMMARY = "summary"
-    NONE = ""
-
-    def __str__(self):
-        return self.value
-
-    @classmethod
-    def from_string(cls, type_string):
-        return cls[type_string.upper()]
-
-
-@dataclass
-class Metric:
-    name: str = ""
-    help: str = ""
-    type: MetricType = MetricType.NONE
-    label: list[str] = field(default_factory=list)
-    value: list[float] = field(default_factory=list)
-
-    def copy(self) -> "Metric":
-        return Metric(
-            name=self.name,
-            help=self.help,
-            type=self.type,
-            label=list(self.label),
-            value=list(self.value),
-        )
 
 
 class MetricsCollector(ThreadSafeSingleton):
@@ -75,6 +48,7 @@ class MetricsCollector(ThreadSafeSingleton):
             config = CoordinatorConfig()
         self._prometheus_metrics_config = config.prometheus_metrics_config
         self._deploy_config = config.deploy_config
+        self._deploy_mode = config.scheduler_config.deploy_mode
 
         # Initial metrics state
         self._inactive_instance_metrics_aggregate: list[Metric] = []
@@ -93,6 +67,8 @@ class MetricsCollector(ThreadSafeSingleton):
         self._loop = None
         # When set, use this to get scheduler (same view as scheduling); must be set in lifespan
         self._scheduler_provider: Callable[[], Any] | None = None
+
+        self._aggregation_engine = SemanticAggregationEngine()
 
         self._initialized = True
         logger.info("MetricsCollector initialized.")
@@ -127,6 +103,7 @@ class MetricsCollector(ThreadSafeSingleton):
         with self._config_lock:
             self._prometheus_metrics_config = config.prometheus_metrics_config
             self._deploy_config = config.deploy_config
+            self._deploy_mode = config.scheduler_config.deploy_mode
         logger.info("MetricsCollector configuration updated")
 
     def get_metrics(
@@ -208,8 +185,9 @@ class MetricsCollector(ThreadSafeSingleton):
             role_groups.setdefault(role, []).append(metrics_list)
 
         result: dict[str, str] = {}
+        ctx = AggregationContext(scope=AggregationScope.ROLE)
         for role, metrics_lists in role_groups.items():
-            aggregated = self._aggregate_metrics(metrics_lists)
+            aggregated = self._aggregation_engine.post_process(self._aggregate_metrics(metrics_lists, ctx=ctx))
             if aggregated:
                 labeled = [self._inject_labels(m, role=role) for m in aggregated]
                 result[role] = self._format_prometheus(labeled)
@@ -245,6 +223,7 @@ class MetricsCollector(ThreadSafeSingleton):
         collects: dict[int, dict[str, Any]],
     ) -> dict[int, list[Metric]]:
         """Non-destructively aggregate endpoints per instance from raw collects."""
+        ctx = AggregationContext(scope=AggregationScope.INSTANCE)
         instance_metrics: dict[int, list[Metric]] = {}
         for ins_id, ins_data in collects.items():
             if not isinstance(ins_data, dict) or "endpoints" not in ins_data:
@@ -254,7 +233,7 @@ class MetricsCollector(ThreadSafeSingleton):
                 if self.METRICS_KEY in pod_info:
                     aggr_input.append(pod_info[self.METRICS_KEY])
             if aggr_input:
-                instance_metrics[ins_id] = self._aggregate_metrics(aggr_input)
+                instance_metrics[ins_id] = self._aggregate_metrics(aggr_input, ctx=ctx)
         return instance_metrics
 
     def _get_available_instances(self) -> tuple[dict[int, Instance], dict[int, Instance]]:
@@ -459,47 +438,11 @@ class MetricsCollector(ThreadSafeSingleton):
 
         return collect
 
-    def _aggregate_metrics_by_instance(
-        self, collects: dict[int, dict[str, dict[int, dict[str, list[Metric]]]]]
-    ) -> None:
-        """For each instance, aggreagte metrics of all endpoints.
-
-        :param collects:
-            collects before call:
-            {
-                instance_id0: {
-                    "endpoints": {
-                        endpoint_id0: {
-                            "metrics": metrics_value # the type of metrics_value: list[Metric]
-                        },
-                        endpoint_id1: ...
-                    }
-                },
-                instance_id1: ...
-            }
-            collects after call:
-            {
-                instance_id0: {
-                    "metrics": metrics_value # the type of metrics_value: list[Metric]
-                },
-                instance_id1: ...
-            }
-        """
-        for instance_id in collects.keys():
-            endpoints = collects[instance_id]["endpoints"]
-            if not endpoints:
-                continue
-
-            aggr_input = []
-            for pod in endpoints.values():
-                aggr_input.append(pod[self.METRICS_KEY])
-            collects[instance_id][self.METRICS_KEY] = self._aggregate_metrics(aggr_input)
-            del collects[instance_id]["endpoints"]
-
-            # update cache
-            self._instance_metrics_cached[instance_id] = {self.METRICS_KEY: collects[instance_id][self.METRICS_KEY]}
-
-    def _aggregate_metrics_all_instance(self, collects: dict[int, dict[str, list[Metric]]]) -> list[Metric]:
+    def _aggregate_metrics_all_instance(
+        self,
+        collects: dict[int, dict[str, Any]],
+        instance_roles: dict[int, str],
+    ) -> list[Metric]:
         """Aggreagte metrics of all instances."""
 
         if not self._instance_metrics_cached:
@@ -519,10 +462,15 @@ class MetricsCollector(ThreadSafeSingleton):
             aggr_input_single.append(metric)
         aggr_input.append(aggr_input_single)
 
-        # 3. excute aggregate
-        aggregate = self._aggregate_metrics(aggr_input)
-
-        return aggregate
+        # 3. service-scope aggregate with role filtering
+        ins_ids = list(self._instance_metrics_cached.keys()) + [-1]
+        ctx = AggregationContext(
+            scope=AggregationScope.SERVICE,
+            ins_ids=ins_ids,
+            instance_roles=instance_roles,
+            deploy_mode=self._deploy_mode,
+        )
+        return self._aggregate_metrics(aggr_input, ctx=ctx)
 
     @staticmethod
     def _copy_metric_zero_gauge(metric: Metric) -> Metric:
@@ -533,46 +481,42 @@ class MetricsCollector(ThreadSafeSingleton):
         zeroed.value = [0.0] * len(zeroed.value)
         return zeroed
 
-    def _aggregate_labels_by_sum(self, metric_list: list[Metric]) -> dict[str, float]:
-        """Aggregate all labels by sum."""
-        aggregate = {}
-        for metric in metric_list:
-            for i, label in enumerate(metric.label):
-                if label not in aggregate:
-                    aggregate[label] = 0.0
-                aggregate[label] += metric.value[i]
-        return aggregate
+    def _aggregate_metrics(
+        self,
+        metrics_list: list[list[Metric]],
+        ctx: AggregationContext | None = None,
+    ) -> list[Metric]:
+        """Aggregate metrics from multiple sources.
 
-    def _aggregate_labels_by_mean(self, metric_list: list[Metric]) -> dict[str, float]:
-        """Aggregate all labels by mean."""
-        aggregate = self._aggregate_labels_by_sum(metric_list)
-        for label in aggregate:
-            aggregate[label] /= len(metric_list)
-        return aggregate
-
-    def _aggregate_metrics(self, metrics_list: list[list[Metric]]) -> list[Metric]:
-        template = max(metrics_list, key=len)
-        aggr_input: dict[str, list[Metric]] = {m.name: [] for m in template}
-        for metrics in metrics_list:
+        Role-scope filtering runs only when ctx.scope is SERVICE.
+        """
+        ins_ids = ctx.ins_ids if ctx else None
+        aggr_input: dict[str, list[tuple[int, Metric]]] = {}
+        for idx, metrics in enumerate(metrics_list):
+            ins_id = ins_ids[idx] if ins_ids and idx < len(ins_ids) else -1
             for metric in metrics:
-                aggr_input[metric.name].append(metric)
-        return [self._aggregate_single_metric(v) for v in aggr_input.values()]
+                if metric.name not in aggr_input:
+                    aggr_input[metric.name] = []
+                aggr_input[metric.name].append((ins_id, metric))
+
+        result: list[Metric] = []
+        for name, entries in aggr_input.items():
+            if ctx is not None and ctx.scope == AggregationScope.SERVICE and ctx.instance_roles is not None:
+                role_scope = MetricRegistry.get_effective_role_scope(name, ctx.deploy_mode)
+                if role_scope:
+                    entries = [
+                        (ins_id, m)
+                        for ins_id, m in entries
+                        if ins_id == -1 or ctx.instance_roles.get(ins_id) == role_scope
+                    ]
+                    if not entries:
+                        continue
+            metric_list = [m for _, m in entries]
+            result.append(self._aggregate_single_metric(metric_list))
+        return result
 
     def _aggregate_single_metric(self, metric_list: list[Metric]) -> Metric:
-        first = metric_list[0]
-        agg_fn = (
-            self._aggregate_labels_by_mean
-            if first.name == "vllm:kv_cache_usage_perc"
-            else self._aggregate_labels_by_sum
-        )
-        aggregate = agg_fn(metric_list)
-        return Metric(
-            name=first.name,
-            help=first.help,
-            type=first.type,
-            label=list(aggregate.keys()),
-            value=list(aggregate.values()),
-        )
+        return self._aggregation_engine.aggregate(metric_list[0].name, metric_list)
 
     def _append_coordinator_metrics(
         self,
@@ -607,7 +551,12 @@ class MetricsCollector(ThreadSafeSingleton):
         instance_metrics = self._aggregate_collects_by_instance(collects)
         if not instance_metrics:
             return ""
-        aggregate = self._aggregate_metrics(list(instance_metrics.values()))
+        for ins_id, metrics_list in instance_metrics.items():
+            self._instance_metrics_cached[ins_id] = {self.METRICS_KEY: metrics_list}
+        instance_roles = {ins_id: data.get("role", "") for ins_id, data in collects.items() if isinstance(data, dict)}
+        aggregate = self._aggregation_engine.post_process(
+            self._aggregate_metrics_all_instance(collects, instance_roles)
+        )
         self._append_coordinator_metrics(aggregate, collects)
         return self._format_prometheus(aggregate)
 
@@ -698,8 +647,11 @@ class MetricsCollector(ThreadSafeSingleton):
                 if not pod_ip:
                     continue
                 key_to_lists.setdefault((pod_ip, role), []).append(pod_info[self.METRICS_KEY])
+        node_ctx = AggregationContext(scope=AggregationScope.NODE)
         pod_aggregates = {
-            key: self._aggregate_metrics(metrics_lists) for key, metrics_lists in key_to_lists.items() if metrics_lists
+            key: self._aggregate_metrics(metrics_lists, ctx=node_ctx)
+            for key, metrics_lists in key_to_lists.items()
+            if metrics_lists
         }
         name_to_meta: dict[str, dict[str, Any]] = {}
         for (pod_ip, role), aggregate in pod_aggregates.items():

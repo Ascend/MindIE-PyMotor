@@ -405,7 +405,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         )
 
     @_test_without_background_thread
-    def test_aggregate_metrics_by_instance(self):
+    def test_aggregate_collects_by_instance(self):
         # ensure MetricsCollector clean
         self.clean_instances()
         metric_collector = MetricsCollector(self.config)
@@ -418,11 +418,10 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
 
         # check function: empty collects
         collects = {}
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert not collects
-        assert len(metric_collector._instance_metrics_cached) == 0
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert not result
 
-        # check function: cache is empty
+        # check function: non-destructive aggregation per instance
         collects = {
             0: {
                 "endpoints": {
@@ -432,13 +431,11 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
             },
         }
 
-        assert len(metric_collector._instance_metrics_cached) == 0
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert len(collects) == 1
-        assert "endpoints" not in collects[0]
-        assert "metrics" in collects[0]
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert len(result) == 1
+        assert 0 in result
         assert self.check_metrics_equel(
-            collects[0]["metrics"],
+            result[0],
             [
                 self.metric_add(metric_gauge, metric_gauge),
                 self.metric_add(metric_counter, metric_counter),
@@ -446,9 +443,10 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
                 self.metric_add(metric_summary, metric_summary),
             ],
         )
-        assert len(metric_collector._instance_metrics_cached) == 1
+        # collects is not modified
+        assert "endpoints" in collects[0]
 
-        # check function: cache is not empty
+        # check function: single endpoint per instance
         collects = {
             1: {
                 "endpoints": {
@@ -457,15 +455,10 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
             },
         }
 
-        assert len(metric_collector._instance_metrics_cached) == 1
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert len(collects) == 1
-        assert "endpoints" not in collects[1]
-        assert "metrics" in collects[1]
-        assert self.check_metrics_equel(
-            collects[1]["metrics"], [metric_gauge, metric_counter, metric_histogram, metric_summary]
-        )
-        assert len(metric_collector._instance_metrics_cached) == 2
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert len(result) == 1
+        assert 1 in result
+        assert self.check_metrics_equel(result[1], [metric_gauge, metric_counter, metric_histogram, metric_summary])
 
     @_test_without_background_thread
     def test_aggregate_metrics_all_instance(self):
@@ -494,7 +487,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
 
         # check function: empty collects
         collects = {}
-        aggregate = metric_collector._aggregate_metrics_all_instance(collects)
+        aggregate = metric_collector._aggregate_metrics_all_instance(collects, {})
         # Just check that we get some result (skip detailed value comparison due to threading issues)
         assert isinstance(aggregate, list)
         assert len(aggregate) == 4
@@ -503,7 +496,7 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         collects = {
             1: {"metrics": [metric_gauge, metric_counter, metric_histogram, metric_summary]},
         }
-        aggregate = metric_collector._aggregate_metrics_all_instance(collects)
+        aggregate = metric_collector._aggregate_metrics_all_instance(collects, {})
         # Just check basic structure (skip detailed comparisons due to threading state issues)
         assert isinstance(aggregate, list)
         assert len(aggregate) == 4
@@ -661,7 +654,7 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
         return metrics_str_a.strip(), copy.deepcopy(metrics_a), metrics_str_b.strip(), copy.deepcopy(metrics_b)
 
     @_test_without_background_thread
-    def test_aggregate_metrics_by_instance_diff_format(self):
+    def test_aggregate_collects_by_instance_diff_format(self):
         # ensure MetricsCollector clean
         self.clean_instances()
         metric_collector = MetricsCollector(self.config)
@@ -672,11 +665,10 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
 
         # check function: empty collects
         collects = {}
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert not collects
-        assert len(metric_collector._instance_metrics_cached) == 0
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert not result
 
-        # check function: cache is empty
+        # check function: non-destructive aggregation per instance
         collects = {
             0: {
                 "endpoints": {
@@ -686,17 +678,15 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             },
         }
 
-        assert len(metric_collector._instance_metrics_cached) == 0
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert len(collects) == 1
-        assert "endpoints" not in collects[0]
-        assert "metrics" in collects[0]
-        assert self.check_metrics_equel(
-            collects[0]["metrics"], [self.metric_add(metrics_a[0], metrics_b[0]), metrics_b[1], metrics_b[2]]
-        )
-        assert len(metric_collector._instance_metrics_cached) == 1
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert len(result) == 1
+        assert 0 in result
+        # *_created metrics use METADATA_GAUGE: passthrough first endpoint (not sum)
+        assert self.check_metrics_equel(result[0], [metrics_a[0], metrics_b[1], metrics_b[2]])
+        # collects is not modified
+        assert "endpoints" in collects[0]
 
-        # check function: cache is not empty
+        # check function: single endpoint per instance
         collects = {
             1: {
                 "endpoints": {
@@ -705,13 +695,10 @@ http_request_duration_seconds_created{handler="/v1/chat/completions",method="POS
             },
         }
 
-        assert len(metric_collector._instance_metrics_cached) == 1
-        metric_collector._aggregate_metrics_by_instance(collects)
-        assert len(collects) == 1
-        assert "endpoints" not in collects[1]
-        assert "metrics" in collects[1]
-        assert self.check_metrics_equel(collects[1]["metrics"], metrics_a)
-        assert len(metric_collector._instance_metrics_cached) == 2
+        result = metric_collector._aggregate_collects_by_instance(collects)
+        assert len(result) == 1
+        assert 1 in result
+        assert self.check_metrics_equel(result[1], metrics_a)
 
     @_test_without_background_thread
     def test_format_prometheus(self):
