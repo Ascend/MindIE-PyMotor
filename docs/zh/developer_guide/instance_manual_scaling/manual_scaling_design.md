@@ -5,7 +5,7 @@
 ## 1. 入口与前置校验
 
 - **入口**：`deploy.py` 的 `main()` 在解析到 `--update_instance_num` 时调用 `handle_update_instance_num(user_config)`，随后 `return`，不会走全量 `deploy_services()`。
-- **通用前置**：在分支判断之前，`main()` 会执行 `validate_instance_nums(user_config)`（`lib/generator/engine.py`）。`motor_deploy_config` 中的 `p_instances_num`、`d_instances_num` 校验链条为：
+- **通用前置**：在分支判断之前，`main()` 会执行 `validate_instance_nums(user_config)`（`lib/generator/engine.py`）。`motor_deploy_config` 中的 `p_instances_num`、`d_instances_num`（PD 分离）或 `hybrid_instances_num`（PD 混部）校验链条为：
     - 字段缺失：内部调用的 `obtain_engine_instance_total`（`lib/utils.py`）抛 `KeyError`，文案 `p_instances_num is required in motor_deploy_config` / `d_instances_num is required ...`。
     - 非整数：`obtain_engine_instance_total` 在 `int(...)` 失败时抛 `ValueError`，文案 `p_instances_num and d_instances_num must be integers`。
     - 越界：`validate_instance_nums` 自身抛 `ValueError`，要求 `> INSTANCE_NUM_ZERO`（0）且 `<= INSTANCE_NUM_MAX`（16），常量定义在 `lib/constant.py`，文案形如 `p_instances_num must be greater than 0` / `must not exceed 16`。

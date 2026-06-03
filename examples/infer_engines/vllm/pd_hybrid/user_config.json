@@ -1,6 +1,7 @@
 {
   "version": "v2.0",
   "motor_deploy_config": {
+    "deploy_mode": "infer_service_set",
     "hybrid_instances_num": 1,
     "single_hybrid_instance_pod_num": 1,
     "hybrid_pod_npu_num": 2,

@@ -21,7 +21,8 @@ from lib.generator.k8s_utils import (
 )
 from lib.generator.engine import (
     build_engine_env_items, set_container_npu, apply_node_selector_by_hardware, set_weight_mount,
-    apply_pd_heterogeneous_node_selector
+    is_hybrid_deploy,
+    apply_pd_heterogeneous_node_selector,
 )
 from lib.generator.kv_pool import normalize_kv_cache_pool_config, gen_kv_pool_env
 from lib.generator.kv_conductor import normalize_kv_conductor_config
@@ -126,19 +127,32 @@ def _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, n
         apply_sp_block_annotation(template.setdefault(C.METADATA, {}), sp_block_num, hardware_type)
 
 
+def _zero_engine_role_replicas(infer_doc, role_name):
+    role = get_infer_role(infer_doc, role_name)
+    if role:
+        role[C.REPLICAS] = 0
+
+
 def _configure_engine_role(infer_doc, user_config, infer_name, role_name):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     role = get_infer_role(infer_doc, role_name)
     if not role:
         return
-    prefix_map = {C.ROLE_PREFILL: "p", C.ROLE_DECODE: "d"}
-    prefix = prefix_map.get(role_name)
-    if not prefix:
-        return
-    instances_key = f"{prefix}_instances_num"
-    pods_key = f"single_{prefix}_instance_pod_num"
-    npu_key = f"{prefix}_pod_npu_num"
-    
+    if role_name == C.ROLE_UNION:
+        instances_key = C.HYBRID_INSTANCES_NUM
+        pods_key = C.SINGLE_HYBRID_INSTANCE_POD_NUM
+        npu_key = C.HYBRID_POD_NPU_NUM
+        env_role = C.ROLE_UNION
+    else:
+        prefix_map = {C.ROLE_PREFILL: "p", C.ROLE_DECODE: "d"}
+        prefix = prefix_map.get(role_name)
+        if not prefix:
+            return
+        instances_key = f"{prefix}_instances_num"
+        pods_key = f"single_{prefix}_instance_pod_num"
+        npu_key = f"{prefix}_pod_npu_num"
+        env_role = role_name
+
     total_instances = int(deploy_config.get(instances_key, 1))
     single_instance = int(deploy_config.get(pods_key, 1))
     role[C.REPLICAS] = total_instances
@@ -157,7 +171,10 @@ def _configure_engine_role(infer_doc, user_config, infer_name, role_name):
     container[C.NAME] = infer_name
     job_id = deploy_config[C.CONFIG_JOB_ID]
     job_name_base = f"{job_id}-{infer_name}"
-    set_container_env(container, build_engine_env_items(role_name, deploy_config, job_name_base, include_kv_pool=True))
+    set_container_env(
+        container,
+        build_engine_env_items(env_role, deploy_config, job_name_base, include_kv_pool=True),
+    )
     npu_num = int(deploy_config.get(npu_key, 1))
     set_container_npu(container, npu_num)
     weight_path = deploy_config.get(C.WEIGHT_MOUNT_PATH, C.DEFAULT_WEIGHT_MOUNT_PATH)
@@ -246,8 +263,13 @@ def generate_yaml_infer_service_set(input_yaml, output_file, user_config):
     infer_doc[C.METADATA][C.NAMESPACE] = namespace
     _configure_controller_role(infer_doc, user_config)
     _configure_coordinator_role(infer_doc, user_config)
-    _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_PREFILL)
-    _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_DECODE)
+    if is_hybrid_deploy(deploy_config):
+        _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_UNION)
+        _zero_engine_role_replicas(infer_doc, C.ROLE_PREFILL)
+        _zero_engine_role_replicas(infer_doc, C.ROLE_DECODE)
+    else:
+        _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_PREFILL)
+        _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_DECODE)
     _configure_kv_pool_role(infer_doc, user_config)
     _configure_kv_conductor_role(infer_doc, user_config)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -319,21 +341,29 @@ def init_infer_service_domain_name(infer_service_template_yaml, deploy_config):
 
 
 def update_infer_service_replicas_only(infer_service_yaml_path, deploy_config):
-    """Update only prefill/decode instance count (role.replicas) in infer_service.yaml for scaling."""
+    """Update engine role.replicas in infer_service.yaml for scaling (union or prefill/decode)."""
     logger.info(f"Updating InferServiceSet instance replicas in {infer_service_yaml_path}")
     all_docs = load_yaml(infer_service_yaml_path, False)
     if not isinstance(all_docs, list):
         all_docs = [all_docs]
     infer_doc = _find_infer_service_set_doc(all_docs)
-    p_total, d_total = obtain_engine_instance_total(deploy_config)
 
-    prefill_role = get_infer_role(infer_doc, C.ROLE_PREFILL)
-    if prefill_role:
-        prefill_role[C.REPLICAS] = p_total
-
-    decode_role = get_infer_role(infer_doc, C.ROLE_DECODE)
-    if decode_role:
-        decode_role[C.REPLICAS] = d_total
+    if is_hybrid_deploy(deploy_config):
+        union_role = get_infer_role(infer_doc, C.ROLE_UNION)
+        if not union_role:
+            raise ValueError(
+                "union role not found in infer_service.yaml. "
+                "Regenerate infer_service.yaml with PD hybrid CRD deploy first."
+            )
+        union_role[C.REPLICAS] = int(deploy_config[C.HYBRID_INSTANCES_NUM])
+    else:
+        p_total, d_total = obtain_engine_instance_total(deploy_config)
+        prefill_role = get_infer_role(infer_doc, C.ROLE_PREFILL)
+        if prefill_role:
+            prefill_role[C.REPLICAS] = p_total
+        decode_role = get_infer_role(infer_doc, C.ROLE_DECODE)
+        if decode_role:
+            decode_role[C.REPLICAS] = d_total
 
     os.makedirs(os.path.dirname(infer_service_yaml_path), exist_ok=True)
     write_yaml(all_docs, infer_service_yaml_path, False)

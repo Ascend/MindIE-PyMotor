@@ -33,7 +33,8 @@ from lib.generator.mf_store import generate_yaml_mf_store
 from lib.config_validator import (
     validate_deploy_mode_consistency, validate_deploy_mode_value,
     validate_only_instance_changed, resolve_config_paths, validate_pd_hybrid_config,
-    validate_node_selectors
+    validate_pd_hybrid_infer_service_template,
+    validate_node_selectors,
 )
 
 
@@ -60,7 +61,12 @@ def handle_update_config(user_config):
     validate_deploy_mode_consistency(deploy_config, baseline_deploy)
     validate_update_config_whitelist(user_config, baseline_config)
 
-    create_motor_config_configmap(deploy_config[C.CONFIG_JOB_ID])
+    effective_mode = resolve_deploy_mode_for_services(baseline_deploy)
+    create_motor_config_configmap(
+        deploy_config[C.CONFIG_JOB_ID],
+        user_config=user_config,
+        effective_deploy_mode=effective_mode,
+    )
     logger.info("Configmap refreshed.")
 
 
@@ -73,7 +79,14 @@ def handle_update_instance_num(user_config):
     validate_only_instance_changed(user_config, baseline_config)
 
     baseline_deploy = baseline_config.get(C.MOTOR_DEPLOY_CONFIG, {})
-    deploy_mode_arg = baseline_deploy.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_INFER_SERVICE_SET)
+    deploy_mode_arg = resolve_deploy_mode_for_services(baseline_deploy)
+    current_deploy = deploy_config
+    current_deploy_mode = resolve_deploy_mode_for_services(current_deploy)
+    if current_deploy_mode != deploy_mode_arg:
+        raise ValueError(
+            f"Resolved deploy_mode from user_config ({current_deploy_mode}) differs from "
+            f"cluster baseline ({deploy_mode_arg}). Only instance counts may change for scaling."
+        )
     validate_deploy_mode_value(deploy_mode_arg)
 
     update_kv_pool_enabled_flag(user_config)
@@ -96,7 +109,9 @@ def handle_update_instance_num(user_config):
     else:
         generate_yaml_engine(paths["engine_input_yaml"], paths["engine_output_yaml"], user_config)
 
-    exec_all_kubectl_multi(deploy_config, baseline_config, deploy_mode_arg)
+    exec_all_kubectl_multi(
+        deploy_config, baseline_config, deploy_mode_arg, user_config=user_config
+    )
     logger.info("instance num update end.")
 
 
@@ -126,7 +141,9 @@ def deploy_services_multi_yaml(paths, user_config, dry_run=False):
             paths["mf_store_input_yaml"], paths["mf_store_output_yaml"], user_config
         )
     if not dry_run:
-        exec_all_kubectl_multi(deploy_config, None, C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML)
+        exec_all_kubectl_multi(
+            deploy_config, None, C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML, user_config=user_config
+        )
 
 
 def deploy_services_infer_service_set(paths, user_config, dry_run=False):
@@ -143,7 +160,10 @@ def deploy_services_infer_service_set(paths, user_config, dry_run=False):
         infer_input, paths["infer_service_output_yaml"], user_config
     )
     if not dry_run:
-        exec_all_kubectl_multi(deploy_config, None, C.DEPLOY_MODE_INFER_SERVICE_SET)
+        deploy_mode_arg = resolve_deploy_mode_for_services(deploy_config)
+        exec_all_kubectl_multi(
+            deploy_config, None, deploy_mode_arg, user_config=user_config
+        )
 
 
 def deploy_services_single_container(paths, user_config, dry_run=False):
@@ -186,10 +206,7 @@ def update_shell_add_kv_patch():
 
 
 def resolve_deploy_mode_for_services(deploy_config):
-    deploy_mode_arg = get_deploy_mode_from_config(deploy_config)
-    if C.HYBRID_INSTANCES_NUM in deploy_config and deploy_mode_arg == C.DEPLOY_MODE_INFER_SERVICE_SET:
-        return C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML
-    return deploy_mode_arg
+    return get_deploy_mode_from_config(deploy_config)
 
 
 def deploy_services(user_config, env_config_path, dry_run=False):
@@ -279,6 +296,10 @@ def main():
     user_config = read_json(user_config_path)
     if C.HYBRID_INSTANCES_NUM in user_config.get(C.MOTOR_DEPLOY_CONFIG, {}):
         validate_pd_hybrid_config(user_config)
+        paths = get_deploy_paths()
+        validate_pd_hybrid_infer_service_template(
+            user_config, paths["infer_service_input_yaml"]
+        )
     validate_instance_nums(user_config)
 
     if args.update_config:

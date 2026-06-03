@@ -12,7 +12,9 @@ import os
 import subprocess
 
 import lib.constant as C
-from lib.utils import logger
+from lib.utils import logger, load_yaml
+from lib.generator.infer_service import get_infer_role, _find_infer_service_set_doc
+from lib.generator.k8s_utils import get_deploy_mode_from_config
 
 
 PD_SEPARATION_DEPLOY_KEYS = {
@@ -84,6 +86,7 @@ def strip_instance_nums(config_dict):
     cleaned["motor_deploy_config"].pop(C.P_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.D_INSTANCES_NUM, None)
     cleaned["motor_deploy_config"].pop(C.HYBRID_INSTANCES_NUM, None)
+    cleaned["motor_deploy_config"].pop(C.DEPLOY_MODE_CONFIG_KEY, None)
     return cleaned
 
 
@@ -96,8 +99,8 @@ def validate_only_instance_changed(current_config, baseline_config):
 
 def validate_deploy_mode_consistency(deploy_config, baseline_config):
     """Validate that deploy_mode hasn't changed when updating config."""
-    baseline_mode = baseline_config.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML)
-    current_mode = deploy_config.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML)
+    baseline_mode = get_deploy_mode_from_config(baseline_config)
+    current_mode = get_deploy_mode_from_config(deploy_config)
     if baseline_mode != current_mode:
         raise ValueError(
             f"motor_deploy_config.{C.DEPLOY_MODE_CONFIG_KEY} cannot be changed when updating config. "
@@ -138,6 +141,28 @@ def validate_pd_hybrid_config(user_config):
     scheduler_config = user_config.get(C.MOTOR_COORDINATOR_CONFIG, {}).get("scheduler_config", {})
     if scheduler_config.get("deploy_mode") != "single_node":
         raise ValueError("PD hybrid config requires motor_coordinator_config.scheduler_config.deploy_mode=single_node.")
+
+
+def validate_pd_hybrid_infer_service_template(user_config, infer_service_template_path):
+    """Require union role in InferServiceSet template when PD hybrid uses CRD deploy mode."""
+    deploy_config = user_config.get(C.MOTOR_DEPLOY_CONFIG, {})
+    deploy_mode = deploy_config.get(C.DEPLOY_MODE_CONFIG_KEY, C.DEPLOY_MODE_INFER_SERVICE_SET)
+    if deploy_mode == C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML:
+        return
+    if not os.path.exists(infer_service_template_path):
+        raise FileNotFoundError(
+            f"InferServiceSet template yaml not found for PD hybrid CRD validation: "
+            f"{infer_service_template_path}"
+        )
+    all_docs = load_yaml(infer_service_template_path, False)
+    if not isinstance(all_docs, list):
+        all_docs = [all_docs]
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    if not get_infer_role(infer_doc, C.ROLE_UNION):
+        raise ValueError(
+            "PD hybrid with infer_service_set requires a 'union' role in "
+            "infer_service_template.yaml."
+        )
 
 
 def _get_pd_heterogeneous_config(deploy_config):

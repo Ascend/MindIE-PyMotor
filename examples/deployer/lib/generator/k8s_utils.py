@@ -302,12 +302,29 @@ def modify_sp_block_num(data, pd_flag, config):
     apply_sp_block_annotation(data[C.METADATA], sp_block_num, hardware_type)
 
 
-def create_motor_config_configmap(job_id):
+def _user_config_path_for_configmap(user_config=None, effective_deploy_mode=None):
+    """Return path to user_config.json for ConfigMap; inject effective deploy_mode when requested."""
+    if user_config is None or effective_deploy_mode is None:
+        if not g_user_config_path:
+            raise ValueError("g_user_config_path is not set")
+        if not os.path.exists(g_user_config_path):
+            raise FileNotFoundError(f"user_config file not found: {g_user_config_path}")
+        return g_user_config_path
+
+    config_copy = json.loads(json.dumps(user_config))
+    motor_deploy = config_copy.setdefault(C.MOTOR_DEPLOY_CONFIG, {})
+    motor_deploy[C.DEPLOY_MODE_CONFIG_KEY] = effective_deploy_mode
+    os.makedirs(C.OUTPUT_ROOT_PATH, exist_ok=True)
+    effective_path = os.path.join(C.OUTPUT_ROOT_PATH, ".motor_config_user_config.json")
+    with open(effective_path, "w", encoding="utf-8") as f:
+        json.dump(config_copy, f, indent=2)
+        f.write("\n")
+    return effective_path
+
+
+def create_motor_config_configmap(job_id, user_config=None, effective_deploy_mode=None):
     """Create or update ConfigMap motor-config with all mounted files (scripts + user_config.json)."""
-    if not g_user_config_path:
-        raise ValueError("g_user_config_path is not set")
-    if not os.path.exists(g_user_config_path):
-        raise FileNotFoundError(f"user_config file not found: {g_user_config_path}")
+    config_path = _user_config_path_for_configmap(user_config, effective_deploy_mode)
     apply_configmap(
         f"kubectl create configmap {C.MOTOR_CONFIG_CONFIGMAP_NAME} "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/boot.sh "
@@ -322,15 +339,22 @@ def create_motor_config_configmap(job_id):
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/all_combine_in_single_container.sh "
         "--from-file=./probe/probe.sh "
         "--from-file=./probe/probe.py "
-        f"--from-file=user_config.json={g_user_config_path}" + " -n " + job_id
+        f"--from-file=user_config.json={config_path}" + " -n " + job_id
     )
 
 
-def exec_all_kubectl_multi(deploy_config, baseline_config, deploy_mode_arg=C.DEPLOY_MODE_INFER_SERVICE_SET):
+def exec_all_kubectl_multi(
+    deploy_config,
+    baseline_config,
+    deploy_mode_arg=C.DEPLOY_MODE_INFER_SERVICE_SET,
+    user_config=None,
+):
     """Execute kubectl commands for multi-deployment or infer-service-set mode."""
     job_id = deploy_config[C.CONFIG_JOB_ID]
     out_deploy_yaml_path = C.OUTPUT_ROOT_PATH
-    create_motor_config_configmap(job_id)
+    create_motor_config_configmap(
+        job_id, user_config=user_config, effective_deploy_mode=deploy_mode_arg
+    )
 
     if baseline_config is None:
         for yaml_file in g_generate_yaml_list:

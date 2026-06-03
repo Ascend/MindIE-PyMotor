@@ -13,9 +13,20 @@ sys.path.insert(0, str(DEPLOYER_ROOT))
 
 import lib.constant as C  # noqa: E402
 import deploy as deploy_module  # noqa: E402
-from lib.config_validator import validate_only_instance_changed, validate_pd_hybrid_config  # noqa: E402
+from lib.config_validator import (  # noqa: E402
+    validate_deploy_mode_consistency,
+    validate_only_instance_changed,
+    validate_pd_hybrid_config,
+)
 from lib.generator import k8s_utils  # noqa: E402
 from lib.generator.engine import generate_yaml_engine, validate_instance_nums  # noqa: E402
+from lib.generator.infer_service import (  # noqa: E402
+    generate_yaml_infer_service_set,
+    update_infer_service_replicas_only,
+    get_infer_role,
+    _find_infer_service_set_doc,
+)
+from lib.utils import load_yaml  # noqa: E402
 from lib.utils import set_env_to_shell  # noqa: E402
 
 
@@ -129,8 +140,20 @@ def test_generate_yaml_engine_creates_hybrid_workload(tmp_path):
     assert container[C.RESOURCES][C.LIMITS][C.ASCEND_910_NPU_NUM] == 4
 
 
-def test_deploy_services_dry_run_uses_multi_deployment_for_hybrid(tmp_path, monkeypatch):
+def test_deploy_services_dry_run_uses_infer_service_set_for_hybrid(tmp_path, monkeypatch):
     user_config = make_pd_hybrid_user_config()
+    monkeypatch.setattr(deploy_module, "get_deploy_paths", lambda: make_deploy_paths(tmp_path))
+    k8s_utils.g_generate_yaml_list = []
+
+    deploy_module.deploy_services(user_config, env_config_path=None, dry_run=True)
+
+    assert any(path.endswith("infer_service.yaml") for path in k8s_utils.g_generate_yaml_list)
+    assert not any(path.endswith("_u0.yaml") for path in k8s_utils.g_generate_yaml_list)
+
+
+def test_deploy_services_dry_run_uses_multi_deployment_when_explicit(tmp_path, monkeypatch):
+    user_config = make_pd_hybrid_user_config()
+    user_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML
     monkeypatch.setattr(deploy_module, "get_deploy_paths", lambda: make_deploy_paths(tmp_path))
     k8s_utils.g_generate_yaml_list = []
 
@@ -228,6 +251,46 @@ def test_validate_only_instance_changed_allows_hybrid_instance_count_change():
     validate_only_instance_changed(current_config, baseline_config)
 
 
+def test_validate_only_instance_changed_ignores_deploy_mode_when_current_omits_it():
+    """ConfigMap baseline may inject deploy_mode while local user_config omits it."""
+    baseline_config = make_pd_hybrid_user_config()
+    baseline_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
+    current_config = make_pd_hybrid_user_config()
+    current_config[C.MOTOR_DEPLOY_CONFIG].pop(C.DEPLOY_MODE_CONFIG_KEY, None)
+    current_config[C.MOTOR_DEPLOY_CONFIG][C.HYBRID_INSTANCES_NUM] = 2
+
+    validate_only_instance_changed(current_config, baseline_config)
+
+
+def test_validate_only_instance_changed_allows_pd_separation_when_current_omits_deploy_mode():
+    baseline_config = make_pd_separation_user_config()
+    baseline_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
+    current_config = make_pd_separation_user_config()
+    current_config[C.MOTOR_DEPLOY_CONFIG].pop(C.DEPLOY_MODE_CONFIG_KEY, None)
+    current_config[C.MOTOR_DEPLOY_CONFIG][C.P_INSTANCES_NUM] = 2
+
+    validate_only_instance_changed(current_config, baseline_config)
+
+
+def test_validate_deploy_mode_consistency_allows_omitted_when_baseline_has_infer_service_set():
+    baseline_deploy = make_pd_hybrid_user_config()[C.MOTOR_DEPLOY_CONFIG]
+    baseline_deploy[C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
+    current_deploy = make_pd_hybrid_user_config()[C.MOTOR_DEPLOY_CONFIG]
+    current_deploy.pop(C.DEPLOY_MODE_CONFIG_KEY, None)
+
+    validate_deploy_mode_consistency(current_deploy, baseline_deploy)
+
+
+def test_validate_deploy_mode_consistency_rejects_explicit_mode_change():
+    baseline_deploy = make_pd_hybrid_user_config()[C.MOTOR_DEPLOY_CONFIG]
+    baseline_deploy[C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
+    current_deploy = make_pd_hybrid_user_config()[C.MOTOR_DEPLOY_CONFIG]
+    current_deploy[C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_MULTI_DEPLOYMENT_YAML
+
+    with pytest.raises(ValueError, match=C.DEPLOY_MODE_CONFIG_KEY):
+        validate_deploy_mode_consistency(current_deploy, baseline_deploy)
+
+
 def test_validate_only_instance_changed_rejects_hybrid_non_instance_change():
     baseline_config = make_pd_hybrid_user_config()
     current_config = make_pd_hybrid_user_config()
@@ -274,7 +337,7 @@ def test_handle_update_instance_num_scales_hybrid_instances(tmp_path, monkeypatc
     monkeypatch.setattr(deploy_module, "get_baseline_config_from_configmap", lambda _: baseline_config)
     monkeypatch.setattr(deploy_module, "get_deploy_paths", lambda: make_deploy_paths(tmp_path))
     monkeypatch.setattr(C, "OUTPUT_ROOT_PATH", str(tmp_path))
-    monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda _: None)
+    monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda *_a, **_k: None)
     monkeypatch.setattr(k8s_utils, "safe_exec_cmd", commands.append)
 
     deploy_module.handle_update_instance_num(current_config)
@@ -323,6 +386,125 @@ def test_elastic_distributed_engine_deploy_scales_in_hybrid_instances(tmp_path, 
     assert not yaml_to_remove.exists()
 
 
+def test_generate_yaml_infer_service_set_configures_union_for_hybrid(tmp_path, monkeypatch):
+    user_config = make_pd_hybrid_user_config()
+    paths = make_deploy_paths(tmp_path)
+    k8s_utils.g_generate_yaml_list = []
+    monkeypatch.setattr(
+        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
+    )
+    monkeypatch.setattr(
+        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
+    )
+
+    generate_yaml_infer_service_set(
+        paths["infer_service_input_yaml"],
+        paths["infer_service_output_yaml"],
+        user_config,
+    )
+
+    all_docs = load_yaml(paths["infer_service_output_yaml"], False)
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    union_role = get_infer_role(infer_doc, C.ROLE_UNION)
+    prefill_role = get_infer_role(infer_doc, C.ROLE_PREFILL)
+    decode_role = get_infer_role(infer_doc, C.ROLE_DECODE)
+
+    assert union_role[C.REPLICAS] == 1
+    assert prefill_role[C.REPLICAS] == 0
+    assert decode_role[C.REPLICAS] == 0
+    container = union_role[C.SPEC][C.TEMPLATE][C.SPEC][C.CONTAINERS][0]
+    env = {item[C.NAME]: item[C.VALUE] for item in container[C.ENV] if C.VALUE in item}
+    assert env[C.ENV_ROLE] == C.ROLE_UNION
+
+
+def test_update_infer_service_replicas_only_updates_union_for_hybrid(tmp_path):
+    user_config = make_pd_hybrid_user_config()
+    paths = make_deploy_paths(tmp_path)
+    k8s_utils.g_generate_yaml_list = []
+    generate_yaml_infer_service_set(
+        paths["infer_service_input_yaml"],
+        paths["infer_service_output_yaml"],
+        user_config,
+    )
+
+    deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
+    deploy_config[C.HYBRID_INSTANCES_NUM] = 3
+    update_infer_service_replicas_only(paths["infer_service_output_yaml"], deploy_config)
+
+    all_docs = load_yaml(paths["infer_service_output_yaml"], False)
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    assert get_infer_role(infer_doc, C.ROLE_UNION)[C.REPLICAS] == 3
+
+
+def test_handle_update_instance_num_scales_hybrid_via_crd_when_current_omits_deploy_mode(
+    tmp_path, monkeypatch
+):
+    """Scale succeeds when baseline has injected deploy_mode but local user_config omits it."""
+    baseline_config = make_pd_hybrid_user_config()
+    baseline_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
+    current_config = make_pd_hybrid_user_config()
+    current_config[C.MOTOR_DEPLOY_CONFIG].pop(C.DEPLOY_MODE_CONFIG_KEY, None)
+    current_config[C.MOTOR_DEPLOY_CONFIG][C.HYBRID_INSTANCES_NUM] = 2
+    commands = []
+    paths = make_deploy_paths(tmp_path)
+    monkeypatch.setattr(deploy_module, "get_baseline_config_from_configmap", lambda _: baseline_config)
+    monkeypatch.setattr(deploy_module, "get_deploy_paths", lambda: paths)
+    monkeypatch.setattr(C, "OUTPUT_ROOT_PATH", str(tmp_path))
+    monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda *_a, **_k: None)
+    monkeypatch.setattr(k8s_utils, "safe_exec_cmd", commands.append)
+    monkeypatch.setattr(
+        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
+    )
+    monkeypatch.setattr(
+        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
+    )
+
+    generate_yaml_infer_service_set(
+        paths["infer_service_input_yaml"],
+        paths["infer_service_output_yaml"],
+        baseline_config,
+    )
+
+    deploy_module.handle_update_instance_num(current_config)
+
+    assert commands == [f"kubectl apply -f {paths['infer_service_output_yaml']} -n pd-hybrid"]
+    all_docs = load_yaml(paths["infer_service_output_yaml"], False)
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    assert get_infer_role(infer_doc, C.ROLE_UNION)[C.REPLICAS] == 2
+
+
+def test_handle_update_instance_num_scales_hybrid_via_crd(tmp_path, monkeypatch):
+    baseline_config = make_pd_hybrid_user_config()
+    current_config = make_pd_hybrid_user_config()
+    current_config[C.MOTOR_DEPLOY_CONFIG][C.HYBRID_INSTANCES_NUM] = 2
+    commands = []
+    paths = make_deploy_paths(tmp_path)
+    monkeypatch.setattr(deploy_module, "get_baseline_config_from_configmap", lambda _: baseline_config)
+    monkeypatch.setattr(deploy_module, "get_deploy_paths", lambda: paths)
+    monkeypatch.setattr(C, "OUTPUT_ROOT_PATH", str(tmp_path))
+    monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda *_a, **_k: None)
+    monkeypatch.setattr(k8s_utils, "safe_exec_cmd", commands.append)
+    monkeypatch.setattr(
+        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
+    )
+    monkeypatch.setattr(
+        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
+    )
+
+    generate_yaml_infer_service_set(
+        paths["infer_service_input_yaml"],
+        paths["infer_service_output_yaml"],
+        baseline_config,
+    )
+
+    deploy_module.handle_update_instance_num(current_config)
+
+    assert commands == [f"kubectl apply -f {paths['infer_service_output_yaml']} -n pd-hybrid"]
+    all_docs = load_yaml(paths["infer_service_output_yaml"], False)
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    assert get_infer_role(infer_doc, C.ROLE_UNION)[C.REPLICAS] == 2
+
+
 def test_vllm_pd_hybrid_sample_is_valid():
     sample_path = DEPLOYER_ROOT.parent / "infer_engines" / "vllm" / "pd_hybrid" / "user_config.json"
     with open(sample_path, "r", encoding="utf-8") as f:
@@ -330,3 +512,4 @@ def test_vllm_pd_hybrid_sample_is_valid():
 
     validate_pd_hybrid_config(user_config)
     validate_instance_nums(user_config)
+    assert user_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] == C.DEPLOY_MODE_INFER_SERVICE_SET
