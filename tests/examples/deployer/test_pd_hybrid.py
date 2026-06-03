@@ -104,12 +104,15 @@ def test_validate_pd_hybrid_config_accepts_union_schema():
     validate_instance_nums(user_config)
 
 
-@pytest.mark.parametrize("mutate", [
-    lambda cfg: cfg[C.MOTOR_DEPLOY_CONFIG].__setitem__(C.P_INSTANCES_NUM, 1),
-    lambda cfg: cfg.__setitem__(C.MOTOR_ENGINE_PREFILL_CONFIG, {}),
-    lambda cfg: cfg.__setitem__("motor_engine_decode_config", {}),
-    lambda cfg: cfg[C.MOTOR_DEPLOY_CONFIG].__setitem__("engine_topology", "pd_hybrid"),
-])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda cfg: cfg[C.MOTOR_DEPLOY_CONFIG].__setitem__(C.P_INSTANCES_NUM, 1),
+        lambda cfg: cfg.__setitem__(C.MOTOR_ENGINE_PREFILL_CONFIG, {}),
+        lambda cfg: cfg.__setitem__("motor_engine_decode_config", {}),
+        lambda cfg: cfg[C.MOTOR_DEPLOY_CONFIG].__setitem__("engine_topology", "pd_hybrid"),
+    ],
+)
 def test_validate_pd_hybrid_config_rejects_mixed_schema(mutate):
     user_config = make_pd_hybrid_user_config()
     mutate(user_config)
@@ -390,12 +393,8 @@ def test_generate_yaml_infer_service_set_configures_union_for_hybrid(tmp_path, m
     user_config = make_pd_hybrid_user_config()
     paths = make_deploy_paths(tmp_path)
     k8s_utils.g_generate_yaml_list = []
-    monkeypatch.setattr(
-        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
-    )
-    monkeypatch.setattr(
-        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
-    )
+    monkeypatch.setattr(k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local")
+    monkeypatch.setattr(k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local")
 
     generate_yaml_infer_service_set(
         paths["infer_service_input_yaml"],
@@ -417,6 +416,30 @@ def test_generate_yaml_infer_service_set_configures_union_for_hybrid(tmp_path, m
     assert env[C.ENV_ROLE] == C.ROLE_UNION
 
 
+def test_generate_yaml_infer_service_set_zeros_union_for_pd_separation(tmp_path, monkeypatch):
+    user_config = make_pd_separation_user_config()
+    paths = make_deploy_paths(tmp_path)
+    k8s_utils.g_generate_yaml_list = []
+    monkeypatch.setattr(k8s_utils, "g_controller_service", "ctrl.pd-separate.svc.cluster.local")
+    monkeypatch.setattr(k8s_utils, "g_coordinator_service", "coord.pd-separate.svc.cluster.local")
+
+    generate_yaml_infer_service_set(
+        paths["infer_service_input_yaml"],
+        paths["infer_service_output_yaml"],
+        user_config,
+    )
+
+    all_docs = load_yaml(paths["infer_service_output_yaml"], False)
+    infer_doc = _find_infer_service_set_doc(all_docs)
+    union_role = get_infer_role(infer_doc, C.ROLE_UNION)
+    prefill_role = get_infer_role(infer_doc, C.ROLE_PREFILL)
+    decode_role = get_infer_role(infer_doc, C.ROLE_DECODE)
+
+    assert union_role[C.REPLICAS] == 0
+    assert prefill_role[C.REPLICAS] == 1
+    assert decode_role[C.REPLICAS] == 1
+
+
 def test_update_infer_service_replicas_only_updates_union_for_hybrid(tmp_path):
     user_config = make_pd_hybrid_user_config()
     paths = make_deploy_paths(tmp_path)
@@ -436,9 +459,7 @@ def test_update_infer_service_replicas_only_updates_union_for_hybrid(tmp_path):
     assert get_infer_role(infer_doc, C.ROLE_UNION)[C.REPLICAS] == 3
 
 
-def test_handle_update_instance_num_scales_hybrid_via_crd_when_current_omits_deploy_mode(
-    tmp_path, monkeypatch
-):
+def test_handle_update_instance_num_scales_hybrid_via_crd_when_current_omits_deploy_mode(tmp_path, monkeypatch):
     """Scale succeeds when baseline has injected deploy_mode but local user_config omits it."""
     baseline_config = make_pd_hybrid_user_config()
     baseline_config[C.MOTOR_DEPLOY_CONFIG][C.DEPLOY_MODE_CONFIG_KEY] = C.DEPLOY_MODE_INFER_SERVICE_SET
@@ -452,12 +473,8 @@ def test_handle_update_instance_num_scales_hybrid_via_crd_when_current_omits_dep
     monkeypatch.setattr(C, "OUTPUT_ROOT_PATH", str(tmp_path))
     monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda *_a, **_k: None)
     monkeypatch.setattr(k8s_utils, "safe_exec_cmd", commands.append)
-    monkeypatch.setattr(
-        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
-    )
-    monkeypatch.setattr(
-        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
-    )
+    monkeypatch.setattr(k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local")
+    monkeypatch.setattr(k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local")
 
     generate_yaml_infer_service_set(
         paths["infer_service_input_yaml"],
@@ -484,12 +501,8 @@ def test_handle_update_instance_num_scales_hybrid_via_crd(tmp_path, monkeypatch)
     monkeypatch.setattr(C, "OUTPUT_ROOT_PATH", str(tmp_path))
     monkeypatch.setattr(k8s_utils, "create_motor_config_configmap", lambda *_a, **_k: None)
     monkeypatch.setattr(k8s_utils, "safe_exec_cmd", commands.append)
-    monkeypatch.setattr(
-        k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local"
-    )
-    monkeypatch.setattr(
-        k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local"
-    )
+    monkeypatch.setattr(k8s_utils, "g_controller_service", "ctrl.pd-hybrid.svc.cluster.local")
+    monkeypatch.setattr(k8s_utils, "g_coordinator_service", "coord.pd-hybrid.svc.cluster.local")
 
     generate_yaml_infer_service_set(
         paths["infer_service_input_yaml"],

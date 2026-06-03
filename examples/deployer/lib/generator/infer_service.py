@@ -10,17 +10,24 @@
 import os
 
 import lib.constant as C
-from lib.utils import (
-    generate_unique_id, load_yaml, logger, write_yaml, obtain_engine_instance_total
-)
+from lib.utils import generate_unique_id, load_yaml, logger, write_yaml, obtain_engine_instance_total
 from lib.generator import k8s_utils
 from lib.generator.k8s_utils import (
-    set_controller_service, set_coordinator_service, set_coordinator_infer_service,
-    set_coordinator_obs_service, set_kv_pool_service, set_kv_conductor_service,
-    set_rbac_namespace, extract_rbac_resources, apply_sp_block_annotation
+    set_controller_service,
+    set_coordinator_service,
+    set_coordinator_infer_service,
+    set_coordinator_obs_service,
+    set_kv_pool_service,
+    set_kv_conductor_service,
+    set_rbac_namespace,
+    extract_rbac_resources,
+    apply_sp_block_annotation,
 )
 from lib.generator.engine import (
-    build_engine_env_items, set_container_npu, apply_node_selector_by_hardware, set_weight_mount,
+    build_engine_env_items,
+    set_container_npu,
+    apply_node_selector_by_hardware,
+    set_weight_mount,
     is_hybrid_deploy,
     apply_pd_heterogeneous_node_selector,
 )
@@ -86,27 +93,23 @@ def _configure_controller_role(infer_doc, user_config):
 
 
 def _configure_coordinator_role(infer_doc, user_config):
-    container = _configure_control_role(
-        infer_doc, user_config, C.COORDINATOR, C.MOTOR_COORDINATOR_CONFIG
-    )
+    container = _configure_control_role(infer_doc, user_config, C.COORDINATOR, C.MOTOR_COORDINATOR_CONFIG)
     if not container:
         return
 
     coordinator_env = []
     if k8s_utils.g_kv_conductor_enabled:
-        coordinator_env.append({
-            C.NAME: C.ENV_KV_CONDUCTOR_SERVICE,
-            C.VALUE: k8s_utils.g_kv_conductor_service
-        })
+        coordinator_env.append({C.NAME: C.ENV_KV_CONDUCTOR_SERVICE, C.VALUE: k8s_utils.g_kv_conductor_service})
 
-    disaggregation_bootstrap_port = user_config.get(
-        C.MOTOR_ENGINE_PREFILL_CONFIG, {}
-    ).get(C.ENGINE_CONFIG, {}).get("disaggregation_bootstrap_port", "")
+    disaggregation_bootstrap_port = (
+        user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG, {})
+        .get(C.ENGINE_CONFIG, {})
+        .get("disaggregation_bootstrap_port", "")
+    )
     if disaggregation_bootstrap_port:
-        coordinator_env.append({
-            C.NAME: C.ENV_DISAGGREGATION_BOOTSTRAP_PORT,
-            C.VALUE: str(disaggregation_bootstrap_port)
-        })
+        coordinator_env.append(
+            {C.NAME: C.ENV_DISAGGREGATION_BOOTSTRAP_PORT, C.VALUE: str(disaggregation_bootstrap_port)}
+        )
 
     if coordinator_env:
         set_container_env(container, coordinator_env)
@@ -188,9 +191,7 @@ def _set_role_primary_service_port(role, service_port):
         raise ValueError(f"Service definition not found for role '{role.get(C.NAME)}' in infer_service_template.yaml")
     ports = services[0].get(C.SPEC, {}).get(C.PORTS, [])
     if not ports:
-        raise ValueError(
-            f"Missing required service ports for role '{role.get(C.NAME)}' in infer_service_template.yaml"
-        )
+        raise ValueError(f"Missing required service ports for role '{role.get(C.NAME)}' in infer_service_template.yaml")
     ports[0][C.PORT] = service_port
     ports[0][C.TARGET_PORT] = service_port
 
@@ -244,14 +245,12 @@ def _configure_kv_conductor_role(infer_doc, user_config):
     if not containers:
         return
     container = containers[0]
-    set_container_env(container, [
-        {C.NAME: C.ENV_KVP_MASTER_SERVICE, C.VALUE: k8s_utils.g_kv_pool_service}
-    ])
+    set_container_env(container, [{C.NAME: C.ENV_KVP_MASTER_SERVICE, C.VALUE: k8s_utils.g_kv_pool_service}])
 
 
 def generate_yaml_infer_service_set(input_yaml, output_file, user_config):
     """Generate InferServiceSet yaml from template and user_config."""
-    logger.info(f"Generating InferServiceSet YAML from {input_yaml} to {output_file}")
+    logger.info("Generating InferServiceSet YAML from %s to %s", input_yaml, output_file)
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     all_docs = load_yaml(input_yaml, False)
     if not isinstance(all_docs, list):
@@ -270,6 +269,7 @@ def generate_yaml_infer_service_set(input_yaml, output_file, user_config):
     else:
         _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_PREFILL)
         _configure_engine_role(infer_doc, user_config, infer_name, C.ROLE_DECODE)
+        _zero_engine_role_replicas(infer_doc, C.ROLE_UNION)
     _configure_kv_pool_role(infer_doc, user_config)
     _configure_kv_conductor_role(infer_doc, user_config)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -342,7 +342,7 @@ def init_infer_service_domain_name(infer_service_template_yaml, deploy_config):
 
 def update_infer_service_replicas_only(infer_service_yaml_path, deploy_config):
     """Update engine role.replicas in infer_service.yaml for scaling (union or prefill/decode)."""
-    logger.info(f"Updating InferServiceSet instance replicas in {infer_service_yaml_path}")
+    logger.info("Updating InferServiceSet instance replicas in %s", infer_service_yaml_path)
     all_docs = load_yaml(infer_service_yaml_path, False)
     if not isinstance(all_docs, list):
         all_docs = [all_docs]
@@ -364,6 +364,7 @@ def update_infer_service_replicas_only(infer_service_yaml_path, deploy_config):
         decode_role = get_infer_role(infer_doc, C.ROLE_DECODE)
         if decode_role:
             decode_role[C.REPLICAS] = d_total
+        _zero_engine_role_replicas(infer_doc, C.ROLE_UNION)
 
     os.makedirs(os.path.dirname(infer_service_yaml_path), exist_ok=True)
     write_yaml(all_docs, infer_service_yaml_path, False)
