@@ -30,6 +30,7 @@ from lib.generator.engine import (
     set_weight_mount,
     is_hybrid_deploy,
     apply_pd_heterogeneous_node_selector,
+    apply_a5_workload
 )
 from lib.generator.kv_pool import normalize_kv_cache_pool_config, gen_kv_pool_env
 from lib.generator.kv_conductor import normalize_kv_conductor_config
@@ -124,10 +125,12 @@ def _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, n
         if node_type:
             apply_pd_heterogeneous_node_selector(pod_spec, deploy_config, node_type)
 
-    if hardware_type == C.HARDWARE_TYPE_800I_A3:
+    if hardware_type == C.HARDWARE_TYPE_800I_A3 or hardware_type in C.HARDWARE_TYPE_950I_A5:
         # CRD uses StatefulSet; MindCluster sp-block differs from Deployment (see engine.py multi_deployment)
         sp_block_num = int(deploy_config.get(npu_key, 1))
         apply_sp_block_annotation(template.setdefault(C.METADATA, {}), sp_block_num, hardware_type)
+    if hardware_type in C.HARDWARE_TYPE_950I_A5:
+        apply_a5_workload(template, deploy_config)
 
 
 def _zero_engine_role_replicas(infer_doc, role_name):
@@ -180,6 +183,7 @@ def _configure_engine_role(infer_doc, user_config, infer_name, role_name):
     )
     npu_num = int(deploy_config.get(npu_key, 1))
     set_container_npu(container, npu_num)
+    set_container_npu(container, npu_num, deploy_config)
     weight_path = deploy_config.get(C.WEIGHT_MOUNT_PATH, C.DEFAULT_WEIGHT_MOUNT_PATH)
     set_weight_mount(pod_spec, container, weight_path)
     _apply_infer_node_selector_and_sp_block(deploy_config, pod_spec, template, npu_key, role_name)

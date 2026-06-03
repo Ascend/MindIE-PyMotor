@@ -17,6 +17,39 @@ from lib.generator import k8s_utils
 from lib.generator.k8s_utils import set_engine_base_name, modify_sp_block_num
 
 
+def _pop_ring_controller_atlas_from_labels(labels):
+    if isinstance(labels, dict):
+        labels.pop(C.RING_CONTROLLER_ATLAS_LABEL, None)
+
+
+def _apply_a5_schedule_policy_annotation(template_metadata, hardware_type):
+    policy = C.A5_SCHEDULE_POLICY_BY_ACCELERATOR_TYPE.get(hardware_type)
+    if policy is None:
+        raise ValueError(
+            f"No huawei.com/schedule_policy mapping for A5 hardware_type '{hardware_type}'. "
+            f"Supported accelerator-type values: {list(C.A5_SCHEDULE_POLICY_BY_ACCELERATOR_TYPE.keys())}"
+        )
+    template_metadata.setdefault(C.ANNOTATIONS, {})[C.HUAWEI_SCHEDULE_POLICY_ANNOTATION] = policy
+    logger.info(
+        "Applied A5 annotation %s=%s for hardware_type=%s",
+        C.HUAWEI_SCHEDULE_POLICY_ANNOTATION, policy, hardware_type,
+    )
+
+
+def apply_a5_workload(workload, deploy_config):
+    hardware_type = deploy_config.get(C.HARDWARE_TYPE) if deploy_config else None
+    if hardware_type not in C.HARDWARE_TYPE_950I_A5:
+        return
+    template_section = workload.get(C.SPEC, {}).get(C.TEMPLATE)
+    if template_section is not None:
+        _pop_ring_controller_atlas_from_labels(workload.get(C.METADATA, {}).get(C.LABELS))
+        template_meta = template_section[C.METADATA]
+    else:
+        template_meta = workload.setdefault(C.METADATA, {})
+    _pop_ring_controller_atlas_from_labels(template_meta.get(C.LABELS))
+    _apply_a5_schedule_policy_annotation(template_meta, hardware_type)
+
+
 def update_engine_base_name(user_config):
     engine_section = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG) or user_config.get(C.MOTOR_ENGINE_UNION_CONFIG, {})
     engine_type = engine_section.get(C.ENGINE_TYPE, C.ENGINE_TYPE_MINDIE_LLM)
@@ -95,11 +128,20 @@ def set_engine_replicas(deployment_data, deploy_config, node_type):
         deployment_data[C.SPEC][C.REPLICAS] = int(deploy_config[instance_pod_num_key])
 
 
-def set_container_npu(container, npu_num):
+def set_container_npu(container, npu_num, deploy_config=None):
     if C.RESOURCES not in container:
         return
-    container[C.RESOURCES][C.REQUESTS][C.ASCEND_910_NPU_NUM] = npu_num
-    container[C.RESOURCES][C.LIMITS][C.ASCEND_910_NPU_NUM] = npu_num
+    requests = container[C.RESOURCES].setdefault(C.REQUESTS, {})
+    limits = container[C.RESOURCES].setdefault(C.LIMITS, {})
+    hardware_type = deploy_config.get(C.HARDWARE_TYPE) if deploy_config else None
+    if hardware_type in C.HARDWARE_TYPE_950I_A5:
+        requests.pop(C.ASCEND_910_NPU_NUM, None)
+        limits.pop(C.ASCEND_910_NPU_NUM, None)
+        requests[C.ASCEND_950_NPU_NUM] = npu_num
+        limits[C.ASCEND_950_NPU_NUM] = npu_num
+    else:
+        requests[C.ASCEND_910_NPU_NUM] = npu_num
+        limits[C.ASCEND_910_NPU_NUM] = npu_num
 
 
 def set_engine_npu(container, deploy_config, node_type):
@@ -113,7 +155,7 @@ def set_engine_npu(container, deploy_config, node_type):
         npu_num = int(deploy_config[C.D_POD_NPU_NUM])
     else:
         return
-    set_container_npu(container, npu_num)
+    set_container_npu(container, npu_num, deploy_config)
 
 
 def apply_node_selector_by_hardware(pod_spec, hardware_type):
@@ -212,6 +254,7 @@ def modify_engine_yaml(deployment_data, user_config, index, node_type):
     set_engine_npu(container, deploy_config, node_type)
     set_engine_node_selector(deployment_data, deploy_config, node_type)
     set_engine_weight_mount(deployment_data, container, deploy_config)
+    apply_a5_workload(deployment_data, deploy_config)
     modify_log_mount(deployment_data, user_config, deployment_data[C.METADATA][C.NAME])
 
 

@@ -26,6 +26,18 @@ E_POD_NPU_NUM = "e_pod_npu_num"
 P_POD_NPU_NUM = "p_pod_npu_num"
 D_POD_NPU_NUM = "d_pod_npu_num"
 ASCEND_910_NPU_NUM = "huawei.com/Ascend910"
+ASCEND_950_NPU_NUM = "huawei.com/npu"
+RING_CONTROLLER_ATLAS_LABEL = "ring-controller.atlas"
+HUAWEI_SCHEDULE_POLICY_ANNOTATION = "huawei.com/schedule_policy"
+A5_SCHEDULE_POLICY_BY_ACCELERATOR_TYPE = {
+    "350-Atlas-8": "chip1-node8",
+    "350-Atlas-16": "chip1-node16",
+    "350-Atlas-4p-8": "chip4-node8",
+    "350-Atlas-4p-16": "chip4-node16",
+    "850-Atlas-8p-8": "chip8-node8",
+    "850-SuperPod-Atlas-8": "chip8-node8-sp",
+    "950-SuperPod-Atlas-8": "chip8-node8-ra64-sp",
+}
 METADATA = "metadata"
 CONTROLLER = "controller"
 COORDINATOR = "coordinator"

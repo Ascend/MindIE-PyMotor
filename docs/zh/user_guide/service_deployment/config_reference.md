@@ -35,7 +35,7 @@
 | d_pod_npu_num | int | 单个 D 实例 Pod 占用的 NPU 卡数，每个 Pod 最大 16 卡 |
 | image_name | string | 推理镜像名（需包含 MindIE-PyMotor 与 vLLM 等运行环境），与 [PD 分离服务部署](./pd_disaggregation_deployment.md#准备镜像) 中准备/加载的镜像名一致 |
 | job_id | string | 部署任务名，同时作为 K8s 命名空间使用，如 `mindie-motor` |
-| hardware_type | string | 硬件类型：`800I_A2` 或 `800I_A3` |
+| hardware_type | string | 硬件类型：<br>A2: 800I_A2<br>A3: 800I_A3<br>A5: 850-Atlas-8p-8|
 | weight_mount_path | string | 宿主机上模型权重挂载路径，容器内 model_path 需与此挂载路径一致，如 `"/mnt/weight/"` |
 | deploy_mode | string | 部署方式。可选：`infer_service_set`（默认，基于 InferServiceSet CRD，生成单个 infer_service.yaml 由 CRD controller 拉起各 pod）、`multi_deployment`（传统方式，生成 controller、coordinator、engine_*、kv_pool 等多个独立 YAML 分别 apply）、`single_container`（单容器方式，P/D 合并运行）。不配置时默认为 `infer_service_set`。CRD 方式尚未完成 RAS 能力与池化能力的适配验证；若需 RAS（可靠性、可用性、可服务性）或 KV 池化能力，请设置为 `multi_deployment` |
 | tls_config | object | 可选；TLS 相关配置，含 infer_tls_config、mgmt_tls_config、etcd_tls_config、grpc_tls_config 四类，结构见 [PD 分离服务部署](./pd_disaggregation_deployment.md#tls_config可选) |
@@ -433,7 +433,7 @@
 | job_name | string/null | 任务/作业名，多由环境或 deploy 注入。默认：Env.job_name 或 null |
 | role | string | 本节点角色。可选：`prefill`（仅预填）、`decode`（仅解码）、`both`（预填+解码）。默认：`both` |
 | model_name | string | 模型名称，PD 部署时多由 user_config 注入。默认：`""` |
-| hardware_type | string | 硬件型号，如 `800I-A3`。默认：`800I-A3` |
+| hardware_type | string | 硬件类型：<br>A2: 800I_A2<br>A3: 800I_A3<br>A5: 850-Atlas-8p-8 |
 | heartbeat_interval_seconds | int | 向 Controller 上报心跳的间隔（秒）。默认：`1` |
 | device_num | int | NPU 设备数量，多由 HCCL 配置推导。默认：`0` |
 | parallel_config | object | 并行维度配置，见下表。默认：各维度 1，world_size 由系统根据各维度自动计算 |

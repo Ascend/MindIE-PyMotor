@@ -194,7 +194,7 @@ examples/
 | d_pod_npu_num | int | 单个 D 实例 Pod 占用的 NPU 卡数 |
 | image_name | string | 填写本文档 [2. 准备镜像](#准备镜像) 中准备/加载的推理镜像名（需包含 MindIE-PyMotor 与 vLLM 等运行环境） |
 | job_id | string | 部署任务名，同时作为 K8s 命名空间使用，如 `mindie-motor` |
-| hardware_type | string | 硬件类型：`800I_A2` 或 `800I_A3` |
+| hardware_type | string | 硬件类型：<br>A2: 800I_A2<br>A3: 800I_A3<br>A5: 850-Atlas-8p-8 |
 | weight_mount_path | string | 宿主机上模型权重挂载路径，容器内 model_path 需与此挂载路径一致，如 `"/mnt/weight/"` |
 | tls_config | object | 可选；TLS 相关配置，完整结构与示例见 4.6 |
 
