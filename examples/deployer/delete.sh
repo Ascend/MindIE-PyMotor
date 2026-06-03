@@ -46,6 +46,7 @@ done
 sed -i '/^# patch_begin/,/^# patch_end/d' ./startup/boot.sh
 sed -i '/^function set_controller_env()/,/^}/d' ./startup/roles/controller.sh
 sed -i '/^function set_coordinator_env()/,/^}/d' ./startup/roles/coordinator.sh
+sed -i '/^function set_union_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_encode_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_prefill_env()/,/^}/d' ./startup/roles/engine.sh
 sed -i '/^function set_decode_env()/,/^}/d' ./startup/roles/engine.sh

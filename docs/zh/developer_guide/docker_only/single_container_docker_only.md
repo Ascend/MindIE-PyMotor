@@ -139,6 +139,7 @@ docker run -u root --rm --name single_container \
 -e KV_POOL_PORT=$KV_POOL_PORT \
 -e KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=$KV_POOL_EVICTION_HIGH_WATERMARK_RATIO \
 -e KV_POOL_EVICTION_RATIO=$KV_POOL_EVICTION_RATIO \
+-e DEFAULT_KV_LEASE_TTL=$DEFAULT_KV_LEASE_TTL \
 -p $ENDPOINT_PORT_RANGE:$ENDPOINT_PORT_RANGE \
 -p $KV_PORT_RANGE:$KV_PORT_RANGE \
 $ASCEND_DEVICES \
@@ -165,10 +166,11 @@ bash -c "export POD_IP=\$(grep \$(hostname) /etc/hosts | cut -f1) && source \$CO
 | KV_POOL_PORT | mooncake_master部署端口 | 若开启kv_pool，设置任意有效端口，如50088；若不开启则设置为空 |
 | KV_POOL_EVICTION_HIGH_WATERMARK_RATIO | mooncake_master进程高水位比例 | 若开启kv_pool，取值0~1；若不开启则设置为空 |
 | KV_POOL_EVICTION_RATIO | mooncake_master进程逐出比例 | 若开启kv_pool，取值0~1；若不开启则设置为空 |
+| DEFAULT_KV_LEASE_TTL | 控制 KV 对象的默认租约 TTL（毫秒） | 配置值需大于env.json中vllm实例的环境变量`ASCEND_CONNECT_TIMEOUT`和`ASCEND_TRANSFER_TIMEOUT`。默认值11000；若不开启kv_pool则设置为空 |
 
 启动服务示例（1P1D）：
 
 ```shell
 # 若开启池化，KVP_MASTER_SERVICE设置为任意非空字符串,如kvp_master，不开启池化设置为空。
-ASCEND_VISIBLE_DEVICES=0,1 KVP_MASTER_SERVICE="" KV_POOL_PORT=50088 KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=0.9 KV_POOL_EVICTION_RATIO=0.1 sh start_docker.sh
+ASCEND_VISIBLE_DEVICES=0,1 KVP_MASTER_SERVICE="" KV_POOL_PORT=50088 KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=0.9 KV_POOL_EVICTION_RATIO=0.1 DEFAULT_KV_LEASE_TTL=11000 sh start_docker.sh
 ```

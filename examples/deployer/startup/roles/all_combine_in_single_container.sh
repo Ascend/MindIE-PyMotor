@@ -45,7 +45,7 @@ if [ -n "$KVP_MASTER_SERVICE" ]; then
     set_kv_pool_env
     ROLE=kv_pool mooncake_master --port "$KV_POOL_PORT" \
     --eviction_high_watermark_ratio "$KV_POOL_EVICTION_HIGH_WATERMARK_RATIO" \
-    --eviction_ratio "$KV_POOL_EVICTION_RATIO" &
+    --eviction_ratio "$KV_POOL_EVICTION_RATIO" --default_kv_lease_ttl "$DEFAULT_KV_LEASE_TTL" &
     pids+=($!)
 fi
 

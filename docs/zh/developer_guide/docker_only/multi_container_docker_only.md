@@ -138,6 +138,7 @@ docker run -u root --rm --name $CONTAINER_NAME --net=host $SET_IPC_HOST_STR \
 -e KV_POOL_PORT=$KV_POOL_PORT \
 -e KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=$KV_POOL_EVICTION_HIGH_WATERMARK_RATIO \
 -e KV_POOL_EVICTION_RATIO=$KV_POOL_EVICTION_RATIO \
+-e DEFAULT_KV_LEASE_TTL=$DEFAULT_KV_LEASE_TTL \
 $ASCEND_DEVICES \
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /usr/local/Ascend/add-ons/:/usr/local/Ascend/add-ons/ \
@@ -167,6 +168,7 @@ bash -c "source \$CONFIGMAP_PATH/boot.sh"
 | KV_POOL_PORT | mooncake_master部署端口 | 若开启kv_pool，设置任意有效端口，如50088；若不开启则设置为空 |
 | KV_POOL_EVICTION_HIGH_WATERMARK_RATIO | mooncake_master进程高水位比例 | 若开启kv_pool，取值0~1；若不开启则设置为空 |
 | KV_POOL_EVICTION_RATIO | mooncake_master进程逐出比例 | 若开启kv_pool，取值0~1；若不开启则设置为空 |
+| DEFAULT_KV_LEASE_TTL | 控制 KV 对象的默认租约 TTL（毫秒） | 配置值需大于env.json中vllm实例的环境变量`ASCEND_CONNECT_TIMEOUT`和`ASCEND_TRANSFER_TIMEOUT`。默认值11000；若不开启kv_pool则设置为空 |
 
 启动服务示例（1P1D）：
 
@@ -179,7 +181,7 @@ COORDINATOR_SERVICE="<IP0>" CONTROLLER_SERVICE="<IP1>" JOB_NAME="" ROLE="coordin
 COORDINATOR_SERVICE="<IP0>" CONTROLLER_SERVICE="<IP1>" JOB_NAME="" ROLE="controller" POD_IP="<IP1>"CONTAINER_NAME="docker_controller"  sh start_docker.sh
 
 # 若开启池化（可选），启动kv_pool，假定部署在节点<IP0>。
-ROLE=kv_pool POD_IP="<IP0>" KVP_MASTER_SERVICE="<IP2>" KV_POOL_PORT=50088 KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=0.9 KV_POOL_EVICTION_RATIO=0.1 CONTAINER_NAME="docker_kv_pool" sh start_docker.sh
+ROLE=kv_pool POD_IP="<IP0>" KVP_MASTER_SERVICE="<IP2>" KV_POOL_PORT=50088 KV_POOL_EVICTION_HIGH_WATERMARK_RATIO=0.9 KV_POOL_EVICTION_RATIO=0.1 DEFAULT_KV_LEASE_TTL=11000 CONTAINER_NAME="docker_kv_pool" sh start_docker.sh
 
 # 启动PD实例
 # 若开启池化，KVP_MASTER_SERVICE设置为kv_pool部署节点ip（即<IP2>），不开启池化设置为空。
