@@ -33,6 +33,7 @@ nav:
       - CRD 部署设计: developer_guide/crd_deployment/crd_deployment_design.md
       - 实例级手动扩缩容设计: developer_guide/instance_manual_scaling/manual_scaling_design.md
       - 故障管理设计: developer_guide/fault_tolerance/fault_manager_design.md
+      - EndPoint 断链取消设计: developer_guide/engine_disconnect_cancellation_design.md
       - 本地构建文档: developer_guide/build_docs/build_docs.md
   - API 参考:
       - 接口说明: api_reference/interface_description.md

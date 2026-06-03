@@ -12,10 +12,10 @@ import json
 import multiprocessing
 from abc import abstractmethod
 from http import HTTPStatus
-from typing import Any, AsyncGenerator, Callable
+from typing import Annotated, Any, AsyncGenerator, Callable
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
 
@@ -23,6 +23,7 @@ from motor.engine_server.core.config import IConfig
 from motor.common.http.cert_util import CertUtil
 from motor.common.logger import get_logger
 from motor.engine_server.core.endpoint import Endpoint
+from motor.engine_server.utils.cancellation import with_cancellation
 
 logger = get_logger(__name__)
 
@@ -100,6 +101,12 @@ class InferEndpoint(Endpoint):
                 status_code=HTTPStatus.BAD_REQUEST.value, detail=detail
             ) from e
 
+    async def _chat_completion_body(self, raw_request: Request) -> Any:
+        return await self._parse_openai_request(raw_request, self.chat_completion_request)
+
+    async def _completion_body(self, raw_request: Request) -> Any:
+        return await self._parse_openai_request(raw_request, self.completion_request)
+
     def _register_profile_routes_if_enabled(self) -> None:
         """Mirror vLLM profile API: POST /start_profile, /stop_profile when profiler is configured."""
         args = self.config.get_args()
@@ -145,18 +152,24 @@ class InferEndpoint(Endpoint):
 
     def _register_routes(self):
         @self.app.post("/v1/chat/completions")
-        async def create_chat_completion(raw_request: Request):
-            request = await self._parse_openai_request(
-                raw_request, self.chat_completion_request
+        @with_cancellation
+        async def create_chat_completion(
+            request: Annotated[Any, Depends(self._chat_completion_body)],
+            raw_request: Request,
+        ):
+            return await self.app.state.openai_serving_chat.handle_request(
+                request, raw_request
             )
-            return await self.app.state.openai_serving_chat.handle_request(request, raw_request)
 
         @self.app.post("/v1/completions")
-        async def create_completion(raw_request: Request):
-            request = await self._parse_openai_request(
-                raw_request, self.completion_request
+        @with_cancellation
+        async def create_completion(
+            request: Annotated[Any, Depends(self._completion_body)],
+            raw_request: Request,
+        ):
+            return await self.app.state.openai_serving_completion.handle_request(
+                request, raw_request
             )
-            return await self.app.state.openai_serving_completion.handle_request(request, raw_request)
         
         @self.app.get("/v1/models")
         async def list_models():
