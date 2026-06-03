@@ -36,6 +36,7 @@ from motor.coordinator.scheduler.runtime.workload_shm.layout import DEFAULT_WORK
 from motor.coordinator.scheduler.runtime.zmq_protocol import (
     SchedulerRequest, SchedulerResponse, SchedulerRequestType, SchedulerResponseType,
     CANDIDATE_POLICY_LOAD_BALANCE,
+    CANDIDATE_POLICY_KV_CACHE_AFFINITY,
     KNOWN_CANDIDATE_POLICIES,
     INSTANCE_CHANGE_TOPIC,
     pack_send_frames, unpack_recv_payload,
@@ -85,6 +86,7 @@ _KEY_WORKLOAD_SEQUENCE = "workload_sequence"
 _KEY_INSTANCE_VERSION = "instance_version"
 _KEY_FAST_PATH = "fast_path"
 _KEY_CANDIDATE_POLICY = "candidate_policy"
+_KEY_CANDIDATES = "candidates"
 
 
 def _should_log_scheduling_sample(sample_key: str) -> bool:
@@ -335,6 +337,11 @@ class _SchedulerRequestDispatcher:
                 request_id=request.request_id,
                 data={_KEY_INSTANCE: None, _KEY_ENDPOINT: None},
             )
+        # Worker-proposed alternates (affinity-ranked, best-first); the authoritative path may
+        # re-pick among them by fresh load. Falls back to the single top-1 for legacy callers.
+        selected_candidates = (
+            self._extract_allocate_candidates(request.data) or [selected_candidate]
+        )
         async with self._workload_commit_lock:
             fast_path = self._can_use_worker_top1_fast_path(
                 worker_workload_sequence,
@@ -344,12 +351,12 @@ class _SchedulerRequestDispatcher:
                 self._select_valid_candidate(selected_candidate, role)
                 if fast_path
                 else self._select_authoritative_allocate_candidate(
-                    selected_candidate, role, candidate_policy
+                    selected_candidate, selected_candidates, role, candidate_policy
                 )
             )
             if fast_path and selected is None:
                 selected = self._select_authoritative_allocate_candidate(
-                    selected_candidate, role, candidate_policy
+                    selected_candidate, selected_candidates, role, candidate_policy
                 )
                 fast_path = False
             if selected is None:
@@ -421,6 +428,26 @@ class _SchedulerRequestDispatcher:
                 return None
         return None
 
+    @staticmethod
+    def _extract_allocate_candidates(data: dict) -> list[tuple[int, int]]:
+        """Parse the worker's ranked alternate endpoints (best-first); empty when absent."""
+        raw = data.get(_KEY_CANDIDATES)
+        result: list[tuple[int, int]] = []
+        if not isinstance(raw, list):
+            return result
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            instance_id = item.get("instance_id")
+            endpoint_id = item.get("endpoint_id")
+            if instance_id is None or endpoint_id is None:
+                continue
+            try:
+                result.append((int(instance_id), int(endpoint_id)))
+            except (TypeError, ValueError):
+                continue
+        return result
+
     def _select_authoritative_candidate(
         self,
         candidate: tuple[int, int],
@@ -432,20 +459,66 @@ class _SchedulerRequestDispatcher:
     def _select_authoritative_allocate_candidate(
         self,
         candidate: tuple[int, int],
+        candidates: list[tuple[int, int]],
         role: PDRole,
         candidate_policy: str | None,
     ) -> tuple[Instance, Endpoint, float] | None:
         """
         Select allocation target using SchedulerServer's authoritative workload view.
 
-        Load-balance can scan all endpoints cheaply at the current cluster size. Other policies
-        keep the worker-proposed endpoint semantics.
+        Load-balance can scan all endpoints cheaply at the current cluster size. KV-cache affinity
+        re-picks the least-loaded among the worker's affinity-ranked alternates (preserving
+        affinity while spreading a stale-view burst). Other policies keep the worker-proposed
+        endpoint semantics.
         """
         if self._should_scan_global_load_balance(candidate_policy):
             selected = self._select_global_load_balance_candidate(role)
             if selected is not None:
                 return selected
+        if candidate_policy == CANDIDATE_POLICY_KV_CACHE_AFFINITY and len(candidates) > 1:
+            selected = self._select_lowest_load_among_candidates(candidates, role)
+            if selected is not None:
+                return selected
         return self._select_authoritative_candidate(candidate, role)
+
+    def _select_lowest_load_among_candidates(
+        self,
+        candidates: list[tuple[int, int]],
+        role: PDRole,
+    ) -> tuple[Instance, Endpoint, float] | None:
+        """
+        Among the worker's affinity-ranked candidates, pick the lowest current endpoint score from
+        the authoritative ledger. The candidate set is already the affinity top-k, so this spreads
+        a burst by fresh load without breaking affinity. Ties keep the earliest (best-affinity) one.
+        """
+        best: tuple[Instance, Endpoint, float] | None = None
+        for cand in candidates:
+            found = self._find_available_instance_endpoint(*cand)
+            if found is None:
+                continue
+            instance, endpoint = found
+            try:
+                instance_role = PDRole(instance.role)
+            except ValueError:
+                instance_role = PDRole.ROLE_U
+            if instance_role != role:
+                continue
+            try:
+                score = LoadBalancePolicy.calculate_endpoint_score(
+                    instance,
+                    endpoint,
+                    role=role,
+                    instance_score_weight=self._endpoint_instance_score_weight,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to score affinity candidate instance_id=%s endpoint_id=%s: %s",
+                    cand[0], cand[1], e,
+                )
+                continue
+            if best is None or score < best[2]:
+                best = (instance, endpoint, score)
+        return best
 
     def _should_scan_global_load_balance(self, candidate_policy: str | None) -> bool:
         """Return True when candidates were selected by load-balance semantics."""

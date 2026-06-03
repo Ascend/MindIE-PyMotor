@@ -40,7 +40,7 @@ def calculate_demand_workload(role: PDRole, req_info: RequestInfo) -> Workload:
         score = _calculate_encode_scores(req_info)
         return Workload(active_tokens=score)
     if role == PDRole.ROLE_P:
-        score = _calculate_prefill_scores(req_info.req_len)
+        score = _prefill_load_score(req_info)
         return Workload(active_kv_cache=score, active_tokens=score)
     if role == PDRole.ROLE_D:
         score = _calculate_decode_scores(req_info.req_len)
@@ -76,8 +76,24 @@ def _calculate_encode_scores(req_info: RequestInfo) -> float:
     return mul_token
 
 
+def _prefill_load_score(req_info: RequestInfo) -> float:
+    """
+    Prefill load in **real prompt tokens** when available, else the legacy byte-length estimate.
+
+    When the request was tokenized at routing (KV affinity sets ``req_info.token_ids``), the load
+    uses the real token count so it shares the token unit with the affinity prefill cost
+    (``isl - matched_tokens``) -- this is what makes the unified score's weights principled instead
+    of mixing token counts with a byte-length fit. Falls back to ``_calculate_prefill_scores`` when
+    token ids are absent (e.g. load_balance/round_robin, or no tokenizer configured).
+    """
+    token_ids = getattr(req_info, "token_ids", None)
+    if isinstance(token_ids, list) and token_ids:
+        return float(len(token_ids))
+    return _calculate_prefill_scores(req_info.req_len)
+
+
 def _calculate_prefill_scores(request_length: int) -> float:
-    """Prefill role workload score."""
+    """Prefill role workload score (legacy byte-length heuristic; fallback only)."""
     length_score = request_length / 4.0
     return length_score * 0.0345 + 120.0745
 

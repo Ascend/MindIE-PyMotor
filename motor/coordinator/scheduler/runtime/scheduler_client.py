@@ -32,7 +32,11 @@ from motor.coordinator.scheduler.runtime.zmq_protocol import (
     ZMQMessageSerializer,
 )
 from motor.common.logger import get_logger
-from motor.config.coordinator import DeployMode
+from motor.config.coordinator import (
+    DeployMode,
+    KV_AFFINITY_MODE_UNIFIED,
+    KV_AFFINITY_MODES,
+)
 from motor.coordinator.scheduler.policy.load_balance import LoadBalancePolicy
 from motor.coordinator.scheduler.policy.round_robin import RoundRobinPolicy
 from motor.coordinator.scheduler.policy.kv_cache_affinity import KvCacheAffinityPolicy
@@ -43,6 +47,10 @@ logger = get_logger(__name__)
 
 # Callback signature: receives active endpoint list [(ip, port), ...], returns None
 OnInstanceRefreshedCallback = Callable[[list[tuple[str, str]]], Awaitable[None]]
+
+# Number of affinity-ranked candidates a prefill request proposes to the scheduler. The scheduler
+# re-picks among them by its authoritative workload ledger, spreading bursts across the top few.
+_AFFINITY_CANDIDATE_TOPK = 3
 
 
 def _collect_active_endpoints_from_cache(cache: "_SchedulerInstanceCache") -> list[tuple[str, str]]:
@@ -479,6 +487,14 @@ class SchedulerClientConfig:
     client_index: int = 0
     client_count: int = 1
     endpoint_instance_score_weight: float = 0.05
+    # kv_cache_affinity tunables (see SchedulerConfig). mode = "unified" | "load_gated".
+    kv_affinity_mode: str = KV_AFFINITY_MODE_UNIFIED
+    kv_affinity_load_weight: float = 1.0
+    kv_affinity_overlap_credit: float = 1.0
+    kv_affinity_prefill_load_scale: float = 1.0
+    # Load-gated affinity: keep only the N least-loaded endpoints, then pick the best prefix
+    # match among them. 0 disables it (uses the unified-score / legacy path instead).
+    kv_affinity_load_gate_topn: int = 0
     tls_config: Any | None = None
     deploy_mode: Any | None = None
     on_instance_refreshed: OnInstanceRefreshedCallback | None = None
@@ -498,6 +514,18 @@ class AsyncSchedulerClient:
         self._endpoint_instance_score_weight = max(
             0.0, config.endpoint_instance_score_weight
         )
+        mode = str(config.kv_affinity_mode or KV_AFFINITY_MODE_UNIFIED).lower()
+        if mode not in KV_AFFINITY_MODES:
+            logger.warning(
+                "Invalid kv_affinity_mode %r; expected one of %s. Falling back to %r.",
+                config.kv_affinity_mode, KV_AFFINITY_MODES, KV_AFFINITY_MODE_UNIFIED,
+            )
+            mode = KV_AFFINITY_MODE_UNIFIED
+        self._kv_affinity_mode = mode
+        self._kv_affinity_load_weight = max(0.0, config.kv_affinity_load_weight)
+        self._kv_affinity_overlap_credit = max(0.0, config.kv_affinity_overlap_credit)
+        self._kv_affinity_prefill_load_scale = max(0.0, config.kv_affinity_prefill_load_scale)
+        self._kv_affinity_load_gate_topn = max(0, int(config.kv_affinity_load_gate_topn))
         self._deploy_mode = config.deploy_mode
 
         self._serializer = ZMQMessageSerializer()
@@ -668,12 +696,24 @@ class AsyncSchedulerClient:
                 else:
                     self._last_instance_version = current_version
 
+        # Prefill affinity proposes several ranked candidates so the scheduler can re-pick among
+        # them by its fresh ledger (burst spreading); other roles/policies stay at top-1.
+        request_top_k = (
+            _AFFINITY_CANDIDATE_TOPK
+            if (role is PDRole.ROLE_P and (self._scheduler_type or "") == "kv_cache_affinity")
+            else 1
+        )
         candidates, candidate_policy = await self._select_endpoint_candidates_with_policy(
-            req_info, role, top_k=1
+            req_info, role, top_k=request_top_k
         )
         if not candidates:
             return None
         instance, endpoint, _ = candidates[0]
+        # Ranked alternates (best-first) the scheduler may re-pick among on a stale-view burst.
+        candidate_endpoints = [
+            {"instance_id": cand_instance.id, "endpoint_id": cand_endpoint.id}
+            for cand_instance, cand_endpoint, _score in candidates
+        ]
 
         # Allocation workload: RR does not use load, so use zero; LB uses demand for accounting.
         workload = (
@@ -694,6 +734,7 @@ class AsyncSchedulerClient:
             data={
                 "instance_id": instance.id,
                 "endpoint_id": endpoint.id,
+                "candidates": candidate_endpoints,
                 "role": role_str,
                 "req_id": req_info.req_id,
                 "workload_sequence": workload_sequence,
@@ -963,25 +1004,33 @@ class AsyncSchedulerClient:
                 return candidates, CANDIDATE_POLICY_LOAD_BALANCE
             logger.warning("load_balance failed, falling back to round-robin")
         elif st == "kv_cache_affinity":
+            # Affinity ranking applies to prefill only; non-prefill roles and the no-match case
+            # fall through to the load_balance -> round_robin chain below.
             if role is PDRole.ROLE_P:
-                selected = KvCacheAffinityPolicy.select_endpoint_from_list(instances, req_info)
-                if selected is not None:
-                    instance, endpoint = selected
-                    return [(instance, endpoint, 0.0)], CANDIDATE_POLICY_KV_CACHE_AFFINITY
-                logger.warning("kv_cache_affinity failed, falling back to load_balance")
-                candidates = self._select_endpoint_candidates_by_load_balance(
-                    instances, role, top_k
+                # Propose the top-k affinity-ranked candidates. The scheduler re-picks among them
+                # by its authoritative (fresh) workload ledger, so a burst spreads across the top
+                # candidates without a client-local in-flight overlay.
+                ranked = KvCacheAffinityPolicy.select_endpoint_candidates_from_list(
+                    instances,
+                    req_info,
+                    mode=self._kv_affinity_mode,
+                    overlap_credit=self._kv_affinity_overlap_credit,
+                    prefill_load_scale=self._kv_affinity_prefill_load_scale,
+                    load_weight=self._kv_affinity_load_weight,
+                    load_gate_topn=self._kv_affinity_load_gate_topn,
+                    top_k=max(1, top_k),
                 )
-                if candidates:
-                    return candidates, CANDIDATE_POLICY_LOAD_BALANCE
-                logger.warning("load_balance also failed, falling back to round-robin")
-            else:
-                candidates = self._select_endpoint_candidates_by_load_balance(
-                    instances, role, top_k
+                if ranked:
+                    return ranked, CANDIDATE_POLICY_KV_CACHE_AFFINITY
+                logger.warning(
+                    "kv_cache_affinity unavailable (no conductor match), falling back to load_balance"
                 )
-                if candidates:
-                    return candidates, CANDIDATE_POLICY_LOAD_BALANCE
-            logger.warning("kv_cache_affinity failed, falling back to round-robin")
+            candidates = self._select_endpoint_candidates_by_load_balance(
+                instances, role, top_k
+            )
+            if candidates:
+                return candidates, CANDIDATE_POLICY_LOAD_BALANCE
+            logger.warning("load_balance unavailable, falling back to round-robin")
         # Round-robin path: default policy or load_balance fallback
         if role not in self._instance_rr_counters:
             self._instance_rr_counters[role] = 0

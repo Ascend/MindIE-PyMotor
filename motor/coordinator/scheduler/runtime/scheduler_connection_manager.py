@@ -80,6 +80,21 @@ class SchedulerConnectionManager:
             endpoint_instance_score_weight=(
                 coordinator_config.scheduler_config.endpoint_instance_score_weight
             ),
+            kv_affinity_mode=(
+                coordinator_config.scheduler_config.kv_affinity_mode
+            ),
+            kv_affinity_load_weight=(
+                coordinator_config.scheduler_config.kv_affinity_load_weight
+            ),
+            kv_affinity_overlap_credit=(
+                coordinator_config.scheduler_config.kv_affinity_overlap_credit
+            ),
+            kv_affinity_prefill_load_scale=(
+                coordinator_config.scheduler_config.kv_affinity_prefill_load_scale
+            ),
+            kv_affinity_load_gate_topn=(
+                coordinator_config.scheduler_config.kv_affinity_load_gate_topn
+            ),
             tls_config=coordinator_config.infer_tls_config,
             deploy_mode=coordinator_config.scheduler_config.deploy_mode,
             on_instance_refreshed=on_instance_refreshed,

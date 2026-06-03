@@ -35,6 +35,25 @@ class TestCalculateDemandWorkload:
         assert w.active_tokens > 0
         assert w.active_kv_cache == w.active_tokens
 
+    def test_prefill_role_uses_real_tokens_when_present(self):
+        """ROLE_P: when req_info.token_ids is set, load is the real token count (not req_len)."""
+        req_info = MagicMock()
+        req_info.req_len = 999  # would give ~128 via the heuristic; must be ignored
+        req_info.token_ids = [1, 2, 3, 4, 5]
+        w = calculate_demand_workload(PDRole.ROLE_P, req_info)
+        assert w.active_tokens == 5.0
+        assert w.active_kv_cache == 5.0
+
+    def test_prefill_role_falls_back_when_token_ids_empty(self):
+        """ROLE_P: empty/absent token_ids falls back to the legacy byte-length heuristic."""
+        req_info = MagicMock()
+        req_info.req_len = 4
+        req_info.token_ids = []  # empty -> not a usable token count -> fallback
+        w = calculate_demand_workload(PDRole.ROLE_P, req_info)
+        # Heuristic at req_len=4 -> ~120.1, definitely not len([])==0.
+        assert w.active_tokens > 100
+        assert w.active_kv_cache == w.active_tokens
+
     def test_decode_role(self):
         """ROLE_D: only active_tokens set (request_length)."""
         req_info = MagicMock()

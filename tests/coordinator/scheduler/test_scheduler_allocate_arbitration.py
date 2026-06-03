@@ -267,6 +267,63 @@ async def test_allocate_only_keeps_affinity_candidate_when_candidate_policy_is_k
 
 
 @pytest.mark.asyncio
+async def test_allocate_only_affinity_reselects_least_loaded_among_candidates():
+    """On a stale-view burst, KV-affinity re-picks the least-loaded *within* the proposed set."""
+    config = CoordinatorConfig()
+    config.scheduler_config.scheduler_type = SchedulerType.KV_CACHE_AFFINITY
+    config.scheduler_config.endpoint_instance_score_weight = 0.0
+    instance_manager = InstanceManager(config)
+
+    inst_a = _make_prefill_instance(1, (10, 11))
+    inst_b = _make_prefill_instance(2, (20, 21))
+    await instance_manager.refresh_instances(EventType.ADD, [inst_a, inst_b])
+    # ep11 is the globally least-loaded but is NOT among the proposed candidates.
+    await instance_manager.update_instance_workload(1, 10, Workload(active_tokens=20))
+    await instance_manager.update_instance_workload(1, 11, Workload(active_tokens=5))
+    await instance_manager.update_instance_workload(2, 20, Workload(active_tokens=10))
+    await instance_manager.update_instance_workload(2, 21, Workload(active_tokens=40))
+
+    scheduler = Scheduler(instance_provider=instance_manager, config=config)
+    workload_writer = _DummyWorkloadWriter()
+    dispatcher = _SchedulerRequestDispatcher(
+        instance_manager,
+        scheduler,
+        config,
+        workload_writer=workload_writer,
+    )
+    request = SchedulerRequest(
+        request_type=SchedulerRequestType.ALLOCATE_ONLY,
+        request_id="alloc-kv-burst",
+        data={
+            "instance_id": 1,
+            "endpoint_id": 10,  # worker top-1 (stale view)
+            "candidates": [
+                {"instance_id": 1, "endpoint_id": 10},
+                {"instance_id": 2, "endpoint_id": 20},
+            ],
+            "role": PDRole.ROLE_P.value,
+            "req_id": "req-kv-burst",
+            "workload_sequence": workload_writer.sequence - 2,  # stale -> slow path
+            "instance_version": workload_writer.instance_version,
+            "workload": Workload(active_tokens=3).model_dump(mode="json"),
+            "candidate_policy": CANDIDATE_POLICY_KV_CACHE_AFFINITY,
+        },
+    )
+
+    response = await dispatcher.dispatch(request)
+
+    assert response.response_type == SchedulerResponseType.SUCCESS
+    assert response.data["fast_path"] is False
+    # Among {ep10=20, ep20=10} the fresh ledger picks ep20; the globally lighter ep11 (5) is
+    # NOT chosen because it was not in the proposed affinity set.
+    assert response.data["instance"]["id"] == 2
+    assert response.data["endpoint"]["id"] == 20
+    _, selected_workload = await instance_manager.get_endpoint_workload(2, 20)
+    assert selected_workload.active_tokens == 13
+    assert workload_writer.writes == [(2, 20)]
+
+
+@pytest.mark.asyncio
 async def test_allocate_only_unknown_candidate_policy_falls_back_to_scheduler_type():
     """Unknown candidate_policy should not silently disable LB's global scan."""
     config = CoordinatorConfig()
