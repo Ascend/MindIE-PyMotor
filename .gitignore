@@ -109,4 +109,9 @@ venv.bak/
 **/*_pb2_grpc.py
 
 # deployer
-examples/deployer/output_yamls/*
+deployer/output/*
+
+# observability stack runtime artifacts
+examples/features/observability/stack/generated/
+examples/features/observability/stack/.native-runtime/
+examples/features/observability/stack/.env
