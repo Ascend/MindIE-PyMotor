@@ -70,7 +70,6 @@ class HardwareType(str, Enum):
     TYPE_850_ATLAS_8P_8 = "850-Atlas-8p-8"
     TYPE_850_SUPERPOD_ATLAS_8 = "850-SuperPod-Atlas-8"
     TYPE_950_SUPERPOD_ATLAS_8 = "950-SuperPod-Atlas-8"
-    TYPE_950_A5 = "950_A5"
 
     def __repr__(self) -> str:
         return str.__repr__(self.value)

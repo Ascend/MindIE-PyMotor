@@ -206,7 +206,7 @@ gen_ranktable_config() {
     local hw_type
     hw_type="$(_motor_deploy_hardware_type)"
     case "$hw_type" in
-        950_A5|350-Atlas-8|350-Atlas-16|350-Atlas-4p-8|350-Atlas-4p-16|850-Atlas-8p-8|850-SuperPod-Atlas-8|950-SuperPod-Atlas-8)
+        350-Atlas-8|350-Atlas-16|350-Atlas-4p-8|350-Atlas-4p-16|850-Atlas-8p-8|850-SuperPod-Atlas-8|950-SuperPod-Atlas-8)
             echo "hardware_type is ${hw_type}: skip gen_ranktable_config (no hccl/ranktable on this platform)"
             return
             ;;
