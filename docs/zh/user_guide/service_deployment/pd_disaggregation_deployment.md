@@ -139,6 +139,7 @@ examples/
 │   ├── startup/               # 启动脚本
 │   │   ├── boot.sh            # 容器内启动脚本
 │   │   ├── common.sh          # 公共环境变量设置
+│   │   ├── hccl_tools.py      # 生成 ranktable
 │   │   ├── mooncake_config.py # Mooncake 配置生成
 │   │   └── roles/             # 各组件环境变量设置脚本
 │   ├── probe/                 # 探针脚本
@@ -364,7 +365,7 @@ prefill / decode 子字段：
 | tp_size | int | 张量并行大小 |
 
 > **说明**
->
+> 
 >- `kv_connector_extra_config` 中 prefill/decode 的 dp_size、tp_size 一般无需手动填写，Motor 在拉起服务时会根据 `data_parallel_size` / `tensor_parallel_size` 自动刷新。
 >- 若需使用 KV 池化等能力，请改用 MultiConnector，并参考 [KV 池化部署指南](../KV_pool_deployment_guide.md) 修改 `user_config.json`，并与 `deploy.py` 配合使用。
 

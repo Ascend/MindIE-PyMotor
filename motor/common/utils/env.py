@@ -23,9 +23,17 @@ class Env:
         return os.getenv("CONFIG_PATH", None)
 
     @property
+    def hccl_path(self):
+        return os.getenv("HCCL_PATH", None)
+
+    @property
+    def ranktable_path(self):
+        return os.getenv("RANKTABLE_PATH", None)
+
+    @property
     def user_config_path(self):
         return os.getenv("USER_CONFIG_PATH", None)
-
+    
     @property
     def role(self):
         return os.getenv("ROLE", None)
@@ -67,6 +75,5 @@ class Env:
     @property
     def disaggregation_bootstrap_port(self):
         return os.getenv("DISAGGREGATION_BOOTSTRAP_PORT", "")
-
 
 Env = Env()

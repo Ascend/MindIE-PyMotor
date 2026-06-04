@@ -14,9 +14,26 @@ from pydantic import BaseModel, Field
 
 from motor.common.logger import get_logger
 from motor.common.resources.instance import Instance, ParallelConfig
-from motor.common.resources.endpoint import Endpoint, EndpointStatus
+from motor.common.resources.endpoint import Endpoint, DeviceInfo, EndpointStatus
 
 logger = get_logger(__name__)
+
+
+class ServerInfo(BaseModel):
+    server_id: str = Field(..., description="Host IP address")
+    container_ip: str = Field(..., description="Container IP address")
+    device: list[DeviceInfo] = Field(..., description="List of DeviceInfo")
+
+
+class Ranktable(BaseModel):
+    """
+    Instance level ranktable, it is unified between different infer engine
+    """
+
+    version: str = Field(..., description="")
+    status: str = Field(..., description="")
+    server_count: str = Field(..., description="")
+    server_list: list[ServerInfo] = Field(..., description="List of ServerInfo")
 
 
 class RegisterMsg(BaseModel):
@@ -34,14 +51,15 @@ class RegisterMsg(BaseModel):
     parallel_config: ParallelConfig = Field(..., description="Parallel configuration")
     enable_multi_endpoints: bool = Field(default=True, description="Whether to enable multi-endpoints mode")
     device_num: int = Field(..., description="Number of visible devices in the container")
+    ranktable: Ranktable | None = Field(default=None, description="Ranktable managed by this nm")
     nnodes: int = Field(default=1, description="PCP cross-node count, from engine_config")
 
 
 class StartCmdMsg(BaseModel):
     """
     Start command message format sent from controller to NodeManager.
-    This msg brings the necessary information, e.g. instance id and role
-    for NodeManager to start the instance.
+    This msg brings the necessary information .e.g instance's ranktable
+    and instance id and role for NodeManager to start the instance.
     """
 
     job_name: str = Field(..., description="Instance job name")
@@ -49,6 +67,7 @@ class StartCmdMsg(BaseModel):
     instance_id: int = Field(..., description="Instance id")
     endpoints: list[Endpoint] = Field(..., description="endpoints that managed by nm")
     master_dp_ip: str = Field(..., description="Master data parallel node IP address")
+    ranktable: Ranktable | None = Field(default=None, description="Ranktable of the instance")
     d2d_peer_ips: list[str] | None = Field(
         default=None, description="IP addresses of ready peer instances for D2D weight transfer"
     )

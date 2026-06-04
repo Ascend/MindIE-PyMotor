@@ -195,7 +195,7 @@ def init_service_domain_name(paths, deploy_config):
 
 def run_cmd_get_output(args):
     """Run command and return stdout. args: list of command and arguments. Raises on non-zero return code."""
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Command failed (exit {result.returncode}): {result.stderr or result.stdout}")
     return result.stdout.strip()
@@ -329,6 +329,7 @@ def create_motor_config_configmap(job_id, user_config=None, effective_deploy_mod
         f"kubectl create configmap {C.MOTOR_CONFIG_CONFIGMAP_NAME} "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/boot.sh "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/common.sh "
+        f"--from-file=./{C.STARTUP_ROOT_PATH}/hccl_tools.py "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/mooncake_config.py "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/controller.sh "
         f"--from-file=./{C.STARTUP_ROOT_PATH}/roles/coordinator.sh "
@@ -388,39 +389,37 @@ def scale_engine_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_
         total = totals[1]
         base = bases[1]
     if total < base:
-        logger.info("Scale-in %s instance, %s -> %s", node_type, base, total)
+        logger.info(f"Scale-in {node_type} instance, {base} -> {total}")
         for index in reversed(range(total, base)):
             yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{node_type}{index}.yaml")
             safe_exec_cmd(f"kubectl delete -f {yaml_path} -n {job_id}")
             if os.path.exists(yaml_path):
                 os.remove(yaml_path)
     if total > base:
-        logger.info("Scale-out %s instance, %s -> %s", node_type, base, total)
+        logger.info(f"Scale-out {node_type} instance, {base} -> {total}")
         for index in range(base, total):
             yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{node_type}{index}.yaml")
             safe_exec_cmd(f"kubectl apply -f {yaml_path} -n {job_id}")
-
 
 def scale_engine_e_by_type(deploy_config, baseline_deploy_config, out_deploy_yaml_path):
     """Scale engine instances by type (p, d or u)."""
     from lib.generator.engine import obtain_engine_e_instance_total
-
+    
     job_id = deploy_config[C.CONFIG_JOB_ID]
     total = obtain_engine_e_instance_total(deploy_config)
     base = obtain_engine_e_instance_total(baseline_deploy_config)
     if total < base:
-        logger.info("Scale-in %s instance, %s -> %s", C.NODE_TYPE_E, base, total)
+        logger.info(f"Scale-in {C.NODE_TYPE_E} instance, {base} -> {total}")
         for index in reversed(range(total, base)):
             yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{C.NODE_TYPE_E}{index}.yaml")
             safe_exec_cmd(f"kubectl delete -f {yaml_path} -n {job_id}")
             if os.path.exists(yaml_path):
                 os.remove(yaml_path)
     if total > base:
-        logger.info("Scale-out %s instance, %s -> %s", C.NODE_TYPE_E, base, total)
+        logger.info(f"Scale-out {C.NODE_TYPE_E} instance, {base} -> {total}")
         for index in range(base, total):
             yaml_path = os.path.join(out_deploy_yaml_path, f"{g_engine_base_name}_{C.NODE_TYPE_E}{index}.yaml")
             safe_exec_cmd(f"kubectl apply -f {yaml_path} -n {job_id}")
-
 
 def elastic_distributed_engine_deploy(deploy_config, baseline_deploy_config, out_deploy_yaml_path):
     """Elastic distributed engine deployment - scale in/out engine instances."""

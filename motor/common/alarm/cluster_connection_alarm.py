@@ -24,7 +24,7 @@ from motor.common.alarm.enums import (
 
 class ClusterConnectionReason(enum.IntEnum):
     REGISTER_FAILED = 1
-    CLUSTER_STATE_SUBSCRIBE_FAILED = 2
+    RANKTABLE_SUBSCRIBE_FAILED = 2
     FAULT_SUBSCRIBE_FAILED = 3
     CONNECTION_INTERRUPTED = 4
 
@@ -39,7 +39,7 @@ class ClusterConnectionAlarm(Alarm):
     probable_cause: str = Field(
         default=(
             "1: Cluster service connection failed; "
-            "2: Subscription to cluster state failed; "
+            "2: Subscription to RankTable failed; "
             "3: Subscription to fault messages failed; "
             "4: Connection interrupted"
         )
