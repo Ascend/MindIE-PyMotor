@@ -378,6 +378,8 @@ OnInstanceChangeNotify = Callable[[int | None], Awaitable[None]]
 
 # ZMQ PUB does not queue; SUB must be ready before PUB sends. Short delay after connect.
 _INSTANCE_PUB_SUB_SETTLE_MS = 150
+# Roles that should use kv_cache_affinity scheduling.
+_KVA_SELECT_ROLES = frozenset({PDRole.ROLE_P, PDRole.ROLE_U})
 
 
 class _InstancePushSubscriber:
@@ -1004,9 +1006,9 @@ class AsyncSchedulerClient:
                 return candidates, CANDIDATE_POLICY_LOAD_BALANCE
             logger.warning("load_balance failed, falling back to round-robin")
         elif st == "kv_cache_affinity":
-            # Affinity ranking applies to prefill only; non-prefill roles and the no-match case
-            # fall through to the load_balance -> round_robin chain below.
-            if role is PDRole.ROLE_P:
+            # Affinity ranking applies to KVA-eligible roles only; others fall through to
+            # the load_balance -> round_robin chain below.
+            if role in _KVA_SELECT_ROLES:
                 # Propose the top-k affinity-ranked candidates. The scheduler re-picks among them
                 # by its authoritative (fresh) workload ledger, so a burst spreads across the top
                 # candidates without a client-local in-flight overlay.

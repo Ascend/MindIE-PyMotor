@@ -1193,3 +1193,265 @@ class TestPreprocessInput:
         # test tool processe
         for tool in processed_tools:
             assert list(tool["function"].keys())[0] == "name"
+
+
+# -----------------------------------------------------------------------------
+# Tools-aware tokenize: standard / non-standard / fallback paths
+# -----------------------------------------------------------------------------
+
+
+def _reset_tokenizer_manager_singleton() -> None:
+    """Drop any cached TokenizerManager singleton so each test gets a fresh one."""
+    from motor.common.utils.singleton import ThreadSafeSingleton
+
+    ThreadSafeSingleton._instances.pop(TokenizerManager, None)
+
+
+def _build_tokenizer_manager(
+    *,
+    openai_standard: str = "STANDARD",
+    apply_chat_template_side_effect=None,
+    encode_side_effect=None,
+):
+    """Construct a TokenizerManager whose internal tokenizer is a Mock.
+
+    Avoids hitting transformers / disk; the returned ``mock_tokenizer`` is the
+    same instance assigned to ``manager.tokenizer``.
+    """
+    _reset_tokenizer_manager_singleton()
+    config = Mock()
+    config.tracer_config.endpoint = ""
+    config.prefill_kv_event_config.conductor_service = "stub-conductor"
+    config.prefill_kv_event_config.model_path = ""
+
+    with patch.dict("os.environ", {"OPENAI_STANDARD": openai_standard}, clear=False):
+        manager = TokenizerManager(config)
+
+    mock_tokenizer = Mock()
+    if apply_chat_template_side_effect is not None:
+        mock_tokenizer.apply_chat_template.side_effect = apply_chat_template_side_effect
+    else:
+        mock_tokenizer.apply_chat_template.return_value = []
+    if encode_side_effect is not None:
+        mock_tokenizer.encode.side_effect = encode_side_effect
+    else:
+        mock_tokenizer.encode.return_value = []
+    manager.tokenizer = mock_tokenizer
+    manager.openai_standard = openai_standard
+    return manager, mock_tokenizer
+
+
+class TestApplyChatTemplateStandard(unittest.TestCase):
+    """STANDARD-path apply_chat_template must include ``tools`` in the rendered tokens."""
+
+    def setUp(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def tearDown(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def test_standard_path_passes_tools(self) -> None:
+        """tools must be forwarded to tokenizer.apply_chat_template on standard path."""
+        manager, mock_tokenizer = _build_tokenizer_manager(openai_standard="STANDARD")
+        mock_tokenizer.apply_chat_template.return_value = [11, 22, 33, 44]
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+
+        result = manager.apply_chat_template(messages, tools)
+
+        self.assertEqual(result, [11, 22, 33, 44])
+        mock_tokenizer.apply_chat_template.assert_called_once()
+        _, kwargs = mock_tokenizer.apply_chat_template.call_args
+        self.assertIn("tools", kwargs)
+        self.assertEqual(kwargs["tools"], tools)
+        self.assertTrue(kwargs.get("add_generation_prompt"))
+        self.assertTrue(kwargs.get("tokenize"))
+
+    def test_standard_path_no_tools(self) -> None:
+        """When no tools provided, standard path still works and forwards tools=None."""
+        manager, mock_tokenizer = _build_tokenizer_manager(openai_standard="STANDARD")
+        mock_tokenizer.apply_chat_template.return_value = [1, 2]
+
+        messages = [{"role": "user", "content": "hi"}]
+        result = manager.apply_chat_template(messages)
+        self.assertEqual(result, [1, 2])
+        _, kwargs = mock_tokenizer.apply_chat_template.call_args
+        self.assertIsNone(kwargs.get("tools"))
+
+    def test_standard_exception_fallback_still_passes_tools(self) -> None:
+        """If primary call raises, fallback retries with the SAME tools (never silently drops it)."""
+        side_effects = [RuntimeError("first failure"), [9, 9, 9, 9]]
+        manager, mock_tokenizer = _build_tokenizer_manager(
+            openai_standard="STANDARD",
+            apply_chat_template_side_effect=side_effects,
+        )
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+        result = manager.apply_chat_template(messages, tools)
+        self.assertEqual(result, [9, 9, 9, 9])
+
+        self.assertEqual(mock_tokenizer.apply_chat_template.call_count, 2)
+        for _, kwargs in mock_tokenizer.apply_chat_template.call_args_list:
+            self.assertEqual(kwargs.get("tools"), tools)
+
+    def test_total_failure_returns_empty_list(self) -> None:
+        """Both primary and fallback failing -> empty list (let scheduler fall back to LB)."""
+        side_effects = [RuntimeError("first"), RuntimeError("second")]
+        manager, mock_tokenizer = _build_tokenizer_manager(
+            openai_standard="STANDARD",
+            apply_chat_template_side_effect=side_effects,
+        )
+        result = manager.apply_chat_template(
+            [{"role": "user", "content": "hi"}],
+            [{"type": "function", "function": {"name": "f"}}],
+        )
+        self.assertEqual(result, [])
+        self.assertEqual(mock_tokenizer.apply_chat_template.call_count, 2)
+
+    def test_non_standard_path_uses_preprocess(self) -> None:
+        """Non-standard path keeps using the preprocess pipeline (tokenize=False then encode)."""
+        manager, mock_tokenizer = _build_tokenizer_manager(openai_standard="DEEPSEEK")
+        mock_tokenizer.apply_chat_template.return_value = "rendered prompt"
+        mock_tokenizer.encode.return_value = [5, 6, 7]
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "f"}}]
+        result = manager.apply_chat_template(messages, tools)
+
+        self.assertEqual(result, [5, 6, 7])
+        # Non-standard path calls apply_chat_template with tokenize=False, then encodes the string.
+        _, kwargs = mock_tokenizer.apply_chat_template.call_args
+        self.assertFalse(kwargs.get("tokenize", True))
+        self.assertEqual(kwargs.get("tools"), tools)
+        mock_tokenizer.encode.assert_called_once_with("rendered prompt")
+
+    def test_non_standard_exception_fallback_to_standard_path_keeps_tools(self) -> None:
+        """If preprocess pipeline raises, we fall back to the tools-aware standard path."""
+        # First call (non-standard, tokenize=False) raises; second call (standard, tokenize=True) returns ids.
+        side_effects = [RuntimeError("preprocess broken"), [42, 43, 44]]
+        manager, mock_tokenizer = _build_tokenizer_manager(
+            openai_standard="DEEPSEEK",
+            apply_chat_template_side_effect=side_effects,
+        )
+
+        messages = [{"role": "user", "content": "hi"}]
+        tools = [{"type": "function", "function": {"name": "f"}}]
+        result = manager.apply_chat_template(messages, tools)
+        self.assertEqual(result, [42, 43, 44])
+        self.assertEqual(mock_tokenizer.apply_chat_template.call_count, 2)
+        # Both invocations must carry tools.
+        for _, kwargs in mock_tokenizer.apply_chat_template.call_args_list:
+            self.assertEqual(kwargs.get("tools"), tools)
+
+
+class TestApplyChatTemplateRenamed(unittest.TestCase):
+    """The misspelled method must be removed (no alias kept)."""
+
+    def setUp(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def tearDown(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def test_correct_method_name_exists(self) -> None:
+        manager, _ = _build_tokenizer_manager()
+        self.assertTrue(hasattr(manager, "_apply_chat_template_with_preprocess"))
+
+    def test_misspelled_method_name_removed(self) -> None:
+        manager, _ = _build_tokenizer_manager()
+        self.assertFalse(hasattr(manager, "_apply_chat_template_with_preproces"))
+
+
+class TestKvCacheAffinityWithToolsEndToEnd(unittest.TestCase):
+    """End-to-end: tokens sent to conductor must reflect tools when present."""
+
+    def setUp(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def tearDown(self) -> None:
+        _reset_tokenizer_manager_singleton()
+
+    def _stub_tokenizer_manager(self, ids_with_tools, ids_without_tools):
+        """Patch TokenizerManager().apply_chat_template so it differentiates tools/no-tools."""
+        manager, mock_tokenizer = _build_tokenizer_manager(openai_standard="STANDARD")
+
+        def _apply(*args, **kwargs):
+            tools = kwargs.get("tools")
+            return ids_with_tools if tools else ids_without_tools
+
+        mock_tokenizer.apply_chat_template.side_effect = _apply
+        return manager
+
+    @patch.object(KvCacheAffinityPolicy, "_conductor_block_size", return_value=16)
+    @patch(
+        "motor.coordinator.scheduler.policy.kv_cache_affinity.ConductorApiClient.query_conductor"
+    )
+    def test_query_conductor_receives_tokens_including_tools(
+        self, mock_query, _mock_block_size
+    ) -> None:
+        ids_with_tools = list(range(20))
+        ids_without_tools = list(range(5))
+        self._stub_tokenizer_manager(ids_with_tools, ids_without_tools)
+
+        instance = Mock()
+        instance.id = 1
+        ep = _make_endpoint(0)
+        instance.endpoints = {"pod-0": {0: ep}}
+        instance.get_all_endpoints.return_value = (ep,)
+
+        mock_query.return_value = {
+            TENANT_ID: {
+                "vllm-prefill-1": {
+                    "longest_matched": 20,
+                    "DP": {"0": 1},
+                }
+            }
+        }
+
+        req_info = Mock()
+        req_info.req_data = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {"type": "function", "function": {"name": "search_order"}},
+                {"type": "function", "function": {"name": "refund"}},
+            ],
+        }
+
+        result = KvCacheAffinityPolicy.select_endpoint_from_list([instance], req_info)
+        self.assertIsNotNone(result)
+        mock_query.assert_called_once()
+        sent_instances, sent_ids = mock_query.call_args[0]
+        self.assertEqual(sent_instances, [instance])
+        self.assertEqual(sent_ids, ids_with_tools)
+        self.assertGreater(len(sent_ids), len(ids_without_tools))
+
+    @patch.object(KvCacheAffinityPolicy, "_conductor_block_size", return_value=0)
+    @patch(
+        "motor.coordinator.scheduler.policy.kv_cache_affinity.ConductorApiClient.query_conductor"
+    )
+    def test_tokenize_total_failure_falls_back_to_empty_ids(
+        self, mock_query, _mock_block_size
+    ) -> None:
+        """If both tokenize attempts fail, encoded_ids must be [] and conductor queried with []."""
+        manager, mock_tokenizer = _build_tokenizer_manager(openai_standard="STANDARD")
+        mock_tokenizer.apply_chat_template.side_effect = RuntimeError("boom")
+
+        instance = Mock()
+        instance.id = 1
+        ep = _make_endpoint(0)
+        instance.endpoints = {"pod-0": {0: ep}}
+        instance.get_all_endpoints.return_value = (ep,)
+        mock_query.return_value = {}
+
+        req_info = Mock()
+        req_info.req_data = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "f"}}],
+        }
+        result = KvCacheAffinityPolicy.select_endpoint_from_list([instance], req_info)
+        self.assertIsNone(result)
+        mock_query.assert_called_once()
+        sent_instances, sent_ids = mock_query.call_args[0]
+        self.assertEqual(sent_ids, [])
