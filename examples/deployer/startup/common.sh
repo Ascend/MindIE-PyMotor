@@ -188,7 +188,29 @@ set_cann_env() {
     source "$CANN_INSTALL_PATH/nnal/atb/set_env.sh"
 }
 
+_motor_deploy_hardware_type() {
+    local cfg=""
+    if [ -n "$USER_CONFIG_PATH" ] && [ -f "$USER_CONFIG_PATH" ]; then
+        cfg="$USER_CONFIG_PATH"
+    elif [ -n "$USER_CONFIG_FILE" ] && [ -f "$USER_CONFIG_FILE" ]; then
+        cfg="$USER_CONFIG_FILE"
+    fi
+    if [ -z "$cfg" ]; then
+        echo "Error: Config file missing" >&2
+        return
+    fi
+    python3 -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print(d.get('motor_deploy_config',{}).get('hardware_type',''))" "$cfg" 2>/dev/null || echo ""
+}
+
 gen_ranktable_config() {
+    local hw_type
+    hw_type="$(_motor_deploy_hardware_type)"
+    case "$hw_type" in
+        950_A5|350-Atlas-8|350-Atlas-16|350-Atlas-4p-8|350-Atlas-4p-16|850-Atlas-8p-8|850-SuperPod-Atlas-8|950-SuperPod-Atlas-8)
+            echo "hardware_type is ${hw_type}: skip gen_ranktable_config (no hccl/ranktable on this platform)"
+            return
+            ;;
+    esac
     if [ -f "$CONFIGMAP_PATH/hccl_tools.py" ]; then
         echo "Using hccl_tools.py to generate ranktable.json..."
         export HCCL_PATH="$CONFIG_PATH/hccl.json"

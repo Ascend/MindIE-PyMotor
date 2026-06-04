@@ -19,7 +19,7 @@ from motor.common.resources.http_msg_spec import Ranktable, RegisterMsg, StartCm
 from motor.common.utils.env import Env
 from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
-from motor.config.node_manager import NodeManagerConfig
+from motor.config.node_manager import HardwareType, NodeManagerConfig
 from motor.node_manager.api_client.controller_api_client import ControllerApiClient
 from motor.node_manager.core.fault_reporter import FaultReporter
 
@@ -194,6 +194,11 @@ class EngineManager(ThreadSafeSingleton):
 
     def _get_ranktable(self) -> Ranktable | None:
         """Get ranktable from HCCL file"""
+        with self.config_lock:
+            hardware_type = str(self._config.basic_config.hardware_type)
+        if HardwareType.is_a5(hardware_type):
+            logger.info("A5 platform does not require ranktable, skip loading from HCCL file")
+            return None
         try:
             with open(Env.hccl_path, "r") as f:
                 data = json.load(f)
