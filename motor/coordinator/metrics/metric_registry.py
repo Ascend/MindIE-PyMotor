@@ -20,6 +20,8 @@ Unknown metrics fall back to type-based defaults (gauge→sum, counter→sum, hi
 from dataclasses import dataclass
 from enum import Enum
 
+from motor.config.coordinator import DeployMode
+
 
 # ---------------------------------------------------------------------------
 # Semantic taxonomy
@@ -205,16 +207,23 @@ _VLLM_METRIC_REGISTRY: dict[str, MetricSemanticConfig] = {
         semantic=MetricSemantic.COUNTER,
     ),
     # -- Coordinator-side (already aggregated) --------------------------------
-    "motor_active_prefill_workers": MetricSemanticConfig(
+    "motor:active_prefill_workers": MetricSemanticConfig(
         semantic=MetricSemantic.METADATA_GAUGE,
     ),
-    "motor_active_decode_workers": MetricSemanticConfig(
+    "motor:active_decode_workers": MetricSemanticConfig(
         semantic=MetricSemantic.METADATA_GAUGE,
     ),
-    "motor_inactive_prefill_workers": MetricSemanticConfig(
+    "motor:inactive_prefill_workers": MetricSemanticConfig(
         semantic=MetricSemantic.METADATA_GAUGE,
     ),
-    "motor_inactive_decode_workers": MetricSemanticConfig(
+    "motor:inactive_decode_workers": MetricSemanticConfig(
+        semantic=MetricSemantic.METADATA_GAUGE,
+    ),
+    # -- Coordinator-side (computed from counter deltas) -----------------------
+    "motor:prompt_tokens_per_second": MetricSemanticConfig(
+        semantic=MetricSemantic.METADATA_GAUGE,
+    ),
+    "motor:generation_tokens_per_second": MetricSemanticConfig(
         semantic=MetricSemantic.METADATA_GAUGE,
     ),
 }
@@ -245,7 +254,7 @@ class MetricRegistry:
         return _VLLM_METRIC_REGISTRY.get(metric_name)
 
     @classmethod
-    def get_effective_role_scope(cls, metric_name: str, deploy_mode: "DeployMode | None" = None) -> str | None:
+    def get_effective_role_scope(cls, metric_name: str, deploy_mode: DeployMode | None = None) -> str | None:
         """Get the effective role scope for a metric, considering deploy mode.
 
         In CPCD mode, TTFT needs both P and D instances (no filtering).
@@ -257,8 +266,6 @@ class MetricRegistry:
 
         # TTFT in CPCD mode: include both P and D instances
         if metric_name == "vllm:time_to_first_token_seconds" and deploy_mode is not None:
-            from motor.config.coordinator import DeployMode
-
             if deploy_mode == DeployMode.CPCD_SEPARATE:
                 return None  # No role filtering — aggregate from both
 

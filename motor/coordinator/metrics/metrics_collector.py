@@ -13,12 +13,10 @@ import math
 import re
 import time
 import threading
-from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
 from motor.common.resources.instance import Instance
-from motor.common.resources import PDRole
 from motor.common.logger import get_logger
 from motor.common.utils.singleton import ThreadSafeSingleton
 from motor.config.coordinator import CoordinatorConfig
@@ -31,6 +29,7 @@ from motor.coordinator.metrics.metric_types import (
 )
 from motor.coordinator.metrics.aggregation_engine import SemanticAggregationEngine
 from motor.coordinator.metrics.metric_registry import MetricRegistry
+from motor.coordinator.metrics.metric_computer import MotorMetricComputer, get_inherited_metric_names
 
 logger = get_logger(__name__)
 
@@ -51,7 +50,7 @@ class MetricsCollector(ThreadSafeSingleton):
         self._deploy_mode = config.scheduler_config.deploy_mode
 
         # Initial metrics state
-        self._inactive_instance_metrics_aggregate: list[Metric] = []
+        self._inactive_instance_metrics_aggregate: dict[str, list[Metric]] = {}
         self._instance_metrics_cached: dict[int, dict[str, list[Metric]]] = {}
         self._last_collects: dict[int, dict[str, Any]] = {}
 
@@ -69,6 +68,7 @@ class MetricsCollector(ThreadSafeSingleton):
         self._scheduler_provider: Callable[[], Any] | None = None
 
         self._aggregation_engine = SemanticAggregationEngine()
+        self._motor_computer = MotorMetricComputer()
 
         self._initialized = True
         logger.info("MetricsCollector initialized.")
@@ -187,6 +187,10 @@ class MetricsCollector(ThreadSafeSingleton):
         result: dict[str, str] = {}
         ctx = AggregationContext(scope=AggregationScope.ROLE)
         for role, metrics_lists in role_groups.items():
+            # Include inactive metrics for this role so counters survive restarts
+            inactive_for_role = self._inactive_instance_metrics_aggregate.get(role, [])
+            if inactive_for_role:
+                metrics_lists = list(metrics_lists) + [inactive_for_role]
             aggregated = self._aggregation_engine.post_process(self._aggregate_metrics(metrics_lists, ctx=ctx))
             if aggregated:
                 labeled = [self._inject_labels(m, role=role) for m in aggregated]
@@ -215,6 +219,10 @@ class MetricsCollector(ThreadSafeSingleton):
         if not self._parse_metrics(collects):
             logger.error("[Metrics] Parse vllm server metrics failed.")
             return None
+
+        # Step 3: compute Motor-specific DP-level metrics (e.g. TPS) and
+        # inject them into each endpoint's metrics list.
+        self._motor_computer.compute_pre_aggregation(collects)
 
         return collects
 
@@ -254,25 +262,36 @@ class MetricsCollector(ThreadSafeSingleton):
             if ins_id in self._instance_metrics_cached:
                 clear_ins_list.append(ins_id)
 
-        # 2. add clear cache data to input data
-        aggr_input = []
+        if not clear_ins_list:
+            return
+
+        # 2. group clearing instances by role
+        inherited_names = get_inherited_metric_names()
+        role_ins_groups: dict[str, list[list[Metric]]] = {}
         for ins_id in clear_ins_list:
+            role = unavailable_pool[ins_id].role
             metrics = self._instance_metrics_cached[ins_id][self.METRICS_KEY]
             aggr_input_single = []
             for metric in metrics:
-                aggr_input_single.append(self._copy_metric_zero_gauge(metric))
-            aggr_input.append(aggr_input_single)
+                m = self._copy_metric_zero_gauge(metric)
+                # Zero out inherited effective counters — their values are
+                # already carried forward by new instances via baseline offset.
+                if metric.name in inherited_names:
+                    m = metric.copy()
+                    m.value = [0.0] * len(m.value)
+                aggr_input_single.append(m)
+            role_ins_groups.setdefault(role, []).append(aggr_input_single)
 
-        # 3. add history metric to input data
-        aggr_input_single = []
-        for metric in self._inactive_instance_metrics_aggregate:
-            aggr_input_single.append(metric)
-        aggr_input.append(aggr_input_single)
+        # 3. per-role: aggregate clearing metrics with existing inactive history
+        for role, metric_lists in role_ins_groups.items():
+            aggr_input = list(metric_lists)
+            # add existing inactive aggregate for this role
+            existing = self._inactive_instance_metrics_aggregate.get(role, [])
+            if existing:
+                aggr_input.append(existing)
+            self._inactive_instance_metrics_aggregate[role] = self._aggregate_metrics(aggr_input)
 
-        # 4. excute aggregate and update history metric
-        self._inactive_instance_metrics_aggregate = self._aggregate_metrics(aggr_input)
-
-        # 5. remove ins_id from cache
+        # 4. remove ins_id from cache
         for ins_id in clear_ins_list:
             del self._instance_metrics_cached[ins_id]
 
@@ -405,6 +424,7 @@ class MetricsCollector(ThreadSafeSingleton):
             collect = self._fetch_endpoint_metrics(ins_info)
             if collect:
                 collect["role"] = ins_info.role
+                collect["job_name"] = ins_info.job_name
                 collects[ins_info.id] = collect
 
         return collects
@@ -455,10 +475,10 @@ class MetricsCollector(ThreadSafeSingleton):
                 aggr_input_single.append(self._copy_metric_zero_gauge(metric) if ins_id not in collects else metric)
             aggr_input.append(aggr_input_single)
 
-        # 2. add history metric to input data
+        # 2. add history metrics from all roles to input data
         aggr_input_single = []
-        for metric in self._inactive_instance_metrics_aggregate:
-            aggr_input_single.append(metric)
+        for role_metrics in self._inactive_instance_metrics_aggregate.values():
+            aggr_input_single.extend(role_metrics)
         aggr_input.append(aggr_input_single)
 
         # 3. service-scope aggregate with role filtering
@@ -517,32 +537,6 @@ class MetricsCollector(ThreadSafeSingleton):
     def _aggregate_single_metric(self, metric_list: list[Metric]) -> Metric:
         return self._aggregation_engine.aggregate(metric_list[0].name, metric_list)
 
-    def _append_coordinator_metrics(
-        self,
-        aggregate: list[Metric],
-        collects: dict[int, dict[str, Any]],
-    ) -> None:
-        role_counts = Counter(ins_data.get("role", "") for ins_data in collects.values())
-        available_p = role_counts.get(PDRole.ROLE_P, 0)
-        available_d = role_counts.get(PDRole.ROLE_D, 0)
-        with self._config_lock:
-            p_num = self._deploy_config.p_instances_num
-            d_num = self._deploy_config.d_instances_num
-
-        def _new(name: str, num: int) -> Metric:
-            return Metric(
-                name=name,
-                help="Number of instances",
-                type=MetricType.GAUGE,
-                label=[name],
-                value=[num],
-            )
-
-        aggregate.append(_new("motor_active_prefill_workers", available_p))
-        aggregate.append(_new("motor_active_decode_workers", available_d))
-        aggregate.append(_new("motor_inactive_prefill_workers", p_num - available_p))
-        aggregate.append(_new("motor_inactive_decode_workers", d_num - available_d))
-
     def _generate_full_metrics(
         self,
         collects: dict[int, dict[str, Any]],
@@ -556,7 +550,9 @@ class MetricsCollector(ThreadSafeSingleton):
         aggregate = self._aggregation_engine.post_process(
             self._aggregate_metrics_all_instance(collects, instance_roles)
         )
-        self._append_coordinator_metrics(aggregate, collects)
+        with self._config_lock:
+            deploy_config = self._deploy_config
+        self._motor_computer.compute_post_aggregation(aggregate, collects, deploy_config)
         return self._format_prometheus(aggregate)
 
     def _format_prometheus(self, aggregate: list[Metric]) -> str:

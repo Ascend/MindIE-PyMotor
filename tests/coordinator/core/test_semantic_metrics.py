@@ -155,10 +155,10 @@ class TestMetricRegistry:
 
     def test_coordinator_metrics_are_metadata(self):
         for name in [
-            "motor_active_prefill_workers",
-            "motor_active_decode_workers",
-            "motor_inactive_prefill_workers",
-            "motor_inactive_decode_workers",
+            "motor:active_prefill_workers",
+            "motor:active_decode_workers",
+            "motor:inactive_prefill_workers",
+            "motor:inactive_decode_workers",
         ]:
             config = MetricRegistry.get_semantic(name)
             assert config.semantic == MetricSemantic.METADATA_GAUGE
@@ -545,7 +545,7 @@ class TestMetricsCollectorIntegration:
             0: {"metrics": [counter, created]},
         }
 
-        collector._inactive_instance_metrics_aggregate = []
+        collector._inactive_instance_metrics_aggregate = {}
 
         # Call _aggregate_metrics_all_instance with empty collects (uses cache)
         result = collector._aggregate_metrics_all_instance({}, {})

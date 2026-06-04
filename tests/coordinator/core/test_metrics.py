@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
 # MindIE is licensed under Mulan PSL v2.
 # You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -15,6 +13,7 @@
 import asyncio
 import os
 import threading
+import time
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import requests
@@ -27,6 +26,11 @@ from motor.coordinator.domain.instance_manager import InstanceManager
 from motor.coordinator.metrics.metrics_collector import MetricsCollector, MetricType, Metric
 from motor.config.coordinator import CoordinatorConfig
 from motor.common.utils.singleton import ThreadSafeSingleton
+from motor.coordinator.metrics.metric_computer import (
+    MotorMetricComputer,
+    _MOTOR_COMPUTED_METRICS,
+    _get_defs_by_phase,
+)
 
 
 def _stop_singleton_instance(instance):
@@ -69,7 +73,7 @@ def cleanup_singletons():
 def mock_metrics_collector():
     """Create a mock MetricsCollector for testing"""
     collector = MagicMock(spec=MetricsCollector)
-    collector._inactive_instance_metrics_aggregate = []
+    collector._inactive_instance_metrics_aggregate = {}
     collector._instance_metrics_cached = {}
     collector._last_metrics = None
     collector._lock = MagicMock()
@@ -146,7 +150,7 @@ class TestMetrics:
         collector = MetricsCollector.__new__(MetricsCollector)
 
         # Manually initialize attributes without starting background thread
-        collector._inactive_instance_metrics_aggregate = []
+        collector._inactive_instance_metrics_aggregate = {}
         collector._instance_metrics_cached = {}
         collector._last_metrics = None
         collector._reuse_time = 0.001  # Very short interval for testing
@@ -391,17 +395,21 @@ vllm:num_requests_running{engine="0",model_name="/job/model/Qwen2.5-0.5B-Instruc
         }
         metric_collector._clear_inactive_metrics(unavailable_pool)
         assert len(metric_collector._instance_metrics_cached) == 0
+        # _inactive_instance_metrics_aggregate is now a dict keyed by role
+        role_key = PDRole.ROLE_P  # self.p_ins role is "prefill"
+        assert role_key in metric_collector._inactive_instance_metrics_aggregate
+        inactive_metrics = metric_collector._inactive_instance_metrics_aggregate[role_key]
         assert self.check_metric_value_equel(
-            metric_collector._inactive_instance_metrics_aggregate[0].value, [0.0] * len(metric_gauge.value)
+            inactive_metrics[0].value, [0.0] * len(metric_gauge.value)
         )
         assert self.check_metric_value_equel(
-            metric_collector._inactive_instance_metrics_aggregate[1].value, metric_counter.value
+            inactive_metrics[1].value, metric_counter.value
         )
         assert self.check_metric_value_equel(
-            metric_collector._inactive_instance_metrics_aggregate[2].value, metric_histogram.value
+            inactive_metrics[2].value, metric_histogram.value
         )
         assert self.check_metric_value_equel(
-            metric_collector._inactive_instance_metrics_aggregate[3].value, metric_summary.value
+            inactive_metrics[3].value, metric_summary.value
         )
 
     @_test_without_background_thread
@@ -1305,4 +1313,526 @@ def test_get_metrics_cache_invalidation():
     result_v2 = collector.get_metrics(metrics_type="full")
     assert "99.0" in result_v2
     assert result_v1 != result_v2
+    _cleanup_singletons()
+
+
+# ---------------------------------------------------------------------------
+# MotorMetricComputer — counter rate (DP-level TPS) tests
+# ---------------------------------------------------------------------------
+
+
+def test_counter_rate_first_collection_creates_state():
+    """First collection: tracking state created, TPS returns 0."""
+    computer = MotorMetricComputer()
+    now = time.monotonic()
+    raw = 500.0
+    _effective, tps = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=raw,
+        ins_id=1,
+        now=now,
+    )
+    assert tps == 0.0
+    key = ("job-1", 0, "vllm:generation_tokens_total")
+    assert key in computer._dp_state
+    state = computer._dp_state[key]
+    assert state["baseline"] == 0.0
+    assert state["last_effective"] == raw
+    assert state["last_raw"] == raw
+    assert state["last_ins_id"] == 1
+
+
+def test_counter_rate_steady_state():
+    """Two consecutive collections produce correct TPS (delta / dt)."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+    dt = 5.0
+
+    _effective, tps1 = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=1000.0,
+        ins_id=1,
+        now=t0,
+    )
+    assert tps1 == 0.0
+
+    _effective, tps2 = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=1500.0,
+        ins_id=1,
+        now=t0 + dt,
+    )
+    assert tps2 == pytest.approx(100.0)  # 500 tokens / 5 seconds
+
+
+def test_counter_rate_restart_by_instance_id():
+    """Restart (new instance_id) triggers baseline inheritance, effective counter continuous."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+    dt = 5.0
+
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=10000.0,
+        ins_id=1,
+        now=t0,
+    )
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=11000.0,
+        ins_id=1,
+        now=t0 + dt,
+    )
+
+    # Restart: new instance_id=12, counter reset
+    _effective, tps_restart = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=50.0,
+        ins_id=12,
+        now=t0 + dt * 2,
+    )
+    assert tps_restart == pytest.approx(10.0)  # ~0 during restart gap
+
+    state = computer._dp_state[("job-1", 0, "vllm:generation_tokens_total")]
+    assert state["baseline"] == pytest.approx(11000.0)
+    assert state["last_ins_id"] == 12
+
+    # Post-restart steady state
+    _effective, tps_post = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=500.0,
+        ins_id=12,
+        now=t0 + dt * 3,
+    )
+    assert tps_post == pytest.approx(90.0)  # 450 tokens / 5 seconds
+
+
+def test_counter_rate_restart_by_counter_drop():
+    """Counter drop >10% triggers restart detection even if instance_id unchanged."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+    dt = 5.0
+
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=10000.0,
+        ins_id=1,
+        now=t0,
+    )
+    # 95% drop → restart detected
+    _effective, tps = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=500.0,
+        ins_id=1,
+        now=t0 + dt,
+    )
+    state = computer._dp_state[("job-1", 0, "vllm:generation_tokens_total")]
+    assert state["baseline"] == pytest.approx(10000.0)
+    assert tps == pytest.approx(100.0)
+
+
+def test_counter_rate_multiple_dp_ranks_independent():
+    """Each (job_name, dp_rank) pair is tracked independently."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=1000.0,
+        ins_id=1,
+        now=t0,
+    )
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=1,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=2000.0,
+        ins_id=1,
+        now=t0,
+    )
+
+    assert ("job-1", 0, "vllm:generation_tokens_total") in computer._dp_state
+    assert ("job-1", 1, "vllm:generation_tokens_total") in computer._dp_state
+    assert computer._dp_state[("job-1", 0, "vllm:generation_tokens_total")]["last_raw"] == 1000.0
+    assert computer._dp_state[("job-1", 1, "vllm:generation_tokens_total")]["last_raw"] == 2000.0
+
+
+def test_counter_rate_both_prompt_and_generation():
+    """Prompt and generation counters tracked under separate state keys."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:prompt_tokens_total",
+        raw_counter=5000.0,
+        ins_id=1,
+        now=t0,
+    )
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=3000.0,
+        ins_id=1,
+        now=t0,
+    )
+
+    assert ("job-1", 0, "vllm:prompt_tokens_total") in computer._dp_state
+    assert ("job-1", 0, "vllm:generation_tokens_total") in computer._dp_state
+
+
+def test_counter_rate_negative_clamped_to_zero():
+    """Negative rates (from counter anomaly) are clamped to 0."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+    dt = 5.0
+
+    computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=1000.0,
+        ins_id=1,
+        now=t0,
+    )
+    _effective, tps = computer._compute_effective_and_rate(
+        job_name="job-1",
+        dp_rank=0,
+        src_name="vllm:generation_tokens_total",
+        raw_counter=950.0,
+        ins_id=1,
+        now=t0 + dt,
+    )
+    assert tps == 0.0
+
+
+# ---------------------------------------------------------------------------
+# MotorMetricComputer — compute_pre_aggregation integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_pre_aggregation_injects_tps_into_endpoint_metrics():
+    """compute_pre_aggregation injects TPS Metric objects into endpoint metrics lists."""
+    computer = MotorMetricComputer()
+
+    gen_metric = Metric(
+        name="vllm:generation_tokens_total",
+        help="Generation tokens total.",
+        type=MetricType.COUNTER,
+        label=["vllm:generation_tokens_total{model=\"test\"}"],
+        value=[1000.0],
+    )
+    prompt_metric = Metric(
+        name="vllm:prompt_tokens_total",
+        help="Prompt tokens total.",
+        type=MetricType.COUNTER,
+        label=["vllm:prompt_tokens_total{model=\"test\"}"],
+        value=[5000.0],
+    )
+
+    collects = {
+        1: {
+            "role": "decode",
+            "job_name": "decode-job-0",
+            "endpoints": {0: {"metrics": [gen_metric, prompt_metric], "pod_ip": "10.0.0.1"}},
+        }
+    }
+
+    computer.compute_pre_aggregation(collects)
+
+    ep_metrics = collects[1]["endpoints"][0]["metrics"]
+    tps_names = {m.name for m in ep_metrics}
+    assert "motor:generation_tokens_per_second" in tps_names
+    assert "motor:prompt_tokens_per_second" in tps_names
+    # Raw vLLM counters should NOT be modified on first collection (no baseline)
+    for m in ep_metrics:
+        if m.name == "vllm:generation_tokens_total":
+            assert m.value[0] == 1000.0  # unchanged (first collection)
+        if m.name == "vllm:prompt_tokens_total":
+            assert m.value[0] == 5000.0  # unchanged (first collection)
+        if "tokens_per_second" in m.name:
+            assert m.type == MetricType.GAUGE
+            assert m.value[0] == 0.0
+
+
+def test_pre_aggregation_skips_missing_job_name():
+    """Endpoints without job_name are skipped gracefully."""
+    computer = MotorMetricComputer()
+    gen_metric = Metric(
+        name="vllm:generation_tokens_total",
+        help="test",
+        type=MetricType.COUNTER,
+        label=["vllm:generation_tokens_total"],
+        value=[1000.0],
+    )
+    collects = {
+        1: {"role": "decode", "endpoints": {0: {"metrics": [gen_metric], "pod_ip": "10.0.0.1"}}},
+    }
+    computer.compute_pre_aggregation(collects)  # must not raise
+
+
+def test_pre_aggregation_skips_missing_counters():
+    """Endpoints without source counters are handled gracefully (no TPS injected)."""
+    computer = MotorMetricComputer()
+    other_metric = Metric(
+        name="vllm:num_requests_running",
+        help="test",
+        type=MetricType.GAUGE,
+        label=["vllm:num_requests_running"],
+        value=[5.0],
+    )
+    collects = {
+        1: {
+            "role": "decode",
+            "job_name": "decode-job-0",
+            "endpoints": {0: {"metrics": [other_metric], "pod_ip": "10.0.0.1"}},
+        }
+    }
+    computer.compute_pre_aggregation(collects)
+    ep_metrics = collects[1]["endpoints"][0]["metrics"]
+    assert "motor:generation_tokens_per_second" not in {m.name for m in ep_metrics}
+
+
+# ---------------------------------------------------------------------------
+# MotorMetricComputer — worker counts (post_aggregation) tests
+# ---------------------------------------------------------------------------
+
+
+def test_worker_counts_basic():
+    """Worker counts match role distributions in collects."""
+    config = CoordinatorConfig()
+    deploy_config = config.deploy_config
+
+    computer = MotorMetricComputer()
+    collects = {
+        1: {"role": "prefill", "job_name": "p-0", "endpoints": {}},
+        2: {"role": "prefill", "job_name": "p-1", "endpoints": {}},
+        3: {"role": "decode", "job_name": "d-0", "endpoints": {}},
+    }
+    aggregate: list[Metric] = []
+    computer.compute_post_aggregation(aggregate, collects, deploy_config)
+
+    result = {m.name: m.value[0] for m in aggregate}
+    assert result["motor:active_prefill_workers"] == 2
+    assert result["motor:active_decode_workers"] == 1
+    assert result["motor:inactive_prefill_workers"] == deploy_config.p_instances_num - 2
+    assert result["motor:inactive_decode_workers"] == deploy_config.d_instances_num - 1
+
+
+def test_worker_counts_empty_collects():
+    """Empty collects yields 0 active workers."""
+    config = CoordinatorConfig()
+    deploy_config = config.deploy_config
+
+    computer = MotorMetricComputer()
+    aggregate: list[Metric] = []
+    computer.compute_post_aggregation(aggregate, {}, deploy_config)
+
+    result = {m.name: m.value[0] for m in aggregate}
+    assert result["motor:active_prefill_workers"] == 0
+    assert result["motor:active_decode_workers"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Computed metric registry tests
+# ---------------------------------------------------------------------------
+
+
+def test_effective_counter_inherited_after_restart():
+    """Effective counter inherits old value via baseline after instance_id change."""
+    computer = MotorMetricComputer()
+    t0 = 1000.0
+    dt = 5.0
+
+    # First collection: raw=10000
+    computer._compute_effective_and_rate(
+        job_name="job-1", dp_rank=0, src_name="vllm:generation_tokens_total",
+        raw_counter=10000.0, ins_id=5, now=t0,
+    )
+    assert computer._dp_state[("job-1", 0, "vllm:generation_tokens_total")]["last_effective"] == 10000.0
+
+    # Restart: new ins_id=12, raw=50
+    computer._compute_effective_and_rate(
+        job_name="job-1", dp_rank=0, src_name="vllm:generation_tokens_total",
+        raw_counter=50.0, ins_id=12, now=t0 + dt,
+    )
+    state = computer._dp_state[("job-1", 0, "vllm:generation_tokens_total")]
+    # baseline = 10000 (inherited), effective = 50 + 10000 = 10050
+    assert state["baseline"] == pytest.approx(10000.0)
+    assert state["last_effective"] == pytest.approx(10050.0)
+    assert state["last_ins_id"] == 12
+
+
+def test_raw_counter_corrected_after_restart():
+    """Raw vllm counter values are corrected in-place after engine restart."""
+    computer = MotorMetricComputer()
+
+    gen_metric = Metric(
+        name="vllm:generation_tokens_total", help="test",
+        type=MetricType.COUNTER, label=["vllm:generation_tokens_total"], value=[10000.0],
+    )
+
+    # First collection: no baseline, raw counter unchanged
+    collects = {
+        5: {
+            "role": "decode", "job_name": "decode-0",
+            "endpoints": {0: {"metrics": [gen_metric], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    computer.compute_pre_aggregation(collects)
+    assert collects[5]["endpoints"][0]["metrics"][0].value[0] == 10000.0  # unchanged
+
+    # Second collection (same instance): counter grows to 11000
+    gen_metric2 = Metric(
+        name="vllm:generation_tokens_total", help="test",
+        type=MetricType.COUNTER, label=["vllm:generation_tokens_total"], value=[11000.0],
+    )
+    collects2 = {
+        5: {
+            "role": "decode", "job_name": "decode-0",
+            "endpoints": {0: {"metrics": [gen_metric2], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    computer.compute_pre_aggregation(collects2)
+
+    # Restart: new instance_id=12, raw counter resets to 50
+    gen_metric3 = Metric(
+        name="vllm:generation_tokens_total", help="test",
+        type=MetricType.COUNTER, label=["vllm:generation_tokens_total"], value=[50.0],
+    )
+    collects3 = {
+        12: {
+            "role": "decode", "job_name": "decode-0",
+            "endpoints": {0: {"metrics": [gen_metric3], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    computer.compute_pre_aggregation(collects3)
+    # Raw counter should be corrected: 50 + baseline(11000) = 11050
+    assert collects3[12]["endpoints"][0]["metrics"][0].value[0] == pytest.approx(11050.0)
+
+
+def test_computed_registry_contains_tps_metrics():
+    """TPS metrics are present in the built-in registry."""
+    names = {d.name for d in _MOTOR_COMPUTED_METRICS}
+    assert "motor:prompt_tokens_per_second" in names
+    assert "motor:generation_tokens_per_second" in names
+    assert "motor:active_prefill_workers" in names
+
+
+def test_computed_registry_pre_aggregation_defs():
+    """Pre-aggregation phase contains counter_rate definitions."""
+    defs = _get_defs_by_phase("pre_aggregation")
+    assert len(defs) >= 2
+    for d in defs:
+        assert d.phase == "pre_aggregation"
+        assert d.compute_type == "counter_rate"
+
+
+def test_computed_registry_post_aggregation_defs():
+    """Post-aggregation phase contains worker_count definitions."""
+    defs = _get_defs_by_phase("post_aggregation")
+    assert len(defs) >= 4
+    for d in defs:
+        assert d.phase == "post_aggregation"
+        assert d.compute_type == "worker_count"
+
+
+# ---------------------------------------------------------------------------
+# MetricsCollector → MotorMetricComputer integration tests
+# ---------------------------------------------------------------------------
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_full_metrics_includes_motor_metrics():
+    """get_metrics('full') output contains both TPS and worker count metrics."""
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    gen_metric = Metric(
+        name="vllm:generation_tokens_total",
+        help="test",
+        type=MetricType.COUNTER,
+        label=["vllm:generation_tokens_total{model=\"test\"}"],
+        value=[1000.0],
+    )
+    prompt_metric = Metric(
+        name="vllm:prompt_tokens_total",
+        help="test",
+        type=MetricType.COUNTER,
+        label=["vllm:prompt_tokens_total{model=\"test\"}"],
+        value=[5000.0],
+    )
+
+    collects = {
+        1: {
+            "role": "decode",
+            "job_name": "decode-job-0",
+            "endpoints": {0: {"metrics": [gen_metric, prompt_metric], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    collector._motor_computer.compute_pre_aggregation(collects)
+    collector._last_collects = collects
+    collector._collects_version = 1
+
+    result = collector.get_metrics(metrics_type="full")
+    assert "motor:generation_tokens_per_second" in result
+    assert "motor:prompt_tokens_per_second" in result
+    assert "motor:active_prefill_workers" in result
+    assert "motor:active_decode_workers" in result
+    _cleanup_singletons()
+
+
+@patch("threading.Thread.start", MagicMock())
+def test_dp_view_includes_tps_with_labels():
+    """DP view includes TPS metrics with dp_rank/role/instance_id/pod_ip labels."""
+    _cleanup_singletons()
+    config = CoordinatorConfig()
+    collector = MetricsCollector(config)
+
+    gen_metric = Metric(
+        name="vllm:generation_tokens_total",
+        help="test",
+        type=MetricType.COUNTER,
+        label=["vllm:generation_tokens_total"],
+        value=[1000.0],
+    )
+
+    collects = {
+        1: {
+            "role": "decode",
+            "job_name": "decode-job-0",
+            "endpoints": {0: {"metrics": [gen_metric], "pod_ip": "10.0.0.1"}},
+        },
+    }
+    collector._motor_computer.compute_pre_aggregation(collects)
+    collector._last_collects = collects
+    collector._collects_version = 1
+
+    result = collector.get_metrics(metrics_type="dp")
+    assert "motor:generation_tokens_per_second" in result
+    assert 'dp_rank="0"' in result
+    assert 'role="decode"' in result
     _cleanup_singletons()
