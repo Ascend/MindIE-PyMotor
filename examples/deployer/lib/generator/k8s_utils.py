@@ -81,7 +81,8 @@ def update_kv_pool_enabled_flag(user_config):
 
     engine_section = user_config.get(C.MOTOR_ENGINE_PREFILL_CONFIG) or user_config.get(C.MOTOR_ENGINE_UNION_CONFIG, {})
     kv_connector = engine_section.get(C.ENGINE_CONFIG, {}).get(C.KV_TRANSFER_CONFIG, {}).get(C.KV_CONNECTOR, "")
-    if kv_connector == C.MULTI_CONNECTOR:
+    kv_pool_cfg = user_config.get(C.KV_CACHE_POOL_CONFIG)
+    if kv_connector == C.MULTI_CONNECTOR or (isinstance(kv_pool_cfg, dict) and kv_pool_cfg):
         g_kv_pool_enabled = True
 
 

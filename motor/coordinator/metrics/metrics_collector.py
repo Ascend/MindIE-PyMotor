@@ -15,6 +15,8 @@ import time
 import threading
 from collections.abc import Callable
 from typing import Any
+from urllib import request as urllib_request
+from urllib.error import URLError
 
 from motor.common.resources.instance import Instance
 from motor.common.logger import get_logger
@@ -32,6 +34,125 @@ from motor.coordinator.metrics.metric_registry import MetricRegistry
 from motor.coordinator.metrics.metric_computer import MotorMetricComputer, get_inherited_metric_names
 
 logger = get_logger(__name__)
+
+# Mooncake Master -> a few kv_pool_* families with labels (cpu/ssd/all, usage/total/rate).
+_BYTES_PER_GB = 1024**3
+_KVPOOL_METRIC_ALLOWLIST = frozenset(
+    {
+        "master_allocated_bytes",
+        "master_total_capacity_bytes",
+        "master_allocated_file_size_bytes",
+        "master_total_file_capacity_bytes",
+        "master_key_count",
+        "master_successful_evictions_total",
+        "master_attempted_evictions_total",
+    }
+)
+_KVPOOL_FAMILY_HELP: dict[str, str] = {
+    "kv_pool_size": "KV pool size in GB (layer=cpu|ssd|all, stat=usage|total)",
+    "kv_pool_ratio": "KV pool used ratio 0-1 (layer=cpu|ssd|all, stat=usage_rate)",
+    "kv_pool_keys": "KV pool number of stored keys",
+    "kv_pool_eviction": "KV pool eviction counters (stat=success|attempts)",
+}
+_SAMPLE_VALUE_RE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{.*\})?\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)")
+
+
+def _emit_labeled(
+    lines: list[str],
+    emitted_help: set[str],
+    name: str,
+    value: float,
+    **labels: str,
+) -> None:
+    if value < 0:
+        return
+    if name not in emitted_help:
+        lines.append(f"# HELP {name} {_KVPOOL_FAMILY_HELP[name]}")
+        lines.append(f"# TYPE {name} gauge")
+        emitted_help.add(name)
+    if labels:
+        label_str = ",".join(f'{k}="{v}"' for k, v in sorted(labels.items()))
+        lines.append(f"{name}{{{label_str}}} {value}")
+    else:
+        lines.append(f"{name} {value}")
+
+
+def _emit_layer_size(
+    lines: list[str],
+    emitted_help: set[str],
+    layer: str,
+    usage_bytes: float,
+    total_bytes: float,
+) -> None:
+    _emit_labeled(lines, emitted_help, "kv_pool_size", usage_bytes / _BYTES_PER_GB, layer=layer, stat="usage")
+    _emit_labeled(lines, emitted_help, "kv_pool_size", total_bytes / _BYTES_PER_GB, layer=layer, stat="total")
+
+
+def _emit_layer_rate(
+    lines: list[str],
+    emitted_help: set[str],
+    layer: str,
+    usage_bytes: float,
+    total_bytes: float,
+) -> None:
+    usage_rate = usage_bytes / total_bytes if total_bytes > 0 else 0.0
+    _emit_labeled(lines, emitted_help, "kv_pool_ratio", usage_rate, layer=layer, stat="usage_rate")
+
+
+def _filter_kvpool_metrics(raw: str) -> str:
+    """Filter Mooncake Master metrics to labeled kv_pool_* families."""
+    if not raw.strip():
+        return ""
+    values: dict[str, float] = {}
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        sample = _SAMPLE_VALUE_RE.match(stripped)
+        if not sample:
+            continue
+        old = sample.group(1)
+        if old not in _KVPOOL_METRIC_ALLOWLIST:
+            continue
+        values[old] = values.get(old, 0.0) + float(sample.group(2))
+
+    out: list[str] = []
+    emitted_help: set[str] = set()
+    cpu_usage = values.get("master_allocated_bytes", 0.0)
+    cpu_total = values.get("master_total_capacity_bytes", 0.0)
+    ssd_usage = values.get("master_allocated_file_size_bytes", 0.0)
+    ssd_total = values.get("master_total_file_capacity_bytes", 0.0)
+
+    total_usage = cpu_usage + ssd_usage
+    total_cap = cpu_total + ssd_total
+
+    _emit_layer_size(out, emitted_help, "cpu", cpu_usage, cpu_total)
+    _emit_layer_size(out, emitted_help, "ssd", ssd_usage, ssd_total)
+    _emit_layer_size(out, emitted_help, "all", total_usage, total_cap)
+
+    _emit_layer_rate(out, emitted_help, "cpu", cpu_usage, cpu_total)
+    _emit_layer_rate(out, emitted_help, "ssd", ssd_usage, ssd_total)
+    _emit_layer_rate(out, emitted_help, "all", total_usage, total_cap)
+
+    _emit_labeled(out, emitted_help, "kv_pool_keys", values.get("master_key_count", 0.0))
+    _emit_labeled(
+        out,
+        emitted_help,
+        "kv_pool_eviction",
+        values.get("master_successful_evictions_total", 0.0),
+        stat="success",
+    )
+    _emit_labeled(
+        out,
+        emitted_help,
+        "kv_pool_eviction",
+        values.get("master_attempted_evictions_total", 0.0),
+        stat="attempts",
+    )
+
+    if not out:
+        return ""
+    return "\n".join(out) + "\n"
 
 
 class MetricsCollector(ThreadSafeSingleton):
@@ -60,6 +181,7 @@ class MetricsCollector(ThreadSafeSingleton):
         self._serialize_lock = threading.Lock()
 
         self._lock = threading.Lock()
+        self._pool_metrics_text: str = ""
         self._stop_event = threading.Event()
         self._metrics_update_thread = None
         # Event loop for async get_all_instances (set from lifespan)
@@ -145,7 +267,13 @@ class MetricsCollector(ThreadSafeSingleton):
                 return self._caches["node"]
             if "full" not in self._caches:
                 self._caches["full"] = self._generate_full_metrics(collects)
-            return self._caches["full"]
+            metrics = self._caches["full"]
+        pool_text = self._pool_metrics_text
+        if pool_text:
+            if metrics and not metrics.endswith("\n"):
+                metrics += "\n"
+            metrics += pool_text
+        return metrics
 
     @classmethod
     def _inject_labels(
@@ -204,9 +332,31 @@ class MetricsCollector(ThreadSafeSingleton):
                 with self._lock:
                     self._last_collects = collects
                     self._collects_version += 1
+            self._fetch_pool_metrics()
             with self._config_lock:
                 reuse_time = self._prometheus_metrics_config.reuse_time
             time.sleep(reuse_time)
+
+    def _fetch_pool_metrics(self) -> None:
+        with self._config_lock:
+            cfg = self._prometheus_metrics_config
+            enabled = cfg.pool_metrics_enable
+            endpoint = cfg.pool_metrics_endpoint
+        if not enabled or not endpoint:
+            self._pool_metrics_text = ""
+            return
+        try:
+            with urllib_request.urlopen(endpoint, timeout=5) as resp:
+                status_code = getattr(resp, "status", 200)
+                if status_code != 200:
+                    logger.warning("Pool metrics fetch got HTTP %s from %s", status_code, endpoint)
+                    self._pool_metrics_text = ""
+                    return
+                raw = resp.read().decode("utf-8", errors="replace")
+                self._pool_metrics_text = _filter_kvpool_metrics(raw)
+        except (URLError, TimeoutError, OSError) as e:
+            logger.warning("Pool metrics fetch %s failed: %s", endpoint, e)
+            self._pool_metrics_text = ""
 
     def _collect_metrics(self) -> dict[int, dict[str, Any]] | None:
         available_instances, unavailable_instances = self._get_available_instances()

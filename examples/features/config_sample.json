@@ -130,7 +130,9 @@
       "log_cleanup_interval": 1800
     },
     "prometheus_metrics_config": {
-      "reuse_time": 3
+      "reuse_time": 3,
+      "pool_metrics_enable": false,
+      "pool_metrics_endpoint": "http://kvp-master.mindie-motor.svc.cluster.local:9003/metrics"
     },
     "exception_config": {
       "max_retry": 5,

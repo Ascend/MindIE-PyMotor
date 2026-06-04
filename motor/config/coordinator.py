@@ -153,6 +153,8 @@ class PrometheusMetricsConfig:
     """Prometheus metrics configuration class"""
 
     reuse_time: int = 3
+    pool_metrics_enable: bool = False
+    pool_metrics_endpoint: str = ""
 
 
 @dataclass
