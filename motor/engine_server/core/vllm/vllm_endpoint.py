@@ -33,18 +33,24 @@ from motor.common.logger import get_logger
 from motor.engine_server.core.infer_endpoint import InferEndpoint, CONFIG_KEY
 from motor.engine_server.core.vllm.vllm_engine import VLLMEngine
 from motor.engine_server.core.vllm.openai.serving_chat import OpenAIServingChat
-from motor.engine_server.core.vllm.openai.serving_completion import OpenAIServingCompletion
+from motor.engine_server.core.vllm.openai.serving_completion import (
+    OpenAIServingCompletion,
+)
 from motor.engine_server.core.vllm.vllm_openai_compat import (
+    create_openai_serving_render,
     get_openai_base_model_path_and_serving_models_types,
     get_openai_chat_and_completion_request_types,
-    kwargs_matching_signature,
     vllm_openai_chat_needs_render,
 )
 
 logger = get_logger(__name__)
 
-ChatCompletionRequest, CompletionRequest = get_openai_chat_and_completion_request_types()
-BaseModelPath, OpenAIServingModels = get_openai_base_model_path_and_serving_models_types()
+ChatCompletionRequest, CompletionRequest = (
+    get_openai_chat_and_completion_request_types()
+)
+BaseModelPath, OpenAIServingModels = (
+    get_openai_base_model_path_and_serving_models_types()
+)
 
 # argparse / EngineArgs field names (optional; getattr for older vLLM)
 ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS = "default_chat_template_kwargs"
@@ -118,7 +124,10 @@ async def _vllm_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             request_logger = None
 
-        base_model_paths = [BaseModelPath(name=name, model_path=args.model) for name in served_model_names]
+        base_model_paths = [
+            BaseModelPath(name=name, model_path=args.model)
+            for name in served_model_names
+        ]
 
         openai_serving_models = OpenAIServingModels(
             engine_client=engine_client,
@@ -130,69 +139,108 @@ async def _vllm_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         openai_serving_render = None
         if vllm_openai_chat_needs_render():
             try:
-                from vllm.entrypoints.serve.render.serving import OpenAIServingRender
+                openai_serving_render = create_openai_serving_render(
+                    engine_client,
+                    {
+                        "model_registry": openai_serving_models.registry,
+                        "request_logger": request_logger,
+                        "chat_template": resolved_chat_template,
+                        "chat_template_content_format": args.chat_template_content_format,
+                        ATTR_TRUST_REQUEST_CHAT_TEMPLATE: getattr(
+                            args, ATTR_TRUST_REQUEST_CHAT_TEMPLATE, False
+                        ),
+                        "enable_auto_tools": getattr(
+                            args, ATTR_ENABLE_AUTO_TOOL_CHOICE, False
+                        ),
+                        ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE: getattr(
+                            args, ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE, False
+                        ),
+                        "tool_parser": getattr(args, ATTR_TOOL_CALL_PARSER, None),
+                        ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS: getattr(
+                            args, ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS, None
+                        ),
+                        "log_error_stack": getattr(args, "log_error_stack", False),
+                    },
+                )
             except ImportError as e:
                 raise RuntimeError(
                     "Installed vLLM expects OpenAIServingRender (chat serving API); "
                     "use a complete matching vLLM build or an older vLLM without the render layer."
                 ) from e
-            render_kw = {
-                "model_config": engine_client.model_config,
-                "renderer": engine_client.renderer,
-                "io_processor": engine_client.io_processor,
-                "model_registry": openai_serving_models.registry,
-                "request_logger": request_logger,
-                "chat_template": resolved_chat_template,
-                "chat_template_content_format": args.chat_template_content_format,
-                ATTR_TRUST_REQUEST_CHAT_TEMPLATE: getattr(args, ATTR_TRUST_REQUEST_CHAT_TEMPLATE, False),
-                "enable_auto_tools": getattr(args, ATTR_ENABLE_AUTO_TOOL_CHOICE, False),
-                ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE: getattr(
-                    args, ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE, False
-                ),
-                "tool_parser": getattr(args, ATTR_TOOL_CALL_PARSER, None),
-                ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS: getattr(args, ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS, None),
-                "log_error_stack": getattr(args, "log_error_stack", False),
-            }
-            render_kw = kwargs_matching_signature(OpenAIServingRender.__init__, render_kw)
-            openai_serving_render = OpenAIServingRender(**render_kw)
+            except RuntimeError as e:
+                logger.warning(
+                    "InferEndpoint lifespan: Failed to initialize OpenAIServingRender, "
+                    "continue without render compatibility layer: %s",
+                    e,
+                )
 
         try:
-            app.state.openai_serving_chat = OpenAIServingChat(
-                engine_client=engine_client,
-                models=openai_serving_models,
-                response_role=args.response_role,
-                request_logger=request_logger,
-                chat_template=resolved_chat_template,
-                chat_template_content_format=args.chat_template_content_format,
-                openai_serving_render=openai_serving_render,
-                trust_request_chat_template=getattr(args, ATTR_TRUST_REQUEST_CHAT_TEMPLATE, False),
-                return_tokens_as_token_ids=getattr(args, "return_tokens_as_token_ids", False),
-                reasoning_parser=getattr(args, "reasoning_parser", ""),
-                enable_auto_tools=getattr(args, ATTR_ENABLE_AUTO_TOOL_CHOICE, False),
-                exclude_tools_when_tool_choice_none=getattr(
-                    args, ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE, False
-                ),
-                tool_parser=getattr(args, ATTR_TOOL_CALL_PARSER, None),
-                enable_prompt_tokens_details=getattr(args, "enable_prompt_tokens_details", False),
-                enable_force_include_usage=getattr(args, "enable_force_include_usage", False),
-                enable_log_outputs=getattr(args, "enable_log_outputs", False),
-                enable_log_deltas=getattr(args, "enable_log_deltas", True),
-                default_chat_template_kwargs=getattr(args, ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS, None),
-            ) if "generate" in supported_tasks else None
+            app.state.openai_serving_chat = (
+                OpenAIServingChat(
+                    engine_client=engine_client,
+                    models=openai_serving_models,
+                    response_role=args.response_role,
+                    request_logger=request_logger,
+                    chat_template=resolved_chat_template,
+                    chat_template_content_format=args.chat_template_content_format,
+                    openai_serving_render=openai_serving_render,
+                    trust_request_chat_template=getattr(
+                        args, ATTR_TRUST_REQUEST_CHAT_TEMPLATE, False
+                    ),
+                    return_tokens_as_token_ids=getattr(
+                        args, "return_tokens_as_token_ids", False
+                    ),
+                    reasoning_parser=getattr(args, "reasoning_parser", ""),
+                    enable_auto_tools=getattr(
+                        args, ATTR_ENABLE_AUTO_TOOL_CHOICE, False
+                    ),
+                    exclude_tools_when_tool_choice_none=getattr(
+                        args, ATTR_EXCLUDE_TOOLS_WHEN_TOOL_CHOICE_NONE, False
+                    ),
+                    tool_parser=getattr(args, ATTR_TOOL_CALL_PARSER, None),
+                    enable_prompt_tokens_details=getattr(
+                        args, "enable_prompt_tokens_details", False
+                    ),
+                    enable_force_include_usage=getattr(
+                        args, "enable_force_include_usage", False
+                    ),
+                    enable_log_outputs=getattr(args, "enable_log_outputs", False),
+                    enable_log_deltas=getattr(args, "enable_log_deltas", True),
+                    default_chat_template_kwargs=getattr(
+                        args, ATTR_DEFAULT_CHAT_TEMPLATE_KWARGS, None
+                    ),
+                )
+                if "generate" in supported_tasks
+                else None
+            )
 
-            app.state.openai_serving_completion = OpenAIServingCompletion(
-                engine_client=engine_client,
-                models=openai_serving_models,
-                request_logger=request_logger,
-                return_tokens_as_token_ids=getattr(args, "return_tokens_as_token_ids", False),
-                enable_prompt_tokens_details=getattr(args, "enable_prompt_tokens_details", False),
-                enable_force_include_usage=getattr(args, "enable_force_include_usage", False),
-                openai_serving_render=openai_serving_render,
-            ) if "generate" in supported_tasks else None
+            app.state.openai_serving_completion = (
+                OpenAIServingCompletion(
+                    engine_client=engine_client,
+                    models=openai_serving_models,
+                    request_logger=request_logger,
+                    return_tokens_as_token_ids=getattr(
+                        args, "return_tokens_as_token_ids", False
+                    ),
+                    enable_prompt_tokens_details=getattr(
+                        args, "enable_prompt_tokens_details", False
+                    ),
+                    enable_force_include_usage=getattr(
+                        args, "enable_force_include_usage", False
+                    ),
+                    openai_serving_render=openai_serving_render,
+                )
+                if "generate" in supported_tasks
+                else None
+            )
 
-            logger.info("InferEndpoint lifespan: Serving components created successfully")
+            logger.info(
+                "InferEndpoint lifespan: Serving components created successfully"
+            )
         except Exception as e:
-            logger.error(f"InferEndpoint lifespan: Failed to create serving components: {e}")
+            logger.error(
+                "InferEndpoint lifespan: Failed to create serving components: %s", e
+            )
             raise
 
         log_stats_task: asyncio.Task[None] | None = None
@@ -215,12 +263,14 @@ async def _vllm_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         engine.shutdown()
         logger.info("InferEndpoint lifespan: Engine_client cleanup completed")
     except Exception as e:
-        logger.error(f"InferEndpoint lifespan: Failed to initialize or manage engine_client: {e}")
+        logger.error(
+            "InferEndpoint lifespan: Failed to initialize or manage engine_client: %s",
+            e,
+        )
         raise
 
 
 class VLLMEndpoint(InferEndpoint):
-
     def get_lifespan(self):
         return _vllm_lifespan
 

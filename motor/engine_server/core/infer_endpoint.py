@@ -12,10 +12,10 @@ import json
 import multiprocessing
 from abc import abstractmethod
 from http import HTTPStatus
-from typing import Any, AsyncGenerator, Callable
+from typing import Annotated, Any, AsyncGenerator, Callable
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
 
@@ -23,6 +23,7 @@ from motor.engine_server.core.config import IConfig
 from motor.common.http.cert_util import CertUtil
 from motor.common.logger import get_logger
 from motor.engine_server.core.endpoint import Endpoint
+from motor.engine_server.utils.cancellation import with_cancellation
 
 logger = get_logger(__name__)
 
@@ -34,18 +35,20 @@ class InferEndpoint(Endpoint):
         self.config = config
         self.host = config.get_endpoint_config().host
         self.port = config.get_endpoint_config().port
-        self.infer_tls_config = config.get_endpoint_config().deploy_config.infer_tls_config
+        self.infer_tls_config = (
+            config.get_endpoint_config().deploy_config.infer_tls_config
+        )
 
-        self.app = FastAPI(title="EngineServer InferEndpoint", lifespan=self.get_lifespan())
+        self.app = FastAPI(
+            title="EngineServer InferEndpoint", lifespan=self.get_lifespan()
+        )
 
         self.app.extra[CONFIG_KEY] = self.config
 
         self._stop_event = multiprocessing.Event()
         self._server: uvicorn.Server | None = None
         self._server_process = multiprocessing.Process(
-            target=self._run_server,
-            name="infer_endpoint_process",
-            daemon=False
+            target=self._run_server, name="infer_endpoint_process", daemon=False
         )
         self._run_http_in_process = True
         self.engine_type = config.get_endpoint_config().engine_type
@@ -64,15 +67,21 @@ class InferEndpoint(Endpoint):
 
     def run(self):
         if getattr(self, "_run_http_in_process", False):
-            logger.info("InferEndpoint running in same process (run_http_in_process=True).")
+            logger.info(
+                "InferEndpoint running in same process (run_http_in_process=True)."
+            )
             self._run_server()
         elif self._server_process and not self._server_process.is_alive():
             self._server_process.start()
-            logger.info(f"InferEndpoint started in process: http://{self.host}:{self.port}")
+            logger.info(
+                f"InferEndpoint started in process: http://{self.host}:{self.port}"
+            )
 
     def join(self) -> None:
         self._server_process.join()
-        logger.error(f"infer_endpoint process exited with code {self._server_process.exitcode}")
+        logger.error(
+            f"infer_endpoint process exited with code {self._server_process.exitcode}"
+        )
 
     def wait(self) -> None:
         """Block until infer server exits. No-op when HTTP runs in-process (run() already blocks)."""
@@ -86,7 +95,9 @@ class InferEndpoint(Endpoint):
         self._stop_event.set()
         logger.info("InferEndpoint stopped completely")
 
-    async def _parse_openai_request(self, raw_request: Request, model: type[Any]) -> Any:
+    async def _parse_openai_request(
+        self, raw_request: Request, model: type[Any]
+    ) -> Any:
         try:
             body = await raw_request.json()
             return model.model_validate(body)
@@ -100,6 +111,14 @@ class InferEndpoint(Endpoint):
                 status_code=HTTPStatus.BAD_REQUEST.value, detail=detail
             ) from e
 
+    async def _chat_completion_body(self, raw_request: Request) -> Any:
+        return await self._parse_openai_request(
+            raw_request, self.chat_completion_request
+        )
+
+    async def _completion_body(self, raw_request: Request) -> Any:
+        return await self._parse_openai_request(raw_request, self.completion_request)
+
     def _register_profile_routes_if_enabled(self) -> None:
         """Mirror vLLM profile API: POST /start_profile, /stop_profile when profiler is configured."""
         args = self.config.get_args()
@@ -107,7 +126,9 @@ class InferEndpoint(Endpoint):
             return
         profiler_config = getattr(args, "profiler_config", None)
         profiler = (
-            getattr(profiler_config, "profiler", None) if profiler_config is not None else None
+            getattr(profiler_config, "profiler", None)
+            if profiler_config is not None
+            else None
         )
         if profiler is None:
             return
@@ -145,19 +166,25 @@ class InferEndpoint(Endpoint):
 
     def _register_routes(self):
         @self.app.post("/v1/chat/completions")
-        async def create_chat_completion(raw_request: Request):
-            request = await self._parse_openai_request(
-                raw_request, self.chat_completion_request
+        @with_cancellation
+        async def create_chat_completion(
+            request: Annotated[Any, Depends(self._chat_completion_body)],
+            raw_request: Request,
+        ):
+            return await self.app.state.openai_serving_chat.handle_request(
+                request, raw_request
             )
-            return await self.app.state.openai_serving_chat.handle_request(request, raw_request)
 
         @self.app.post("/v1/completions")
-        async def create_completion(raw_request: Request):
-            request = await self._parse_openai_request(
-                raw_request, self.completion_request
+        @with_cancellation
+        async def create_completion(
+            request: Annotated[Any, Depends(self._completion_body)],
+            raw_request: Request,
+        ):
+            return await self.app.state.openai_serving_completion.handle_request(
+                request, raw_request
             )
-            return await self.app.state.openai_serving_completion.handle_request(request, raw_request)
-        
+
         @self.app.get("/v1/models")
         async def list_models():
             models = getattr(self.app.state, "openai_serving_models", None)
@@ -183,7 +210,7 @@ class InferEndpoint(Endpoint):
             "log_level": "warning",
             "workers": 1,
             "loop": "uvloop",
-            "http": "httptools"
+            "http": "httptools",
         }
         config = uvicorn.Config(**config_kwargs)
 
