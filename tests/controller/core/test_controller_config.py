@@ -52,16 +52,16 @@ def test_default_config_initialization():
 
         # Verify default values
         assert config.instance_config.instance_assemble_timeout == 600
-        assert config.instance_config.instance_assembler_check_interval == 1
-        assert config.instance_config.instance_assembler_cmd_send_interval == 1
+        assert config.instance_config.instance_assembler_check_interval == 30
+        assert config.instance_config.instance_assembler_cmd_send_interval == 30
         assert config.instance_config.send_cmd_retry_times == 3
         assert config.instance_config.instance_manager_check_interval == 1
-        assert config.instance_config.instance_heartbeat_timeout == 5
+        assert config.instance_config.instance_heartbeat_timeout == 10
         assert config.instance_config.instance_expired_timeout == 1200
         assert config.api_config.controller_api_host == '127.0.0.1'
         assert config.api_config.controller_api_port == 1026
         assert config.event_config.event_consumer_sleep_interval == 1.0
-        assert config.event_config.coordinator_heartbeat_interval == 5.0
+        assert config.event_config.coordinator_heartbeat_interval == 10.0
         assert config.mgmt_tls_config.enable_tls is False
         assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
         assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'
@@ -72,7 +72,7 @@ def test_default_config_initialization():
             os.environ['POD_IP'] = original_pod_ip
         elif 'POD_IP' in os.environ:
             del os.environ['POD_IP']
-    assert config.fault_tolerance_config.strategy_center_check_interval == 1
+    assert config.fault_tolerance_config.strategy_center_check_interval == 10
 
 
 def test_config_validation_success():
@@ -400,7 +400,7 @@ def test_config_partial_json_loading():
             assert config.instance_config.instance_assemble_timeout == 300
             # Other fields should be default values
             assert config.api_config.controller_api_host == '127.0.0.1'
-            assert config.event_config.coordinator_heartbeat_interval == 5.0
+            assert config.event_config.coordinator_heartbeat_interval == 10.0
             assert config.mgmt_tls_config.enable_tls is False
             assert config.mgmt_tls_config.cert_file == 'security/mgmt/cert/server.crt'
             assert config.mgmt_tls_config.key_file == 'security/mgmt/keys/server.key'

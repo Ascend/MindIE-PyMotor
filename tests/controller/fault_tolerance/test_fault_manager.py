@@ -1177,12 +1177,12 @@ def test_ft_strategy_center_processing(fault_manager_with_instances):
     """Test _ft_strategy_center processes instances correctly"""
     manager = fault_manager_with_instances
 
-    # Mock the time.sleep to avoid actual sleeping
-    with patch("time.sleep") as mock_sleep:
+    # Mock work_condition.wait to avoid actual sleeping
+    with patch.object(manager.work_condition, 'wait') as mock_wait:
         # Mock _process_instance_strategy to track calls
         with patch.object(manager, "_process_instance_strategy") as mock_process:
             # Simulate the loop by raising KeyboardInterrupt after first iteration
-            mock_sleep.side_effect = KeyboardInterrupt()
+            mock_wait.side_effect = KeyboardInterrupt()
 
             with pytest.raises(KeyboardInterrupt):
                 manager._ft_strategy_center()
@@ -1192,14 +1192,14 @@ def test_ft_strategy_center_processing(fault_manager_with_instances):
             mock_process.assert_any_call(1)
             mock_process.assert_any_call(2)
 
-            # Verify sleep was called with check interval
-            mock_sleep.assert_called_once_with(manager.strategy_center_check_interval)
+            # Verify wait was called with check interval
+            mock_wait.assert_called_once_with(timeout=manager.strategy_center_check_interval)
 
 
 def test_ft_strategy_center_with_empty_instances(fault_manager):
     """Test _ft_strategy_center with no instances"""
-    # Mock the time.sleep to avoid actual sleeping and interrupt the loop
-    with patch("time.sleep", side_effect=KeyboardInterrupt()):
+    # Mock work_condition.wait to avoid actual sleeping and interrupt the loop
+    with patch.object(fault_manager.work_condition, 'wait', side_effect=KeyboardInterrupt()):
         with patch.object(fault_manager, "_process_instance_strategy") as mock_process:
             with pytest.raises(KeyboardInterrupt):
                 fault_manager._ft_strategy_center()
@@ -1212,14 +1212,14 @@ def test_ft_strategy_center_stop_event_handling(fault_manager_with_instances):
     manager = fault_manager_with_instances
     manager.stop_event.set()
 
-    with patch("time.sleep") as mock_sleep:
+    with patch.object(manager.work_condition, 'wait') as mock_wait:
         with patch.object(manager, "_process_instance_strategy") as mock_process:
             # Should exit immediately due to stop_event being set
             manager._ft_strategy_center()
 
-            # Should not process any instances or sleep
+            # Should not process any instances or wait
             mock_process.assert_not_called()
-            mock_sleep.assert_not_called()
+            mock_wait.assert_not_called()
 
 
 # =============================================================================

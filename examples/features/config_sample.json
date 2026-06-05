@@ -79,13 +79,13 @@
       "instance_assembler_check_interval": 1,
       "instance_assembler_cmd_send_interval": 1,
       "instance_manager_check_interval": 1,
-      "instance_heartbeat_timeout": 5,
+      "instance_heartbeat_timeout": 10,
       "instance_expired_timeout": 1200,
       "send_cmd_retry_times": 3
     },
     "event_config": {
       "event_consumer_sleep_interval": 1.0,
-      "coordinator_heartbeat_interval": 5.0
+      "coordinator_heartbeat_interval": 10.0
     },
     "fault_tolerance_config": {
       "enable_fault_tolerance": true,

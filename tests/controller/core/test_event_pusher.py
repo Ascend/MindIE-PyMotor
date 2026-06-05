@@ -96,19 +96,22 @@ def test_event_consumer_add_event(event_pusher, mock_http_client):
         instance=readonly_instance.to_instance()
     )
     event_pusher.event_queue.put(test_event)
-    # send stop single
+    # Put sentinel None to signal end of real events
     event_pusher.event_queue.put(None)
 
-    # Call the event consumer (since it's an infinite loop, we need to control it to execute only once)
-    def mock_stop_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    # Save original get, then mock to drain the real queue and raise StopIteration
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
-    with patch('motor.controller.core.event_pusher.time') as mock_time:
-        mock_time.sleep.side_effect = mock_stop_sleep
+    with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
         try:
             event_pusher._event_consumer()
-        except StopIteration as e:
+        except StopIteration:
             pass
 
         # check send_instance_refresh is called
@@ -126,16 +129,18 @@ def test_event_consumer_del_event(event_pusher, mock_http_client):
         instance=readonly_instance.to_instance()
     )
     event_pusher.event_queue.put(test_event)
-    # send stop single
+    # Put sentinel None to signal end of real events
     event_pusher.event_queue.put(None)
 
-    # Call the event consumer (since it's an infinite loop, we need to control it to execute only once)
-    def mock_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
-    with patch('motor.controller.core.event_pusher.time') as mock_time:
-        mock_time.sleep.side_effect = mock_sleep
+    with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
         try:
             event_pusher._event_consumer()
         except StopIteration:
@@ -168,13 +173,15 @@ def test_event_consumer_set_event(event_pusher, mock_http_client):
     event_pusher.event_queue.put(test_event)
     event_pusher.event_queue.put(None)
 
-    # Call the event consumer (since it's an infinite loop, we need to control it to execute only once)
-    def mock_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
-    with patch('motor.controller.core.event_pusher.time') as mock_time:
-        mock_time.sleep.side_effect = mock_sleep
+    with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
         try:
             event_pusher._event_consumer()
         except StopIteration:
@@ -200,14 +207,16 @@ def test_event_consumer_set_event_skip_missing_prefill(event_pusher, mock_http_c
     event_pusher.event_queue.put(test_event)
     event_pusher.event_queue.put(None)
 
-    # Call the event consumer
-    def mock_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
     with patch('motor.controller.core.event_pusher.logger') as mock_logger:
-        with patch('motor.controller.core.event_pusher.time') as mock_time:
-            mock_time.sleep.side_effect = mock_sleep
+        with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
             try:
                 event_pusher._event_consumer()
             except StopIteration:
@@ -237,14 +246,16 @@ def test_event_consumer_set_event_missing_decode(event_pusher, mock_http_client)
     event_pusher.event_queue.put(test_event)
     event_pusher.event_queue.put(None)
 
-    # Call the event consumer
-    def mock_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
     with patch('motor.controller.core.event_pusher.logger') as mock_logger:
-        with patch('motor.controller.core.event_pusher.time') as mock_time:
-            mock_time.sleep.side_effect = mock_sleep
+        with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
             try:
                 event_pusher._event_consumer()
             except StopIteration:
@@ -271,12 +282,15 @@ def test_event_consumer_exception_handling(event_pusher, mock_http_client):
     event_pusher.event_queue.put(test_event)
     event_pusher.event_queue.put(None)
 
-    def mock_sleep(seconds):
-        if event_pusher.event_queue.qsize() > 0:
+    _original_get = event_pusher.event_queue.get
+
+    def mock_get(timeout=None):
+        try:
+            return _original_get(block=False)
+        except queue.Empty:
             raise StopIteration
 
-    with patch('motor.controller.core.event_pusher.time') as mock_time:
-        mock_time.sleep.side_effect = mock_sleep
+    with patch.object(event_pusher.event_queue, 'get', side_effect=mock_get):
         try:
             event_pusher._event_consumer()
         except StopIteration:
@@ -297,14 +311,13 @@ def test_heartbeat_detector_normal(event_pusher):
         # set loop count
         call_count = 0
 
-        def mock_sleep(seconds):
+        def mock_wait(timeout=None):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
                 raise StopIteration
 
-        with patch('motor.controller.core.event_pusher.time') as mock_time:
-            mock_time.sleep.side_effect = mock_sleep
+        with patch.object(event_pusher.work_condition, 'wait', side_effect=mock_wait):
 
             try:
                 event_pusher._coordinator_heartbeat_detector()
@@ -336,15 +349,14 @@ def test_heartbeat_detector_failure(event_pusher):
 
     with patch('motor.controller.core.event_pusher.CoordinatorApiClient.query_status', side_effect=mock_query_status):
         sleep_count = 0
-        def mock_sleep(seconds):
+        def mock_wait(timeout=None):
             nonlocal sleep_count
             sleep_count += 1
             if sleep_count >= 5:  # Run enough iterations to trigger reset detection
                 raise StopIteration
 
         with patch('motor.controller.core.event_pusher.logger') as mock_logger:
-            with patch('motor.controller.core.event_pusher.time') as mock_time:
-                mock_time.sleep.side_effect = mock_sleep
+            with patch.object(event_pusher.work_condition, 'wait', side_effect=mock_wait):
                 try:
                     event_pusher._coordinator_heartbeat_detector()
                 except StopIteration:
@@ -540,20 +552,16 @@ def test_update_config():
         config = ControllerConfig()
         event_pusher = EventPusher(config)
 
-        # Store original config fields
-        original_event_consumer_sleep_interval = event_pusher.event_consumer_sleep_interval
+        # Store original config field
         original_coordinator_heartbeat_interval = event_pusher.coordinator_heartbeat_interval
 
         # Create new config with different event settings
         new_config = ControllerConfig()
-        new_config.event_config.event_consumer_sleep_interval = 2.0
-        new_config.event_config.coordinator_heartbeat_interval = 10.0
+        new_config.event_config.coordinator_heartbeat_interval = 20.0
 
         # Update config
         event_pusher.update_config(new_config)
 
         # Verify config was updated
-        assert event_pusher.event_consumer_sleep_interval == 2.0
-        assert event_pusher.coordinator_heartbeat_interval == 10.0
-        assert event_pusher.event_consumer_sleep_interval != original_event_consumer_sleep_interval
+        assert event_pusher.coordinator_heartbeat_interval == 20.0
         assert event_pusher.coordinator_heartbeat_interval != original_coordinator_heartbeat_interval

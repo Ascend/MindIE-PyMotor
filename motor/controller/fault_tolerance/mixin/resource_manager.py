@@ -422,6 +422,10 @@ class _ResourceManagerMixin:
         for instance_id in affected_ids:
             self._refresh_instance_fault_level(instance_id)
 
+        # Wake the strategy center — hardware fault data changed
+        with self.work_condition:
+            self.work_condition.notify_all()
+
     def _handle_node_status_update(self, status: NodeStatus, node_name: str) -> None:
         """Handle a node status change pushed by a ResourceMonitor.
 
@@ -466,3 +470,7 @@ class _ResourceManagerMixin:
         affected_ids = list(node_metadata.instance_ids)
         for instance_id in affected_ids:
             self._refresh_instance_fault_level(instance_id)
+
+        # Wake the strategy center — node status changed
+        with self.work_condition:
+            self.work_condition.notify_all()

@@ -86,6 +86,7 @@ class InstanceAssembler(ThreadSafeSingleton):
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
         self.config_lock = threading.RLock()
+        self.work_condition = threading.Condition()
 
         # Extract required config fields
         self._user_config_path = config.config_path or Env.user_config_path
@@ -139,6 +140,8 @@ class InstanceAssembler(ThreadSafeSingleton):
 
     def stop(self) -> None:
         self.stop_event.set()
+        with self.work_condition:
+            self.work_condition.notify_all()
         # Only join threads that have been started
         if (
             hasattr(self, 'assemble_instance_thread')
@@ -208,10 +211,12 @@ class InstanceAssembler(ThreadSafeSingleton):
 
                 # Convert PersistentState to dict for etcd storage
                 dict_data = {"state": persistent_state.model_dump()}
-                success = self.etcd_client.persist_data("/controller/instance_assembler", dict_data)
-                if success:
-                    logger.info("Successfully persisted instance assembler data with version %d", next_version)
-                return success
+
+            # Release lock before ETCD I/O to avoid blocking other operations
+            success = self.etcd_client.persist_data("/controller/instance_assembler", dict_data)
+            if success:
+                logger.info("Successfully persisted instance assembler data with version %d", next_version)
+            return success
 
         except Exception as e:
             logger.error("Error persisting instance assembler data: %s", e)
@@ -326,6 +331,10 @@ class InstanceAssembler(ThreadSafeSingleton):
 
         logger.info("Endpoints added for instance %s from pod %s.", msg.job_name, msg.pod_ip)
 
+        # Wake the assembler loop to process the new registration
+        with self.work_condition:
+            self.work_condition.notify_all()
+
         # Persist data on state change
         with self.config_lock:
             enable_persistence = self.etcd_config.enable_etcd_persistence
@@ -375,6 +384,10 @@ class InstanceAssembler(ThreadSafeSingleton):
                 endpoint.headless = True
         metadata.instance.add_endpoints(msg.pod_ip, {endpoint.id: endpoint for endpoint in msg.endpoints})
         logger.info("Recovery instance assembler's info, current ins_id_idx is %d.", self.ins_id_cnt)
+
+        # Wake the assembler loop to process the re-registration
+        with self.work_condition:
+            self.work_condition.notify_all()
 
         # Persist data on state change
         with self.config_lock:
@@ -544,7 +557,8 @@ class InstanceAssembler(ThreadSafeSingleton):
             if state_changed and enable_persistence and not self.persist_data():
                 logger.warning("Failed to persist instance assembler data to ETCD after sending start command")
 
-            time.sleep(sleep_interval)
+            with self.work_condition:
+                self.work_condition.wait(timeout=sleep_interval)
 
     def _send_start_command(self, metadata: AssembleInstanceMetadata) -> bool:
         is_succeed = True
@@ -694,7 +708,8 @@ class InstanceAssembler(ThreadSafeSingleton):
 
             with self.config_lock:
                 check_interval = self.instance_assembler_check_interval
-            time.sleep(check_interval)
+            with self.work_condition:
+                self.work_condition.wait(timeout=check_interval)
 
     def _assemble_instance(self, metadata: AssembleInstanceMetadata) -> None:
         job_name = metadata.instance.job_name
@@ -757,6 +772,10 @@ class InstanceAssembler(ThreadSafeSingleton):
                     # Keep it in instances with ASSEMBLED status for _start_commmand_sender to handle
                     InstanceManager().add_instance(metadata.instance)
                     # No need to persist for new registration until start command is sent
+
+            # Wake the start-command sender — an instance is now ASSEMBLED
+            with self.work_condition:
+                self.work_condition.notify_all()
         else:
             # Assembling... check if this instance registration is timeout
             with self.config_lock:

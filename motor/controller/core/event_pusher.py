@@ -10,7 +10,6 @@
 # See the Mulan PSL v2 for more details.
 import queue
 import threading
-import time
 from dataclasses import dataclass
 
 from motor.common.resources import Instance, ReadOnlyInstance, InsEventMsg, EventType
@@ -45,9 +44,11 @@ class EventPusher(Observer):
         self.config_lock = threading.RLock()
         self.stop_event = threading.Event()
 
+        # Condition variable for on-demand wake-up instead of busy-waiting.
+        self.work_condition = threading.Condition()
+
         # Extract required config fields
         with self.config_lock:
-            self.event_consumer_sleep_interval = config.event_config.event_consumer_sleep_interval
             self.coordinator_heartbeat_interval = config.event_config.coordinator_heartbeat_interval
 
         self.event_consumer_thread = None
@@ -79,9 +80,8 @@ class EventPusher(Observer):
 
     def stop(self) -> None:
         self.stop_event.set()
-        if hasattr(self, 'event_queue') and self.event_queue.qsize() == 0:
-            # Put a element into queue to make thread exit.
-            self.event_queue.put(None)
+        with self.work_condition:
+            self.work_condition.notify_all()
         # Only join threads that have been started
         if (
                 hasattr(self, 'event_consumer_thread')
@@ -109,7 +109,6 @@ class EventPusher(Observer):
     def update_config(self, config: ControllerConfig) -> None:
         """Update configuration for the event pusher"""
         with self.config_lock:
-            self.event_consumer_sleep_interval = config.event_config.event_consumer_sleep_interval
             self.coordinator_heartbeat_interval = config.event_config.coordinator_heartbeat_interval
 
     def update(self, instance: ReadOnlyInstance, event: ObserverEvent) -> None:
@@ -143,8 +142,13 @@ class EventPusher(Observer):
         logger.info("Pushed event: %s", event_type)
 
     def _event_consumer(self) -> None:
+        # Use get(timeout=1.0) to process events without forced throttling
+        # while still checking stop_event every second when the queue is idle.
         while not self.stop_event.is_set():
-            event = self.event_queue.get()
+            try:
+                event = self.event_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
             if event is not None:
                 event_type = event.event_type
                 if event_type == EventType.ADD:
@@ -177,13 +181,9 @@ class EventPusher(Observer):
                     except Exception as e:
                         logger.error("Failed to send instance refresh event, error: %s", e)
 
-            with self.config_lock:
-                sleep_interval = self.event_consumer_sleep_interval
-            time.sleep(sleep_interval)
-
     def _coordinator_heartbeat_detector(self) -> None:
         """
-        Detect Coordinator heartbeat, when Coordinator need Controller sent all 
+        Detect Coordinator heartbeat, when Coordinator need Controller sent all
         instances resource, this function will produce a SET event.
         """
         hb_loss_cnt = 0
@@ -242,4 +242,5 @@ class EventPusher(Observer):
 
             with self.config_lock:
                 heartbeat_interval = self.coordinator_heartbeat_interval
-            time.sleep(heartbeat_interval)
+            with self.work_condition:
+                self.work_condition.wait(timeout=heartbeat_interval)

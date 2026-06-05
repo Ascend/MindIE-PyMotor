@@ -21,8 +21,10 @@ from motor.common.alarm.server_exception_event import ServerExceptionEvent, Serv
 
 logger = get_logger(__name__)
 
-ACTIVE_INSTANCE_HEARTBEAT_TIMEOUT = 5
 CLEAR_INSTANCE_TIMEOUT = 300
+# Default heartbeat timeout for ACTIVE instances (seconds).
+# Can be overridden by passing ``active_timeout`` to ``is_all_endpoints_alive()``.
+DEFAULT_ACTIVE_HEARTBEAT_TIMEOUT = 10
 
 
 class InsStatus(str, Enum):
@@ -288,11 +290,11 @@ class Instance(BaseModel):
                     return True
                 return False
 
-    def is_all_endpoints_alive(self) -> bool:
+    def is_all_endpoints_alive(self, active_timeout: float | None = None) -> bool:
         timestamp = time.time()
 
         if self.status == InsStatus.ACTIVE:
-            timeout = ACTIVE_INSTANCE_HEARTBEAT_TIMEOUT
+            timeout = active_timeout if active_timeout is not None else DEFAULT_ACTIVE_HEARTBEAT_TIMEOUT
         else:
             timeout = CLEAR_INSTANCE_TIMEOUT
 

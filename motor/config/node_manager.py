@@ -93,7 +93,7 @@ class BasicConfig:
     hardware_type: HardwareType = HardwareType.TYPE_800I_A3
 
     # Heartbeat sending configuration
-    heartbeat_interval_seconds: int = 1
+    heartbeat_interval_seconds: int = 3
 
     # Device information
     device_num: int = 0

@@ -123,7 +123,7 @@
 | instance_assembler_check_internal | int | 轮询实例组装状态的间隔（秒）。默认：`1` |
 | instance_assembler_cmd_send_internal | int | 向实例下发组装命令的间隔（秒）。默认：`1` |
 | instance_manager_check_internal | int | 实例状态巡检间隔（秒）。默认：`1` |
-| instance_heartbeat_timeout | int | 超过该时长未收到实例心跳则判定异常（秒）。默认：`5` |
+| instance_heartbeat_timeout | int | 超过该时长未收到实例心跳则判定异常（秒）。默认：`10` |
 | instance_expired_timeout | int | 实例空闲超过该时长则被清理（秒）。默认：`300` |
 | send_cmd_retry_times | int | 向实例下发命令失败时的重试次数。默认：`3` |
 
@@ -132,7 +132,7 @@
 | 配置项 | 类型 | 说明 |
 |--------|------|------------------|
 | event_consumer_sleep_interval | float | 事件队列轮询间隔，即每次处理事件后的等待时间（秒）。默认：`1.0` |
-| coordinator_heartbeat_interval | float | Controller 与 Coordinator 间心跳上报间隔（秒）。默认：`5.0` |
+| coordinator_heartbeat_interval | float | Controller 与 Coordinator 间心跳上报间隔（秒）。默认：`10.0` |
 
 ### 2.6 fault_tolerance_config
 
@@ -373,7 +373,7 @@
     "role": "both",
     "model_name": "",
     "hardware_type": "800I-A3",
-    "heartbeat_interval_seconds": 1,
+    "heartbeat_interval_seconds": 3,
     "device_num": 0,
     "parallel_config": {
       "dp_size": 1,
@@ -434,7 +434,7 @@
 | role | string | 本节点角色。可选：`prefill`（仅预填）、`decode`（仅解码）、`both`（预填+解码）。默认：`both` |
 | model_name | string | 模型名称，PD 部署时多由 user_config 注入。默认：`""` |
 | hardware_type | string | 硬件类型：<br>A2: 800I_A2<br>A3: 800I_A3<br>A5: 850-Atlas-8p-8 |
-| heartbeat_interval_seconds | int | 向 Controller 上报心跳的间隔（秒）。默认：`1` |
+| heartbeat_interval_seconds | int | 向 Controller 上报心跳的间隔（秒）。默认：`3` |
 | device_num | int | NPU 设备数量，多由 HCCL 配置推导。默认：`0` |
 | parallel_config | object | 并行维度配置，见下表。默认：各维度 1，world_size 由系统根据各维度自动计算 |
 

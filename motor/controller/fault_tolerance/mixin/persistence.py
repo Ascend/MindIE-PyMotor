@@ -70,10 +70,11 @@ class _PersistenceMixin:
                 dict_data = {"state": persistent_state.model_dump()}
                 logger.debug("Persistence data being saved to ETCD: %s", dict_data)
 
-                success = self.etcd_client.persist_data("/controller/fault_manager", dict_data)
-                if success:
-                    logger.info("Successfully persisted fault manager data with version %d", next_version)
-                return success
+            # Release lock before ETCD I/O to avoid blocking other operations
+            success = self.etcd_client.persist_data("/controller/fault_manager", dict_data)
+            if success:
+                logger.info("Successfully persisted fault manager data with version %d", next_version)
+            return success
         except Exception as e:
             logger.error("Error persisting fault manager data: %s", e)
             return False

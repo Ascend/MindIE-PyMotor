@@ -108,7 +108,7 @@ def mock_config():
     config.etcd_config.enable_etcd_persistence = False
     config.instance_config.instance_assemble_timeout = 1.0  # Fast timeout for tests
     config.instance_config.instance_assembler_check_interval = 0.1
-    config.instance_config.instance_assembler_cmd_send_internal = 0.1
+    config.instance_config.instance_assembler_cmd_send_interval = 0.1
     config.instance_config.send_cmd_retry_times = 3
     return config
 
@@ -306,7 +306,7 @@ def test_register_already_assembled_instance(instance_assembler, test_config):
     with patch(
         'motor.controller.api_client.node_manager_api_client.NodeManagerApiClient.send_start_command', return_value=True
     ):
-        with patch('time.sleep', side_effect=stop_sleep):
+        with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
             try:
                 instance_assembler._start_commmand_sender()
             except RuntimeError as e:
@@ -608,8 +608,8 @@ def test_start_command_sender_success(instance_assembler, test_config):
     ) as mock_send:
         mock_send.return_value = True
 
-        # Mock time.sleep to stop after one iteration
-        with patch('time.sleep', side_effect=stop_sleep):
+        # Mock work_condition.wait to stop after one iteration
+        with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
             try:
                 instance_assembler._start_commmand_sender()
             except RuntimeError as e:
@@ -636,8 +636,8 @@ def test_start_command_sender_retry(instance_assembler, test_config):
     ) as mock_send:
         mock_send.return_value = False
 
-        # Mock time.sleep to stop after one iteration
-        with patch('time.sleep', side_effect=stop_sleep):
+        # Mock work_condition.wait to stop after one iteration
+        with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
             try:
                 instance_assembler._start_commmand_sender()
             except RuntimeError as e:
@@ -669,7 +669,7 @@ def test_start_command_sender_max_retries(instance_assembler, test_config):
         mock_send.return_value = False
 
         # First attempt - should increment retry count
-        with patch('time.sleep', side_effect=stop_sleep):
+        with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
             try:
                 instance_assembler._start_commmand_sender()
             except RuntimeError as e:
@@ -681,7 +681,7 @@ def test_start_command_sender_max_retries(instance_assembler, test_config):
         assert instance_assembler.instances[job_name].start_command_send_times == 1
 
         # Second attempt - should remove instance since max retries (2) reached
-        with patch('time.sleep', side_effect=stop_sleep):
+        with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
             try:
                 instance_assembler._start_commmand_sender()
             except RuntimeError as e:
@@ -1082,11 +1082,11 @@ def test_instances_assembler_loop_stop_event(instance_assembler, test_config):
     # Set stop event
     instance_assembler.stop_event.set()
 
-    # Mock sleep to raise RuntimeError when stop event is set
+    # Mock work_condition.wait to raise RuntimeError when stop event is set
     def stop_sleep(*args, **kwargs):
         raise RuntimeError("Stop iteration")
 
-    with patch('time.sleep', side_effect=stop_sleep):
+    with patch.object(instance_assembler.work_condition, 'wait', side_effect=stop_sleep):
         try:
             instance_assembler._instances_assembler_loop()
         except RuntimeError as e:

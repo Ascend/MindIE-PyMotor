@@ -63,12 +63,16 @@ class InstanceConfig:
 
     # instance assembler configuration
     instance_assemble_timeout: int = 600  # 600 seconds
-    instance_assembler_check_interval: int = 1  # 1 second
-    instance_assembler_cmd_send_interval: int = 1  # 1 second
+    # The assembler background threads use threading.Condition and are woken
+    # immediately by notify_all() when a new registration arrives or an instance
+    # becomes ASSEMBLED.  Registration is infrequent, so the interval only needs
+    # to cover assembly-timeout detection and start-command retries.
+    instance_assembler_check_interval: int = 30  # 30 seconds
+    instance_assembler_cmd_send_interval: int = 30  # 30 seconds
 
     # instance manager configuration
     instance_manager_check_interval: int = 1  # 1 second
-    instance_heartbeat_timeout: int = 5  # 5 seconds
+    instance_heartbeat_timeout: int = 10  # 10 seconds
     instance_expired_timeout: int = 1200  # 1200 seconds
 
     # other instance configuration
@@ -79,11 +83,13 @@ class InstanceConfig:
 class EventPusherConfig:
     """Event configuration class"""
 
-    # event consumer configuration
+    # event consumer configuration (deprecated: consumer now uses queue.get(timeout=1))
     event_consumer_sleep_interval: float = 1.0  # 1 second
 
     # coordinator heartbeat configuration
-    coordinator_heartbeat_interval: float = 5.0  # 5 seconds
+    # Uses threading.Condition — woken immediately by notify_all() on stop.
+    # Coordinator restart detection is rare, so 10 s is sufficient.
+    coordinator_heartbeat_interval: float = 10.0  # 10 seconds
 
 
 @dataclass
@@ -94,7 +100,11 @@ class FaultToleranceConfig:
     enable_fault_tolerance: bool = True
 
     # strategy center configuration
-    strategy_center_check_interval: int = 1  # 1 second
+    # The strategy center thread uses threading.Condition and is woken
+    # immediately by notify_all() on fault reports, node status changes, or
+    # instance lifecycle events.  The interval is only a fallback for periodic
+    # strategy re-evaluation, so 10 s is sufficient.
+    strategy_center_check_interval: int = 10  # 10 seconds
 
     # configmap monitoring configuration - ConfigMap namespace and name prefix
     configmap_namespace: str = "kube-system"

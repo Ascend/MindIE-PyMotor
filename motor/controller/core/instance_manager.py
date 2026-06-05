@@ -215,12 +215,13 @@ class InstanceManager(ThreadSafeSingleton):
                 dict_data = {"state": persistent_state.model_dump()}
                 logger.debug("Persistence data being saved to ETCD: %s", dict_data)
 
-                success = self.etcd_client.persist_data("/controller/instance_manager", dict_data)
-                if success:
-                    logger.info(
-                        "Successfully persisted %d instances with version %d", len(instances_data), next_version
-                    )
-                return success
+            # Release ins_lock before ETCD I/O to avoid blocking heartbeat lookups
+            success = self.etcd_client.persist_data("/controller/instance_manager", dict_data)
+            if success:
+                logger.info(
+                    "Successfully persisted %d instances with version %d", len(instances_data), next_version
+                )
+            return success
 
         except Exception as e:
             logger.error("Error persisting instance manager data: %s", e)

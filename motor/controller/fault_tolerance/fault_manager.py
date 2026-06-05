@@ -7,7 +7,6 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-import time
 import threading
 import concurrent.futures
 from motor.config.controller import ControllerConfig
@@ -94,6 +93,10 @@ class FaultManager(_PersistenceMixin, _ResourceManagerMixin, ThreadSafeSingleton
 
         self.stop_event = threading.Event()
 
+        # Condition variable to wake the strategy center thread on-demand
+        # instead of busy-waiting on a fixed sleep interval.
+        self.work_condition = threading.Condition()
+
         # For dual handle function trigger, we use a thread pool executor to handle it.
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
 
@@ -135,6 +138,8 @@ class FaultManager(_PersistenceMixin, _ResourceManagerMixin, ThreadSafeSingleton
 
     def stop(self) -> None:
         self.stop_event.set()
+        with self.work_condition:
+            self.work_condition.notify_all()
 
         # Stop all host-specific Resource monitors
         with self.resource_monitors_lock:
@@ -227,6 +232,10 @@ class FaultManager(_PersistenceMixin, _ResourceManagerMixin, ThreadSafeSingleton
                     instance.job_name,
                 )
 
+        # Wake the strategy center — instance lifecycle changed
+        with self.work_condition:
+            self.work_condition.notify_all()
+
     def update_instances(self, instances: list[ReadOnlyInstance]) -> None:
         """
         Update fault manager with existing instances, this func will be invoked
@@ -313,6 +322,10 @@ class FaultManager(_PersistenceMixin, _ResourceManagerMixin, ThreadSafeSingleton
 
         for instance_id in affected_instance_ids:
             self._refresh_instance_fault_level(instance_id)
+
+        # Wake the strategy center — fault data changed
+        with self.work_condition:
+            self.work_condition.notify_all()
 
     def _refresh_instance_fault_level(self, instance_id: int) -> None:
         """Re-evaluate the fault level of an instance from all its nodes' faults.
@@ -435,7 +448,8 @@ class FaultManager(_PersistenceMixin, _ResourceManagerMixin, ThreadSafeSingleton
 
             with self.config_lock:
                 check_interval = self.strategy_center_check_interval
-            time.sleep(check_interval)
+            with self.work_condition:
+                self.work_condition.wait(timeout=check_interval)
 
         logger.info("Fault tolerance strategy center stopped")
 
