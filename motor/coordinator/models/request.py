@@ -22,6 +22,7 @@ from motor.coordinator.tracer.tracing import TraceObj
 
 class RequestType(Enum):
     OPENAI = "openai"
+    ANTHROPIC = "anthropic"
     TRITON = "triton"
     TGI = "tgi"
     VLLM = "vllm"

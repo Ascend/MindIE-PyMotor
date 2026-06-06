@@ -19,6 +19,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from fastapi.responses import JSONResponse
+from fastapi import HTTPException
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from fastapi import FastAPI
@@ -26,7 +27,7 @@ from fastapi import FastAPI
 from motor.common.standby.standby_manager import StandbyRole, StandbyManager
 from motor.coordinator.api_server.management_server import ManagementServer
 from motor.coordinator.domain.probe import RoleHeartbeatResult
-from motor.coordinator.api_server.inference_server import InferenceServer
+from motor.coordinator.api_server.inference_server import InferenceServer, _validate_anthropic_request
 from motor.coordinator.domain.request_manager import RequestManager
 from motor.config.coordinator import CoordinatorConfig, RateLimitConfig
 from motor.coordinator.domain import InstanceReadiness
@@ -1700,3 +1701,416 @@ async def test_run_split_mode(monkeypatch):
     srv = ManagementServer(config=cfg)
     await srv.run()
     assert len(instances) == 2 or len(instances) == 0 or len(instances) == 1
+
+
+class TestValidateAnthropicRequest:
+    """Unit tests for _validate_anthropic_request validation function."""
+
+    def test_valid_messages_request(self):
+        """Valid Anthropic messages request should pass validation."""
+        _validate_anthropic_request(
+            {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100},
+            require_max_tokens=True,
+        )
+
+    def test_valid_messages_request_with_complex_content(self):
+        """Valid request with content blocks should pass validation."""
+        _validate_anthropic_request(
+            {
+                "model": "claude-3",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Hello"},
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}},
+                        ],
+                    }
+                ],
+                "max_tokens": 100,
+            },
+            require_max_tokens=True,
+        )
+
+    def test_missing_model(self):
+        """Missing model field should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100},
+            )
+        assert exc_info.value.status_code == 400
+        assert "model" in exc_info.value.detail.lower()
+
+    def test_empty_model(self):
+        """Empty model should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_missing_messages(self):
+        """Missing messages field should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "max_tokens": 100},
+            )
+        assert exc_info.value.status_code == 400
+        assert "messages" in exc_info.value.detail.lower()
+
+    def test_empty_messages(self):
+        """Empty messages array should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": [], "max_tokens": 100},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_messages_not_a_list(self):
+        """Messages as non-list should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": "not a list", "max_tokens": 100},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_missing_max_tokens(self):
+        """Missing max_tokens should raise HTTP 400 when require_max_tokens=True."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}]},
+                require_max_tokens=True,
+            )
+        assert exc_info.value.status_code == 400
+        assert "max_tokens" in exc_info.value.detail.lower()
+
+    def test_max_tokens_zero(self):
+        """max_tokens=0 should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 0},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_max_tokens_negative(self):
+        """Negative max_tokens should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": -1},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_max_tokens_not_integer(self):
+        """Non-integer max_tokens should raise HTTP 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": "abc"},
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_count_tokens_no_max_tokens_required(self):
+        """Count tokens validation should NOT require max_tokens."""
+        _validate_anthropic_request(
+            {"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}]},
+            require_max_tokens=False,
+        )
+
+    def test_count_tokens_missing_model(self):
+        """Count tokens validation should still require model."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"messages": [{"role": "user", "content": "Hello"}]},
+                require_max_tokens=False,
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_count_tokens_missing_messages(self):
+        """Count tokens validation should still require messages."""
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_anthropic_request(
+                {"model": "claude-3"},
+                require_max_tokens=False,
+            )
+        assert exc_info.value.status_code == 400
+
+    def test_system_as_string_accepted(self):
+        """System prompt as string should pass validation."""
+        _validate_anthropic_request(
+            {
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+                "system": "You are a helpful assistant",
+            },
+            require_max_tokens=True,
+        )
+
+    def test_tool_definitions_accepted(self):
+        """Request with tools should pass validation."""
+        _validate_anthropic_request(
+            {
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "What is the weather?"}],
+                "max_tokens": 100,
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            require_max_tokens=True,
+        )
+
+
+class TestAnthropicEndpoints:
+    """Integration tests for Anthropic API endpoints."""
+
+    def setup_method(self):
+        """Setup test fixtures"""
+        # Mock InstanceManager
+        self._im_patcher = patch("motor.coordinator.api_server.management_server.InstanceManager")
+        im_mock_cls = self._im_patcher.start()
+        im_instance = MagicMock()
+        im_instance.has_required_instances.return_value = True
+        im_instance.get_required_instances_status.return_value = InstanceReadiness.REQUIRED_MET
+        im_instance.refresh_instances = AsyncMock(return_value=None)
+        im_mock_cls.return_value = im_instance
+
+        # Mock handle_request to return appropriate response
+        async def mock_handle_request(request, config, scheduler=None, request_manager=None):
+            try:
+                body_json = await request.json()
+            except Exception:
+                body_json = {}
+
+            input_data = ""
+            if "messages" in body_json:
+                input_data = json.dumps(body_json["messages"], ensure_ascii=False)
+
+            is_stream = body_json.get("stream", False)
+            if isinstance(is_stream, str):
+                is_stream = is_stream.lower() in ("true", "1", "yes")
+
+            import hashlib
+            request_id = f"req-{hashlib.md5(str(body_json).encode()).hexdigest()[:8]}"
+
+            response_data = {
+                "id": f"msg_{request_id}",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Hello! How can I help you?"}],
+                "model": body_json.get("model", "unknown"),
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 7},
+            }
+            return JSONResponse(content=response_data)
+
+        self._handle_request_patcher = patch(
+            "motor.coordinator.api_server.inference_server.handle_request", side_effect=mock_handle_request
+        )
+        self._handle_request_patcher.start()
+
+        self._is_available_patcher = patch(
+            "motor.coordinator.api_server.inference_server.InferenceServer._is_available",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        self._is_available_patcher.start()
+
+        coordinator_config = CoordinatorConfig()
+        coordinator_config.api_key_config.enable_api_key = True
+        coordinator_config.api_key_config.valid_keys = {"sk-test123456789"}
+
+        self.coordinator_server = _TestServerShell(config=coordinator_config)
+        self.coordinator_server.setup_rate_limiting()
+        inf = self.coordinator_server._inf
+        inf._is_available = AsyncMock(return_value=True)
+        _mock_scheduler = MagicMock()
+        _mock_scheduler.get_available_instances = AsyncMock(return_value={})
+        inf._get_scheduler_client = lambda: _mock_scheduler
+        if not getattr(inf.app.state, "request_manager", None):
+            inf.app.state.request_manager = inf._request_manager
+        self.inference_client = TestClient(self.coordinator_server.inference_app)
+        self.valid_api_key = "sk-test123456789"
+        self.auth_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.valid_api_key}",
+        }
+
+    def teardown_method(self):
+        for patcher_name in ["_im_patcher", "_handle_request_patcher", "_is_available_patcher"]:
+            patcher = getattr(self, patcher_name, None)
+            if patcher is not None:
+                try:
+                    patcher.stop()
+                except Exception:
+                    pass
+
+    # 4.3 Integration test for POST /v1/messages
+    def test_anthropic_messages_basic(self):
+        """Basic Anthropic messages request should succeed."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200, f"Expected 200, got: {response.status_code}"
+        data = response.json()
+        assert data["type"] == "message"
+        assert data["role"] == "assistant"
+        assert len(data["content"]) > 0
+        assert "usage" in data
+
+    def test_anthropic_messages_with_system_prompt(self):
+        """Anthropic request with system prompt should succeed."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+                "system": "You are a helpful assistant",
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    def test_anthropic_messages_with_tools(self):
+        """Anthropic request with tools should succeed."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "What is the weather?"}],
+                "max_tokens": 100,
+                "tools": [{"name": "get_weather", "input_schema": {"type": "object"}}],
+                "tool_choice": {"type": "auto"},
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    # 4.4 Integration test for streaming
+    def test_anthropic_messages_streaming(self):
+        """Streaming Anthropic request should succeed."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+                "stream": True,
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    # 4.5 Integration test for count_tokens
+    def test_anthropic_count_tokens(self):
+        """Count tokens request should succeed."""
+        response = self.inference_client.post(
+            "/v1/messages/count_tokens",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    # 4.6 Error passthrough
+    def test_anthropic_messages_missing_required_field(self):
+        """Missing required field should return 400."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                # Missing max_tokens
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 400
+
+    def test_anthropic_messages_auth_required(self):
+        """Request without API key should return 401."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 401
+
+    def test_anthropic_messages_invalid_auth(self):
+        """Request with invalid API key should return 403."""
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+            },
+            headers={"Content-Type": "application/json", "Authorization": "Bearer invalid-key"},
+        )
+        assert response.status_code == 403
+
+    def test_anthropic_count_tokens_missing_model(self):
+        """Count tokens without model should return 400."""
+        response = self.inference_client.post(
+            "/v1/messages/count_tokens",
+            json={"messages": [{"role": "user", "content": "Hello"}]},
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 400
+
+    def test_anthropic_count_tokens_with_max_tokens_ok(self):
+        """Count tokens with max_tokens (extra field) should still succeed."""
+        response = self.inference_client.post(
+            "/v1/messages/count_tokens",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,  # extra, not validated against
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    # 4.7 Regression test
+    def test_openai_endpoints_still_work(self):
+        """Verify OpenAI endpoints still function."""
+        response = self.inference_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+        response = self.inference_client.post(
+            "/v1/completions",
+            json={"model": "text-davinci-003", "prompt": "Hello"},
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 200
+
+    def test_service_unavailable(self):
+        """When service is unavailable, should return 503."""
+        self.coordinator_server._inf._is_available = AsyncMock(return_value=False)
+        response = self.inference_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "max_tokens": 100,
+            },
+            headers=self.auth_headers,
+        )
+        assert response.status_code == 503

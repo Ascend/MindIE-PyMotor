@@ -9,7 +9,8 @@
 # See the Mulan PSL v2 for more details.
 
 """
-Inference plane: Worker subprocess only; provides /v1/completions, /v1/chat/completions, /v1/models, etc.
+Inference plane: Worker subprocess only; provides /v1/completions, /v1/chat/completions,
+/v1/messages, /v1/messages/count_tokens, /v1/models, etc.
 """
 
 import asyncio
@@ -45,6 +46,33 @@ logger = get_logger(__name__)
 def get_request_manager(request: Request) -> RequestManager:
     """FastAPI dependency: inject RequestManager from app.state."""
     return request.app.state.request_manager
+
+
+def _validate_anthropic_request(body_json: dict[str, Any], *, require_max_tokens: bool = True) -> None:
+    """Validate Anthropic-style request body. Raises HTTPException on invalid."""
+    if not body_json.get("model"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required field: model",
+        )
+    messages = body_json.get("messages")
+    if not messages or not isinstance(messages, list) or len(messages) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required field: messages (must be a non-empty array)",
+        )
+    if require_max_tokens:
+        max_tokens = body_json.get("max_tokens")
+        if max_tokens is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required field: max_tokens",
+            )
+        if not isinstance(max_tokens, int) or max_tokens <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="max_tokens must be a positive integer",
+            )
 
 
 def _validate_openai_request(body_json: dict[str, Any], request_type: RequestType) -> None:
@@ -334,6 +362,28 @@ class InferenceServer(BaseCoordinatorServer):
             self.verify_api_key(request)
             return await self._handle_openai_request(request, RequestType.OPENAI, request_manager)
 
+        @self._inference_app.post("/v1/messages")
+        @self.timeout_handler()
+        async def anthropic_messages(
+            request: Request,
+            request_manager: RequestManager = Depends(get_request_manager),
+        ):
+            self.verify_api_key(request)
+            return await self._handle_anthropic_request(
+                request, RequestType.ANTHROPIC, request_manager, require_max_tokens=True,
+            )
+
+        @self._inference_app.post("/v1/messages/count_tokens")
+        @self.timeout_handler()
+        async def anthropic_count_tokens(
+            request: Request,
+            request_manager: RequestManager = Depends(get_request_manager),
+        ):
+            self.verify_api_key(request)
+            return await self._handle_anthropic_request(
+                request, RequestType.ANTHROPIC, request_manager, require_max_tokens=False,
+            )
+
         @self._inference_app.get("/v1/models")
         async def list_models():
             models = await self._build_models_metadata()
@@ -359,6 +409,38 @@ class InferenceServer(BaseCoordinatorServer):
             "created": self._service_start_timestamp,
         }
         return [enriched]
+
+    async def _handle_anthropic_request(
+        self,
+        request: Request,
+        request_type: RequestType,
+        request_manager: RequestManager,
+        *,
+        require_max_tokens: bool = True,
+    ):
+        try:
+            body = await request.body()
+            body_json = json.loads(body.decode("utf-8"))
+            _validate_anthropic_request(body_json, require_max_tokens=require_max_tokens)
+            if not await self._is_available():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Service is not available",
+                )
+            return await handle_request(
+                request,
+                self.coordinator_config,
+                scheduler=self._get_scheduler_client(),
+                request_manager=request_manager,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("Failed to process Anthropic request: %s", e, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
 
     async def _handle_openai_request(
         self,
