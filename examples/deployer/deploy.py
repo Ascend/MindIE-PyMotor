@@ -8,7 +8,10 @@
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
 import argparse
+import configparser
 import os
+import subprocess
+import tempfile
 
 import lib.constant as C
 from lib.utils import logger, read_json, set_env_to_shell, get_deploy_paths
@@ -183,7 +186,9 @@ def update_shell_add_kv_patch():
     end_str = "# patch_end"
     multi_connector_path = "/usr/local/python3.11.10/lib/python3.11/site-packages\
 /vllm/distributed/kv_transfer/kv_connector/v1/multi_connector.py"
-    patch_path = "/tmp/motor/examples/deployer/patch/kv_vllm_multi_connector.patch"
+    patch_path = os.path.join(
+        tempfile.gettempdir(), "motor", "examples", "deployer", "patch", "kv_vllm_multi_connector.patch"
+    )
 
     with open(C.BOOT_SHELL_PATH, 'r') as f:
         lines = f.readlines()
@@ -209,7 +214,7 @@ def resolve_deploy_mode_for_services(deploy_config):
     return get_deploy_mode_from_config(deploy_config)
 
 
-def deploy_services(user_config, env_config_path, dry_run=False):
+def deploy_services(user_config, env_config_path, dry_run=False, auto_log_collect=False):
     deploy_config = user_config[C.MOTOR_DEPLOY_CONFIG]
     update_kv_pool_enabled_flag(user_config)
     update_kv_conductor_enabled_flag(user_config)
@@ -242,7 +247,46 @@ def deploy_services(user_config, env_config_path, dry_run=False):
     if dry_run:
         logger.info("all deploy end (dry-run: kubectl apply skipped).")
     else:
+        if auto_log_collect:
+            _start_log_collection(deploy_config)
         logger.info("all deploy end.")
+
+
+def _start_log_collection(deploy_config):
+    job_id = deploy_config.get(C.CONFIG_JOB_ID, "")
+    if not job_id:
+        logger.warning("job_id not found in deploy config, skip log collection.")
+        return
+
+    deployer_dir = os.path.dirname(os.path.abspath(__file__))
+    ini_path = os.path.join(deployer_dir, "log_collect", "log_config.ini")
+    if not os.path.exists(ini_path):
+        logger.warning("log_config.ini not found at %s, skip log collection.", ini_path)
+        return
+
+    config = configparser.ConfigParser()
+    config.read(ini_path)
+    config.set("LogSetting", "name_space", job_id)
+    with open(ini_path, "w") as f:
+        config.write(f)
+    logger.info("Updated log_config.ini: name_space = %s", job_id)
+
+    show_log_path = os.path.join(deployer_dir, "show_log.sh")
+    result = subprocess.run(
+        ["/bin/bash", show_log_path],
+        cwd=deployer_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "show_log.sh exited with code %s: %s",
+            result.returncode,
+            (result.stderr or result.stdout or "").strip(),
+        )
+        return
+    logger.info("Log collection started via show_log.sh")
 
 
 def parse_arguments():
@@ -281,6 +325,11 @@ def parse_arguments():
         action="store_true",
         help="Generate YAML only: skip set_env_to_shell and kubectl apply (normal deploy path only)",
     )
+    parser.add_argument(
+        "--auto_log_collect",
+        action="store_true",
+        help="Automatically start log collection after deployment",
+    )
     return parser.parse_args()
 
 
@@ -309,7 +358,7 @@ def main():
         handle_update_instance_num(user_config)
         return
 
-    deploy_services(user_config, env_config_path, dry_run=args.dry_run)
+    deploy_services(user_config, env_config_path, dry_run=args.dry_run, auto_log_collect=args.auto_log_collect)
 
 
 if __name__ == "__main__":
