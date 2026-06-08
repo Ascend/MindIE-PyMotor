@@ -28,8 +28,10 @@ env_log_dir = os.getenv('MOTOR_LOG_PATH')
 
 _MODULE_LOGGER_NAME = "common.logger"
 
-# motor.engine_server.* uses a single logger bucket; other top-level packages use two levels.
-_SINGLE_BUCKET_COMPONENTS = frozenset({"engine_server"})
+# Top-level packages that use only the first level (e.g. "engine_server", "node_manager", "config").
+_TOPLEVEL_COMPONENTS = frozenset({"engine_server", "node_manager", "config"})
+# Top-level packages that use only the second level (e.g. "fault_tolerance", "domain", "http").
+_SECONDLEVEL_COMPONENTS = frozenset({"controller", "coordinator", "common"})
 
 
 class ProcessContextFilter(logging.Filter):
@@ -56,7 +58,7 @@ class MaxLengthFormatter(logging.Formatter):
         msg = self.inner.format(record)
         msg = repr(msg)[1:-1]
         if len(msg) > self.max_length:
-            return msg[:self.max_length] + '...'
+            return msg[: self.max_length] + '...'
         return msg
 
 
@@ -95,8 +97,10 @@ def _resolve_logger_name(name: str) -> str:
     if len(parts) < 2:
         return name
     component = parts[1]
-    if component in _SINGLE_BUCKET_COMPONENTS:
+    if component in _TOPLEVEL_COMPONENTS:
         return component
+    if component in _SECONDLEVEL_COMPONENTS and len(parts) >= 3:
+        return parts[2]
     if len(parts) >= 3:
         return f"{parts[1]}.{parts[2]}"
     return component
@@ -124,10 +128,7 @@ def _build_formatter(config: LoggingConfig, *, color: bool) -> MaxLengthFormatte
     return MaxLengthFormatter(inner, config.log_max_line_length)
 
 
-def get_logger(
-    name: str = __name__,
-    level: int | None = None
-):
+def get_logger(name: str = __name__, level: int | None = None):
     """
     Get or create a logger with enhanced capabilities.
 
@@ -224,7 +225,7 @@ def _ensure_root_logger_configured(config: LoggingConfig, log_dir: str | None) -
                     compress=config.log_compress,
                     compress_level=config.log_compress_level,
                     max_total_size=config.log_max_total_size * 1024 * 1024,
-                    cleanup_interval=config.log_cleanup_interval
+                    cleanup_interval=config.log_cleanup_interval,
                 )
                 rotate_handler.addFilter(process_filter)
                 rotate_handler.setFormatter(file_formatter)
@@ -267,7 +268,7 @@ def reconfigure_logging(log_config: LoggingConfig) -> None:
         handler.setLevel(new_level)
 
     # Update all existing logger levels (they propagate to root logger for formatting)
-    for name in logging.root.manager.loggerDict:
+    for name in logging.root.manager.loggerDict:  # pylint: disable=no-member
         logger_obj = logging.getLogger(name)
         logger_obj.setLevel(new_level)
 

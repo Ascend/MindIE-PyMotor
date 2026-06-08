@@ -10,14 +10,17 @@ from motor.config.log_config import LoggingConfig
 
 
 class TestResolveLoggerName:
-    def test_engine_server_single_bucket(self):
+    def test_toplevel_components_use_first_level(self):
         assert _resolve_logger_name("motor.engine_server.core.vllm_engine") == "engine_server"
         assert _resolve_logger_name("motor.engine_server.cli.main") == "engine_server"
+        assert _resolve_logger_name("motor.node_manager.api_client.controller_api_client") == "node_manager"
+        assert _resolve_logger_name("motor.config.controller") == "config"
+        assert _resolve_logger_name("motor.config.coordinator") == "config"
 
-    def test_two_level_for_other_components(self):
-        assert _resolve_logger_name("motor.coordinator.api_server.management_server") == "coordinator.api_server"
-        assert _resolve_logger_name("motor.config.coordinator") == "config.coordinator"
-        assert _resolve_logger_name("motor.common.logger") == "common.logger"
+    def test_secondlevel_components_use_second_level(self):
+        assert _resolve_logger_name("motor.controller.fault_tolerance.k8s.resource_monitor") == "fault_tolerance"
+        assert _resolve_logger_name("motor.coordinator.api_server.management_server") == "api_server"
+        assert _resolve_logger_name("motor.common.etcd.etcd_client") == "etcd"
 
     def test_non_motor_name_unchanged(self):
         assert _resolve_logger_name("uvicorn.error") == "uvicorn.error"
