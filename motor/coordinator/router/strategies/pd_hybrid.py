@@ -8,8 +8,10 @@
 # EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 # MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 # See the Mulan PSL v2 for more details.
-from typing import Dict, AsyncGenerator, Any
+from typing import Dict, AsyncGenerator, Any, Iterator
 import asyncio
+import contextlib
+from contextlib import aclosing
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi import HTTPException
 
@@ -18,6 +20,7 @@ from motor.coordinator.router.strategies.base import BaseRouter
 import motor.coordinator.router.recompute as recompute_common
 from motor.coordinator.router.adapters.completion_to_chat import adapt_completion_nonstream_to_chat
 from motor.common.resources.instance import PDRole
+from motor.coordinator.tracer.tracing import TracerManager
 
 
 class PDHybridRouter(BaseRouter):
@@ -31,13 +34,26 @@ class PDHybridRouter(BaseRouter):
         """
         return (PDRole.ROLE_U, PDRole.ROLE_P)
 
-    async def _prepare_resource_with_fallback(self, attempt: int, max_retry: int):
+    @contextlib.contextmanager
+    def _inference_span(self) -> Iterator[Any]:
+        trace_obj = self.req_info.trace_obj
+        headers = trace_obj.get_trace_headers_dict(is_meta=False)
+        trace_context = TracerManager().extract_trace_context(headers)
+        with TracerManager().tracer.start_as_current_span("PDHybrid_Inference", context=trace_context) as span:
+            trace_obj.meta_span = span
+            trace_obj.meta_trace_headers = TracerManager().inject_trace_context()
+            trace_obj.set_trace_attribute("requestId", self.req_info.req_id, is_meta=True)
+            yield span
+
+    @contextlib.asynccontextmanager
+    async def _manage_hybrid_resource_context(self, attempt: int, max_retry: int):
         """Fallback to ROLE_P only when scheduling has no ROLE_U resource."""
         last_error = None
         for role in self._candidate_roles():
             try:
-                resource = await self.prepare_resource(role)
-                return resource
+                async with self._manage_resource_context(role, self.release_all) as resource:
+                    yield resource
+                    return
             except HTTPException as role_error:
                 last_error = role_error
                 self.logger.warning(
@@ -52,17 +68,47 @@ class PDHybridRouter(BaseRouter):
         if last_error is not None:
             raise last_error
         raise HTTPException(status_code=503, detail="No available instance for hybrid scheduling")
-    
-    async def handle_request(self) -> StreamingResponse | JSONResponse:
 
+    @contextlib.asynccontextmanager
+    async def _inference_lifecycle(  # pylint: disable=contextmanager-generator-missing-cleanup
+        self, attempt: int, max_retry: int
+    ):
+        """Tracer span + request lifecycle + hybrid scheduling + HTTP client."""
+        with self._inference_span():
+            async with (
+                self._manage_request_context(),
+                self._manage_hybrid_resource_context(attempt, max_retry) as resource,
+                self._manage_client_context(resource) as client,
+            ):
+                yield client
+
+    async def handle_request(self) -> StreamingResponse | JSONResponse:
         req_data = self.req_info.req_data.copy()
 
         if self.req_info.req_data.get("stream", False):
-            return StreamingResponse(
-                self._generate_stream(req_data),
-                media_type="text/event-stream"
-            )
+            return StreamingResponse(self._generate_stream(req_data), media_type="text/event-stream")
         return await self._generate_post(req_data)
+
+    async def _stream_inference_attempt(  # pylint: disable=contextmanager-generator-missing-cleanup
+        self,
+        req_data: Dict[str, Any],
+        attempt: int,
+        max_retry: int,
+    ) -> AsyncGenerator[str, None]:
+        trace_obj = self.req_info.trace_obj
+        async with self._inference_lifecycle(attempt, max_retry) as client:
+            async for chunk in self.forward_stream_request(
+                req_data,
+                client,
+                self.config.exception_config.first_token_timeout,
+            ):
+                yield recompute_common.strip_stream_chunk_bytes_for_client(
+                    chunk,
+                    client_return_token_ids=self.req_info.req_data.get("_client_return_token_ids", False),
+                )
+
+            self.req_info.update_state(ReqState.DECODE_END)
+            self.logger.info(trace_obj.set_end_and_ttft_tpot())
 
     async def _generate_stream(self, req_data: Dict[str, Any]) -> AsyncGenerator[str, None]:
         """
@@ -76,46 +122,31 @@ class PDHybridRouter(BaseRouter):
             max_retry = self.config.exception_config.transport_retry_limit
 
             for attempt in range(max_retry):
-                resource = None
                 try:
-                    resource = await self._prepare_resource_with_fallback(attempt, max_retry)
-                    async with self._manage_client_context(resource) as client:
-                        async for chunk in self.forward_stream_request(
-                                req_data, client, self.config.exception_config.first_token_timeout
-                            ):
-                            yield recompute_common.strip_stream_chunk_bytes_for_client(
-                                chunk,
-                                client_return_token_ids=self.req_info.req_data.get(
-                                    "_client_return_token_ids", False
-                                ),
-                            )
-
-                        self.req_info.update_state(ReqState.DECODE_END)
-                        self.logger.info(trace_obj.set_end_and_ttft_tpot())
-                        return
+                    async with aclosing(self._stream_inference_attempt(req_data, attempt, max_retry)) as attempt_stream:
+                        async for chunk in attempt_stream:
+                            yield chunk
+                    return
                 except asyncio.CancelledError:
                     self.logger.debug("Stream request was cancelled")
                     raise
                 except Exception as e:
                     self.logger.error(
-                        "Error in streaming (attempt %d/%d): %s",
-                        attempt + 1, max_retry, str(e), exc_info=True
+                        "Error in streaming (attempt %d/%d): %s", attempt + 1, max_retry, str(e), exc_info=True
                     )
 
                     # If chunk was already sent, cannot retry the HTTP stream.
                     # Send error chunk and terminate.
                     if self.first_chunk_sent or attempt == max_retry - 1:
                         trace_obj.set_trace_status(e)
+                        trace_obj.set_trace_exception(e, is_meta=True)
                         self.req_info.update_state(ReqState.EXCEPTION)
                         yield self._generate_streaming_error_chunk(e)
                         return
 
-                    wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
+                    wait_time = self.config.exception_config.retry_delay * (2**attempt)
                     self.logger.info("Retrying streaming request in %.2f seconds...", wait_time)
                     await asyncio.sleep(wait_time)
-                finally:
-                    if resource is not None:
-                        await self.release_all(resource)
 
     async def _generate_post(self, req_data: Dict[str, Any]) -> JSONResponse:
         """
@@ -129,28 +160,21 @@ class PDHybridRouter(BaseRouter):
             max_retries = self.config.exception_config.transport_retry_limit
 
             for attempt in range(max_retries):
-                resource = None
                 try:
-                    resource = await self._prepare_resource_with_fallback(attempt, max_retries)
-                    async with self._manage_client_context(resource) as client:
+                    async with self._inference_lifecycle(attempt, max_retries) as client:
                         response = await self.forward_request(
-                                req_data, client, self.config.exception_config.infer_timeout
-                            )
+                            req_data,
+                            client,
+                            self.config.exception_config.infer_timeout,
+                        )
 
                         self.req_info.update_state(ReqState.DECODE_END)
                         body = response.json()
-                        if (
-                            "chat" in self.req_info.effective_entry_api()
-                            and body.get("object") == "text_completion"
-                        ):
-                            adapt_completion_nonstream_to_chat(
-                                body, req_id=self.req_info.req_id
-                            )
+                        if "chat" in self.req_info.effective_entry_api() and body.get("object") == "text_completion":
+                            adapt_completion_nonstream_to_chat(body, req_id=self.req_info.req_id)
                         recompute_common.strip_nonstream_response_body_for_client(
                             body,
-                            client_return_token_ids=self.req_info.req_data.get(
-                                "_client_return_token_ids", False
-                            ),
+                            client_return_token_ids=self.req_info.req_data.get("_client_return_token_ids", False),
                         )
                         return JSONResponse(content=body)
 
@@ -158,11 +182,17 @@ class PDHybridRouter(BaseRouter):
                     self.logger.debug("Post request was cancelled")
                     raise
                 except Exception as e:
-                    self.logger.error("Error in post (attempt %d/%d): %s", attempt + 1, max_retries, str(e))
+                    self.logger.error(
+                        "Error in post (attempt %d/%d): %s",
+                        attempt + 1,
+                        max_retries,
+                        str(e),
+                    )
 
                     trace_obj.set_trace_exception(e)
+                    trace_obj.set_trace_exception(e, is_meta=True)
                     if attempt < max_retries - 1:
-                        wait_time = self.config.exception_config.retry_delay * (2 ** attempt)
+                        wait_time = self.config.exception_config.retry_delay * (2**attempt)
                         self.logger.info("Retrying non-streaming request in %.2f seconds...", wait_time)
                         await asyncio.sleep(wait_time)
                         continue
@@ -170,6 +200,3 @@ class PDHybridRouter(BaseRouter):
                     self.logger.error("All retries failed for non-streaming decode request.")
                     self.req_info.update_state(ReqState.EXCEPTION)
                     raise e
-                finally:
-                    if resource is not None:
-                        await self.release_all(resource)
