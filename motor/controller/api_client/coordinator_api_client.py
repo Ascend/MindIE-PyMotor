@@ -11,10 +11,12 @@
 from motor.common.resources import InsEventMsg
 from motor.common.http.http_client import SafeHTTPSClient
 from motor.common.logger import get_logger
+from motor.common.logger.rate_limited_logger import RateLimitedLogger
 from motor.config.controller import ControllerConfig
 from motor.config.coordinator import CoordinatorConfig
 
 logger = get_logger(__name__)
+_rl = RateLimitedLogger(logger)
 
 
 class CoordinatorApiClient:
@@ -59,8 +61,22 @@ class CoordinatorApiClient:
             client_ars = CoordinatorApiClient._generate_client_args()
             client = SafeHTTPSClient(**client_ars, timeout=0.5)
             response = client.get("/readiness", params=params)
+            _rl.record_success("controller.coordinator.query_status")
+            _rl.emit_info_periodic(
+                "controller.coordinator.query_status",
+                "Controller->Coordinator query_status periodic summary: succeeded {count} times in last 60s",
+            )
             return response
         except Exception as e:
+            address = CoordinatorApiClient._generate_client_args().get("address", "unknown")
+            logger.error(
+                "Controller->Coordinator query_status failed. address=%s, error=%s. "
+                "Possible causes: 1) coordinator down 2) network unreachable 3) tls mismatch. "
+                "Check: ping %s, coordinator process status.",
+                address,
+                e,
+                address,
+            )
             raise e
 
     @staticmethod
@@ -73,17 +89,50 @@ class CoordinatorApiClient:
         client = None
         try:
             client_ars = CoordinatorApiClient._generate_obs_client_args()
+            address = client_ars.get("address", "unknown")
             client = SafeHTTPSClient(**client_ars, timeout=5.0)
             url = f"/metrics?type={metrics_type}"
             if role:
                 url += f"&role={role}"
             response = client.do_get(url)
             if response and response.ok:
+                metrics_key = f"controller.coordinator.get_metrics.{metrics_type}.{role or 'all'}"
+                logger.debug(
+                    "Controller->Coordinator get_metrics success. address=%s, "
+                    "metrics_type=%s, role=%s, status_code=%s, size=%s",
+                    address,
+                    metrics_type,
+                    role,
+                    response.status_code,
+                    len(response.text),
+                )
+                _rl.record_success(metrics_key)
+                _rl.emit_info_periodic(
+                    metrics_key,
+                    "Controller->Coordinator get_metrics periodic summary: succeeded {count} times in last 60s",
+                )
                 return response.text
+            logger.warning(
+                "Controller->Coordinator get_metrics non-2xx. address=%s, metrics_type=%s, role=%s, status_code=%s",
+                address,
+                metrics_type,
+                role,
+                getattr(response, "status_code", "unknown"),
+            )
             return None
         except Exception as e:
             address = CoordinatorApiClient._generate_obs_client_args().get("address", "unknown")
-            logger.error("Failed to get metrics from coordinator %s: %s", address, e)
+            logger.error(
+                "Controller->Coordinator get_metrics failed. address=%s, "
+                "metrics_type=%s, role=%s, error=%s. "
+                "Possible causes: 1) coordinator down 2) network issue. "
+                "Check: ping %s.",
+                address,
+                metrics_type,
+                role,
+                e,
+                address,
+            )
             return None
         finally:
             if client is not None:

@@ -69,6 +69,13 @@ class SafeHTTPSClient:
             'Connection': 'close' if mode == ConnectionMode.SHORT else 'Keep-Alive',
             'Content-Type': 'application/json'
         })
+        logger.debug(
+            "SafeHTTPSClient initialized. address=%s, tls=%s, mode=%s, timeout=%s",
+            address,
+            bool(tls_config and tls_config.enable_tls),
+            mode.value,
+            timeout,
+        )
 
     def __enter__(self):
         return self
@@ -95,11 +102,18 @@ class SafeHTTPSClient:
         return self._request('POST', endpoint, data=data)
 
     def close(self) -> None:
+        logger.debug("SafeHTTPSClient closing. address=%s", self.base_url)
         self.session.close()
 
     def _request(self, method: str, endpoint: str, data: dict | None = None,
                  params: dict | None = None) -> Response:
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        logger.debug(
+            "HTTP request start. method=%s, url=%s, timeout=%s",
+            method.upper(),
+            url,
+            self.timeout,
+        )
         try:
             response = self.session.request(
                 method=method.upper(),
@@ -111,12 +125,43 @@ class SafeHTTPSClient:
             )
 
             response.raise_for_status()
+            logger.debug(
+                "HTTP request success. method=%s, url=%s, status_code=%s",
+                method.upper(),
+                url,
+                response.status_code,
+            )
             return response
         except requests.exceptions.SSLError as e:
+            logger.error(
+                "SSL verify failed. url=%s, error=%s. "
+                "Possible causes: 1) CA/cert mismatch 2) expired cert "
+                "3) hostname mismatch. "
+                "Check: cert path in tls_config, cert expiry date.",
+                url,
+                e,
+            )
             raise Exception(f"SSL verify failed: {e}") from e
         except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, "status_code", "unknown")
+            logger.error(
+                "HTTP error response. url=%s, status_code=%s, body=%s. "
+                "Possible causes: 1) peer rejected request "
+                "2) peer service down 3) auth failure.",
+                url,
+                status,
+                getattr(e.response, "text", ""),
+            )
             raise Exception(f"http response error {e.response.status_code}, {e.response.text}") from e
         except Exception as e:
+            logger.error(
+                "HTTP request send failed. url=%s, error=%s. "
+                "Possible causes: 1) connection refused (peer down) "
+                "2) network unreachable 3) DNS failure. "
+                "Check: ping/telnet peer, ss -tlnp | grep port.",
+                url,
+                e,
+            )
             raise Exception(f"send request {url} error: {e}") from e
 
 
@@ -143,6 +188,12 @@ class AsyncSafeHTTPSClient:
                 max_keepalive_connections=None,
             )
 
+        logger.debug(
+            "AsyncSafeHTTPSClient created. base_url=%s, verify=%s, limits=%s",
+            base_url,
+            bool(verify),
+            client_kwargs.get("limits"),
+        )
         return httpx.AsyncClient(base_url=base_url, verify=verify, **client_kwargs)
 
 
@@ -173,12 +224,14 @@ class HTTPClientPool(ThreadSafeSingleton):
 
         client = self._client_pool.get(pool_key)
         if client and not client.is_closed:
+            logger.debug("HTTPClientPool cache hit. pool_key=%s", pool_key)
             return client
 
         old_client_to_close: httpx.AsyncClient | None = None
         with self._lock:
             client = self._client_pool.get(pool_key)
             if client and not client.is_closed:
+                logger.debug("HTTPClientPool cache hit (post-lock). pool_key=%s", pool_key)
                 return client
 
             address = f"{ip}:{port}"
@@ -194,6 +247,12 @@ class HTTPClientPool(ThreadSafeSingleton):
                     old_client_to_close = None
 
             self._client_pool[pool_key] = client
+            logger.info(
+                "HTTPClientPool new client created. pool_key=%s, address=%s, tls=%s",
+                pool_key,
+                address,
+                bool(tls_config and tls_config.enable_tls),
+            )
 
         await self._safe_aclose(old_client_to_close)
         return client
@@ -307,6 +366,7 @@ class HTTPClientPool(ThreadSafeSingleton):
         with self._lock:
             client = self._client_pool.get(pool_key)
             if client and not client.is_closed:
+                logger.debug("HTTPClientPool warmup skipped (already cached). pool_key=%s", pool_key)
                 return
 
             address = f"{ip}:{port}"
@@ -316,3 +376,8 @@ class HTTPClientPool(ThreadSafeSingleton):
                 **client_kwargs
             )
             self._client_pool[pool_key] = client
+            logger.info(
+                "HTTPClientPool warmup created new client. pool_key=%s, address=%s",
+                pool_key,
+                address,
+            )

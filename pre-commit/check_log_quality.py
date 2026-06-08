@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Pre-commit hook: basic log quality checks for motor/ Python code."""
 
 from __future__ import annotations
@@ -195,12 +196,19 @@ def direct_sensitive_arguments(node: ast.Call, privacy: set[str]) -> str | None:
     return None
 
 
+def is_error_window_call(node: ast.Call) -> bool:
+    func = node.func
+    return isinstance(func, ast.Attribute) and func.attr == "error_window"
+
+
 def handler_has_log(body: list[ast.stmt]) -> bool:
     for stmt in body:
         for child in ast.walk(stmt):
             if isinstance(child, ast.Call):
                 method = is_logger_call(child)
                 if method in WARN_METHODS or method == "exception":
+                    return True
+                if is_error_window_call(child):
                     return True
     return False
 

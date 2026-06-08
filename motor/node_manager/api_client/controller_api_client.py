@@ -11,10 +11,12 @@
 from motor.common.resources import RegisterMsg, ReregisterMsg, HeartbeatMsg
 from motor.common.http.http_client import SafeHTTPSClient
 from motor.common.logger import get_logger
+from motor.common.logger.rate_limited_logger import RateLimitedLogger
 from motor.config.controller import ControllerConfig
 from motor.config.node_manager import NodeManagerConfig
 
 logger = get_logger(__name__)
+_rl = RateLimitedLogger(logger)
 
 
 class ControllerApiClient:
@@ -57,6 +59,11 @@ class ControllerApiClient:
         client_args = ControllerApiClient._generate_client_args()
         with SafeHTTPSClient(timeout=15, **client_args) as client:
             response = client.post("/controller/heartbeat", heartbeat_msg.model_dump())
+            _rl.record_success("node_manager.controller.report_heartbeat")
+            _rl.emit_info_periodic(
+                "node_manager.controller.report_heartbeat",
+                "NodeManager->Controller report_heartbeat periodic summary: succeeded {count} times in last 60s",
+            )
             logger.debug(
                 f"Heartbeat success, response: {response}, "
                 f"message body: {heartbeat_msg.model_dump()}, "

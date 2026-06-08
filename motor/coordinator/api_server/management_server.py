@@ -26,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from motor.common.resources.http_msg_spec import InsEventMsg
 from motor.common.http.cert_util import CertUtil
 from motor.common.logger import get_logger
+from motor.common.logger.rate_limited_logger import RateLimitedLogger
 from motor.common.http.security_utils import sanitize_error_message, log_audit_event
 from motor.config.coordinator import CoordinatorConfig, DeployMode
 from motor.coordinator.models.response import RequestResponse
@@ -43,6 +44,8 @@ from motor.coordinator.domain.probe import (
 )
 
 logger = get_logger(__name__)
+_rl = RateLimitedLogger(logger)
+_READINESS_REMAINS_READY_KEY = "coordinator.readiness.remains_ready"
 
 # Readiness 503: result -> HTTP detail.
 _READINESS_503: dict[ReadinessResult, str] = {
@@ -246,6 +249,13 @@ class ManagementServer(BaseCoordinatorServer):
                         "[Readiness] Coordinator remains ready. result=%s instances_status=%s",
                         out.result.value,
                         instances_status,
+                    )
+                    _rl.record_success(_READINESS_REMAINS_READY_KEY)
+                    _rl.emit_info_periodic(
+                        _READINESS_REMAINS_READY_KEY,
+                        "[Readiness] Coordinator remains ready periodic summary: "
+                        "probe succeeded {count} times in last 60s, result=%s instances_status=%s"
+                        % (out.result.value, instances_status),
                     )
             else:
                 if prev_ready:
