@@ -12,10 +12,13 @@
 "motor_deploy_config": {
   "p_instances_num": 1,
   "d_instances_num": 1,
+  "hybrid_instances_num": 1,
   "single_p_instance_pod_num": 1,
   "single_d_instance_pod_num": 1,
+  "single_hybrid_instance_pod_num": 1,
   "p_pod_npu_num": 16,
   "d_pod_npu_num": 16,
+  "hybrid_pod_npu_num": 2,
   "image_name": "",
   "job_id": "mindie-motor",
   "hardware_type": "800I_A3",
@@ -29,10 +32,13 @@
 |--------|------|------|
 | p_instances_num | int | P 实例个数，≥1 且 ≤16 |
 | d_instances_num | int | D 实例个数，≥1 且 ≤16 |
+| hybrid_instances_num | int | PD 混部 union 实例个数，≥1 且 ≤16；PD 混部扩缩容时修改该字段 |
 | single_p_instance_pod_num | int | 单个 P 实例对应的 Pod 数，≥1 |
 | single_d_instance_pod_num | int | 单个 D 实例对应的 Pod 数，≥1 |
+| single_hybrid_instance_pod_num | int | 单个 PD 混部 union 实例对应的 Pod 数，≥1 |
 | p_pod_npu_num | int | 单个 P 实例 Pod 占用的 NPU 卡数，每个 Pod 最大 16 卡 |
 | d_pod_npu_num | int | 单个 D 实例 Pod 占用的 NPU 卡数，每个 Pod 最大 16 卡 |
+| hybrid_pod_npu_num | int | 单个 PD 混部 union Pod 占用的 NPU 卡数，每个 Pod 最大 16 卡 |
 | image_name | string | 推理镜像名（需包含 MindIE-PyMotor 与 vLLM 等运行环境），与 [PD 分离服务部署](./pd_disaggregation_deployment.md#准备镜像) 中准备/加载的镜像名一致 |
 | job_id | string | 部署任务名，同时作为 K8s 命名空间使用，如 `mindie-motor` |
 | hardware_type | string | 硬件类型：<br>A2: 800I_A2<br>A3: 800I_A3<br>A5: 850-Atlas-8p-8|
@@ -237,7 +243,7 @@
 
 | 配置项 | 类型 | 说明 |
 |--------|------|------------------|
-| deploy_mode | string | 部署模式。<ul><li>pd_separate：PD分离部署方式；</li><li>cdp_separate：CDP部署方式；</li><li>cpcd_separate：CPCD部署方式。</li></ul>默认：pd_separate |
+| deploy_mode | string | 部署模式。<ul><li>pd_separate：PD分离部署方式；</li><li>single_node：PD 混部或单节点完整推理方式；</li><li>cdp_separate：CDP部署方式；</li><li>cpcd_separate：CPCD部署方式。</li></ul>默认：pd_separate |
 | scheduler_type | string | 调度类型。<ul><li>load_balance：负载均衡；</li><li>round_robin：轮询。</li></ul>默认：load_balance |
 
 ### 3.5 infer_tls_config / mgmt_tls_config / etcd_tls_config
@@ -459,3 +465,68 @@
 | log_file | string/null | 日志输出文件路径；为 null 时输出到标准输出。默认：`null` |
 | log_format | string | 日志格式模板，支持 Python logging 占位符。默认：`%(asctime)s  [%(levelname)s][%(name)s][%(filename)s:%(lineno)d]  %(message)s` |
 | log_date_format | string | 日志日期格式。默认：`%Y-%m-%d %H:%M:%S` |
+
+---
+
+## 5. motor_engine_union_config（PD 混部引擎）
+
+`motor_engine_union_config` 用于 PD 混部场景，配置同一类 union Engine Server 实例。其结构与 `motor_engine_prefill_config` / `motor_engine_decode_config` 类似，但不区分 P/D 两套引擎配置，也无需配置 `kv_transfer_config` 的 producer/consumer 角色。示例可参考 `examples/infer_engines/vllm/pd_hybrid/user_config.json`。
+
+**配置示例**：
+
+```json
+"motor_engine_union_config": {
+  "engine_type": "vllm",
+  "engine_config": {
+    "served_model_name": "qwen3-8B",
+    "model": "/mnt/weight/qwen3_8B",
+    "gpu_memory_utilization": 0.9,
+    "data_parallel_size": 1,
+    "tensor_parallel_size": 1,
+    "pipeline_parallel_size": 1,
+    "enable_expert_parallel": false,
+    "data_parallel_rpc_port": 9000,
+    "enforce-eager": true,
+    "max_model_len": 2048
+  }
+}
+```
+
+| 配置项 | 类型 | 说明 |
+|--------|------|------------------|
+| engine_type | string | 引擎类型，如 `vllm` |
+| engine_config | object | 引擎相关配置，含模型信息、并行策略和引擎原生参数 |
+| engine_config.served_model_name | string | 对外服务的模型名称 |
+| engine_config.model | string | 容器内模型权重路径，需与 `motor_deploy_config.weight_mount_path` 挂载后一致 |
+| engine_config.gpu_memory_utilization | float | NPU 内存使用占比上限，0～1 |
+| engine_config.data_parallel_size | int | 数据并行大小 |
+| engine_config.tensor_parallel_size | int | 张量并行大小 |
+| engine_config.pipeline_parallel_size | int | 流水并行大小 |
+| engine_config.enable_expert_parallel | bool | 是否启用 EP |
+| engine_config.data_parallel_rpc_port | int | DP 侧 RPC 端口 |
+| engine_config.max_model_len | int | 最大模型上下文长度 |
+| 其它键 | - | 引擎原生参数，按所选用引擎文档直接填写 |
+
+---
+
+## 6. env.json 补充说明（PD 混部）
+
+PD 混部场景下，union Engine Server 的环境变量配置在 `env.json` 的 `motor_engine_union_env` 中。示例可参考 `examples/infer_engines/vllm/pd_hybrid/env.json`。
+
+**配置示例**：
+
+```json
+"motor_engine_union_env": {
+  "HCCL_BUFFSIZE": 200,
+  "PYTORCH_NPU_ALLOC_CONF": "expandable_segments:True",
+  "HCCL_OP_EXPANSION_MODE": "AIV",
+  "OMP_PROC_BIND": "false",
+  "OMP_NUM_THREADS": 100,
+  "ASCEND_BUFFER_POOL": "0:0"
+}
+```
+
+| 配置项 | 说明 |
+|--------|------|
+| motor_common_env | 所有组件共用环境变量，如 CANN 安装路径、日志根目录 |
+| motor_engine_union_env | PD 混部 union 实例的 NPU、HCCL、OMP 等环境变量，可按机型与模型进行调优 |

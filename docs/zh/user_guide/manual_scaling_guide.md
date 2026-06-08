@@ -27,11 +27,17 @@
 
 ```bash
 cd examples/deployer
-# 方式一：指定配置目录（推荐）
+# PD 分离：方式一，指定配置目录（推荐）
 python3 deploy.py --config_dir ../infer_engines/vllm
 
-# 方式二：单独指定配置文件
+# PD 混部：方式一，指定配置目录（推荐）
+python3 deploy.py --config_dir ../infer_engines/vllm/pd_hybrid
+
+# PD 分离：方式二，单独指定配置文件
 python3 deploy.py --user_config_path ../infer_engines/vllm/user_config.json --env_config_path ../infer_engines/vllm/env.json
+
+# PD 混部：方式二，单独指定配置文件
+python3 deploy.py --user_config_path ../infer_engines/vllm/pd_hybrid/user_config.json --env_config_path ../infer_engines/vllm/pd_hybrid/env.json
 ```
 
 完成后：
@@ -48,7 +54,11 @@ python3 deploy.py --user_config_path ../infer_engines/vllm/user_config.json --en
 
 ```bash
 cd examples/deployer
+# PD 分离
 python3 deploy.py --config_dir ../infer_engines/vllm --update_instance_num
+
+# PD 混部
+python3 deploy.py --config_dir ../infer_engines/vllm/pd_hybrid --update_instance_num
 ```
 
 若使用单独指定配置文件方式部署，扩缩容时需同样指定 `--user_config_path` 和 `--env_config_path`。
@@ -74,6 +84,8 @@ python3 deploy.py --config_dir ../infer_engines/vllm
 ### 报错：user_config changes detected beyond instance numbers
 
 表示除实例数外还修改了其他配置。请仅修改 `p_instances_num`/`d_instances_num`/`hybrid_instances_num`
+
+PD 混部完整部署流程和配置说明请参考 [PD 混部服务部署](./service_deployment/pd_hybrid_deployment.md)。
 
 ## 注意事项
 

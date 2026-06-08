@@ -22,7 +22,7 @@
 
 # 简介
 
-提供一键式 PD 分离部署，基于云原生插件化架构灵活适配多种推理引擎（[vLLM](https://github.com/vllm-project/vllm-ascend)、[SGLang](https://github.com/sgl-project/sglang)），结合高性能调度与负载均衡能力，构建高可用、可扩展的大规模推理服务。
+提供一键式 PD 分离与 PD 混部部署，基于云原生插件化架构灵活适配多种推理引擎（[vLLM](https://github.com/vllm-project/vllm-ascend)、[SGLang](https://github.com/sgl-project/sglang)），结合高性能调度与负载均衡能力，构建高可用、可扩展的大规模推理服务。
 
 # 社区活动
 
@@ -46,6 +46,8 @@ MindIE 系列 TC/SIG 会议安排，请查看 [Ascend会议中心](https://meeti
 **环境部署**：安装前的相关软硬件环境准备，以及安装步骤，请参见[环境部署](./docs/zh/user_guide/environment_preparation.md)。
 
 **快速入门**：快速体验启动服务、接口调用、精度&性能测试和停止服务全流程，请参见[快速入门](./docs/zh/user_guide/quick_start.md)。
+
+**服务部署**：PD 分离部署请参见[PD 分离服务部署](./docs/zh/user_guide/service_deployment/pd_disaggregation_deployment.md)，PD 混部部署请参见[PD 混部服务部署](./docs/zh/user_guide/service_deployment/pd_hybrid_deployment.md)。
 
 # 问题反馈
 

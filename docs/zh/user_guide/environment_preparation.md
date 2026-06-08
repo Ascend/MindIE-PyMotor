@@ -12,7 +12,8 @@
 
 |部署形态|含义|
 |--|--|
-|PD分离服务|多个Server在一个或多个计算节点上联合部署，分为P实例（Prefill计算实例）和D实例（Decode计算实例），P实例与D实例分离部署，协同推理，整体作为一个Group对外提供推理服务，PD分离部署详情请参见PD分离服务部署。|
+|PD分离服务|多个Server在一个或多个计算节点上联合部署，分为P实例（Prefill计算实例）和D实例（Decode计算实例），P实例与D实例分离部署，协同推理，整体作为一个Group对外提供推理服务，部署详情请参见[PD分离服务部署](./service_deployment/pd_disaggregation_deployment.md)。|
+|PD混部服务|多个Server以 union 实例形态部署，每个实例同时承载 Prefill 与 Decode 能力，整体作为一个Group对外提供推理服务，部署详情请参见[PD混部服务部署](./service_deployment/pd_hybrid_deployment.md)。|
 
 ## 组件介绍
 

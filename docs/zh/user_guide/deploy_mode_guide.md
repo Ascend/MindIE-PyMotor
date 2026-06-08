@@ -44,3 +44,5 @@
 - 默认与 PD 分离相同，使用 `infer_service_set`（可不配置 `deploy_mode`）。deployer 在 InferServiceSet 中配置 **union** 角色，`hybrid_instances_num` 映射为 `union.role.replicas`。
 - 扩缩容：修改 `hybrid_instances_num` 后执行 `--update_instance_num`，仅 apply `infer_service.yaml`，由 CRD controller 扩缩 union pod。
 - 兼容：若需沿用多 YAML Deployment，在 `motor_deploy_config` 中显式设置 `"deploy_mode": "multi_deployment"`。
+
+完整部署流程、配置示例和故障排查请参考 [PD 混部服务部署](./service_deployment/pd_hybrid_deployment.md)。

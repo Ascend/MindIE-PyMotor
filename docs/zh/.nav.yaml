@@ -7,6 +7,7 @@ nav:
       - 部署模式指南: user_guide/deploy_mode_guide.md
       - 服务部署:
           - PD 分离部署: user_guide/service_deployment/pd_disaggregation_deployment.md
+          - PD 混部部署: user_guide/service_deployment/pd_hybrid_deployment.md
           - 配置参考: user_guide/service_deployment/config_reference.md
           - 更新配置白名单: user_guide/service_deployment/update_config_whitelist.md
       - Standby 部署: user_guide/standby_deployment.md

@@ -7,6 +7,8 @@
 - `user_config.json`：PD 混部 `user_config` 示例（使用 `motor_engine_union_config` 与 `hybrid_*` 字段）
 - `env.json`：部署环境变量示例（包含 `motor_engine_union_env`）
 
+完整部署流程、配置项说明和故障排查请参考 [PD 混部服务部署](../../../../docs/zh/user_guide/service_deployment/pd_hybrid_deployment.md)。
+
 ## 使用方式
 
 在 `examples/deployer` 目录执行：
